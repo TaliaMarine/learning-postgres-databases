@@ -4,3 +4,4 @@ __pycache__/
 *.pyc
 .pg-work/
 node_modules/
+.idea

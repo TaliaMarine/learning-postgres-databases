@@ -4,6 +4,8 @@ A hands-on course in **PostgreSQL 18** for developers who already write SQL and 
 underneath: what a database, a schema, a role and a privilege really are, how the planner and transactions
 behave, and how to run it.
 
+https://taliamarine.github.io/learning-postgres-databases/
+
 **Read the course:** the site is published with GitHub Pages from this repository (see the
 [workflow](.github/workflows/pages.yml)). Build it locally with `python3 tools/build_docs.py` and open
 `index.html` in a browser.
