@@ -1,0 +1,8 @@
+-- Create a group role lab_04_support (cannot log in) and a login role
+-- lab_04_agent that is a member of it. Through the group, an agent must be able to:
+--   * read every column of shop.orders
+--   * read ONLY the columns id, full_name, country and status of shop.customers
+--     (so not email, phone or profile)
+--   * change ONLY the status column of shop.customers
+-- Nothing else: no table-level SELECT on customers, no writes to orders.
+-- Then run ./pg check 04 2.

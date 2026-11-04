@@ -1,0 +1,13 @@
+-- Run these five statements first, exactly as written:
+--   select count(*) from shop.products where stock < 10;
+--   select count(*) from shop.products where price > 100;
+--   select email from shop.customers where id = 7;
+--   select email from shop.customers where id = 8;
+--   select email from shop.customers where id = 9;
+-- Statistics are sent to the shared counters only every few seconds, so then
+-- run:  select pg_stat_force_next_flush();
+-- Finally, from pg_stat_user_tables, return the columns table_name (the
+-- relname), seq_scan and idx_scan for shop.products and shop.customers, so you
+-- can see which of the two was read by a sequential scan and which through
+-- an index. Then run ./pg check 25 2.
+

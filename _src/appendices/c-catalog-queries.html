@@ -1,0 +1,635 @@
+<p class="lede">
+  Everything PostgreSQL knows about itself is stored in tables you can query: the <em>system catalogs</em>
+  (<code>pg_catalog</code>), the standard <code>information_schema</code> views, and the statistics views
+  (<code>pg_stat_*</code>). This annex is a library of copy-paste queries for everyday questions, from “how big is
+  this table?” to “who is blocking whom?”. They are all read-only.
+</p>
+
+<h2 id="lab">How to use this page</h2>
+<p>
+  Every query here was run against the course's Docker database (<code>./pg psql</code>, database <code>shop</code>).
+  The structural ones (tables, columns, keys, roles, privileges) also have a playground, which runs on the small
+  in-browser copy, so the sizes and row counts there are tiny. Queries about live activity, locks and
+  statistics have no playground: the browser database has no other sessions and almost no history, so they
+  return nothing useful there. Run those in Docker.
+</p>
+<p>
+  The three sources, in one sentence each:
+</p>
+<ul>
+  <li><code>pg_catalog</code> — PostgreSQL's own tables (<code>pg_class</code>, <code>pg_namespace</code>, <code>pg_attribute</code>, <code>pg_roles</code>, …). Complete and precise; specific to PostgreSQL.</li>
+  <li><code>information_schema</code> — views defined by the SQL standard. Portable between databases, but they only show objects you have some privilege on, and they hide PostgreSQL-specific detail.</li>
+  <li><code>pg_stat_*</code> and <code>pg_statio_*</code> — counters and live state: sessions, scans, dead rows, cache hits. Counters accumulate since the last statistics reset.</li>
+</ul>
+
+<div class="note tip">
+  <span class="note-title">Learn the catalogs from psql</span>
+  <p>
+    <code>\set ECHO_HIDDEN on</code> in psql prints the catalog query behind every <code>\d</code> command
+    (<a href="b-psql.html#settings">annex B</a>). That is how most of the queries below started.
+  </p>
+</div>
+
+<h2 id="sizes">1. Tables and their sizes</h2>
+<p>
+  <code>pg_relation_size</code> is the table's main data. <code>pg_indexes_size</code> is all its indexes.
+  <code>pg_total_relation_size</code> is everything, including TOAST (out-of-line storage for large values).
+  <code>reltuples</code> is the planner's row estimate, refreshed by <code>ANALYZE</code> and autovacuum; it is
+  <code>-1</code> for a table that has never been analysed. Use <code>count(*)</code> when you need the exact number.
+</p>
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">every table with its size</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select n.nspname as schema,
+       c.relname as table,
+       c.reltuples::bigint as approx_rows,
+       pg_size_pretty(pg_relation_size(c.oid))       as table_size,
+       pg_size_pretty(pg_indexes_size(c.oid))        as indexes_size,
+       pg_size_pretty(pg_total_relation_size(c.oid)) as total_size
+from pg_class c
+join pg_namespace n on n.oid = c.relnamespace
+where c.relkind in ('r', 'p')
+  and n.nspname not in ('pg_catalog', 'information_schema')
+  and n.nspname not like 'pg_toast%'
+order by pg_total_relation_size(c.oid) desc;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">in the Docker database (first rows)</span><span class="grow"></span><span class="lang">output</span></figcaption>
+<pre><code>  schema   |     table      | approx_rows | table_size | indexes_size | total_size
+-----------+----------------+-------------+------------+--------------+------------
+ analytics | events         |     1000000 | 117 MB     | 21 MB        | 138 MB
+ shop      | orders         |      255295 | 36 MB      | 9800 kB      | 46 MB
+ shop      | order_items    |      599702 | 30 MB      | 13 MB        | 43 MB
+ shop      | customers      |       20000 | 3656 kB    | 1768 kB      | 5464 kB
+ shop      | products       |         500 | 160 kB     | 64 kB        | 256 kB
+ shop      | categories     |          13 | 8192 bytes | 32 kB        | 48 kB
+ ...</code></pre>
+</figure>
+
+<h2 id="indexes">2. Indexes and their sizes</h2>
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">indexes, largest first, with their definition</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select i.schemaname as schema,
+       i.tablename  as table,
+       i.indexname  as index,
+       pg_size_pretty(pg_relation_size(format('%I.%I', i.schemaname, i.indexname)::regclass)) as size,
+       i.indexdef   as definition
+from pg_indexes i
+where i.schemaname not in ('pg_catalog', 'information_schema')
+order by pg_relation_size(format('%I.%I', i.schemaname, i.indexname)::regclass) desc;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<h2 id="fks">3. Foreign keys</h2>
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">every foreign key</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select con.conrelid::regclass  as table,
+       con.conname             as constraint,
+       pg_get_constraintdef(con.oid) as definition,
+       con.confrelid::regclass as references_table
+from pg_constraint con
+join pg_namespace n on n.oid = con.connamespace
+where con.contype = 'f'
+  and n.nspname not in ('pg_catalog', 'information_schema')
+order by 1, 2;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+<p>
+  PostgreSQL creates an index for every primary key and unique constraint, but <em>not</em> for the referencing
+  side of a foreign key. Without one, deleting a parent row or joining from the parent scans the child table.
+  This query lists foreign keys whose columns are not the leading columns of any index:
+</p>
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">foreign keys with no index on the referencing columns</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">-- foreign keys whose referencing columns are not the leading columns of any index
+select con.conrelid::regclass as table,
+       con.conname            as constraint,
+       pg_get_constraintdef(con.oid) as definition
+from pg_constraint con
+where con.contype = 'f'
+  and not exists (
+        select 1
+        from pg_index ix
+        where ix.indrelid = con.conrelid
+          and (ix.indkey::int2[])[0:cardinality(con.conkey) - 1] @&gt; con.conkey
+      )
+order by 1, 2;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+<p>
+  In the course database it lists five of the six foreign keys, including <code>orders.customer_id</code>. Only
+  <code>order_items.order_id</code> is covered, by the primary key <code>(order_id, line_no)</code>. Whether you need
+  the missing indexes depends on your queries (<a href="../lessons/12-indexes.html">lesson 12</a>).
+</p>
+
+<h2 id="columns">4. Columns and their types</h2>
+<p>
+  The standard way is <code>information_schema.columns</code>. It reports an enum as <code>USER-DEFINED</code>
+  and drops the length of <code>numeric(12,2)</code>:
+</p>
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">columns, the portable way (information_schema)</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select table_schema, table_name, column_name, data_type,
+       is_nullable, column_default
+from information_schema.columns
+where table_schema = 'shop' and table_name = 'orders'
+order by ordinal_position;</code></pre>
+</figure>
+<p>
+  The catalog way, with <code>format_type</code>, gives the exact types (<code>shop.order_status</code>,
+  <code>numeric(12,2)</code>, <code>character(2)</code>):
+</p>
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">columns with exact types (pg_catalog)</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select a.attnum                               as pos,
+       a.attname                              as column,
+       format_type(a.atttypid, a.atttypmod)   as type,
+       a.attnotnull                           as not_null,
+       pg_get_expr(d.adbin, d.adrelid)        as default_value
+from pg_attribute a
+left join pg_attrdef d on d.adrelid = a.attrelid and d.adnum = a.attnum
+where a.attrelid = 'shop.orders'::regclass
+  and a.attnum &gt; 0
+  and not a.attisdropped
+order by a.attnum;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<h3 id="find">Find an object by name</h3>
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">find any object by name</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select n.nspname as schema, c.relname as name,
+       case c.relkind when 'r' then 'table' when 'v' then 'view' when 'm' then 'materialized view'
+                      when 'i' then 'index' when 'S' then 'sequence' when 'p' then 'partitioned table'
+                      when 'f' then 'foreign table' end as kind
+from pg_class c
+join pg_namespace n on n.oid = c.relnamespace
+where c.relname ilike '%order%'
+  and n.nspname not in ('pg_catalog', 'information_schema')
+order by 1, 2;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<h3 id="depends">What depends on a table</h3>
+<p>
+  Before a <code>DROP</code> or a type change, ask what refers to the object. <code>pg_depend</code> records the
+  dependencies; <code>pg_describe_object</code> makes them readable.
+</p>
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">what depends on a table</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select classid::regclass as catalog,
+       objid,
+       pg_describe_object(classid, objid, objsubid) as dependent_object,
+       deptype
+from pg_depend
+where refobjid = 'shop.customers'::regclass
+  and deptype = 'n'
+order by 3;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+<p>
+  This one does not list views directly: a view depends on the table through its rewrite rule, so for views
+  it is easier to try <code>DROP … RESTRICT</code> inside a transaction and read the error (<a href="e-troubleshooting.html#depend">annex E</a>).
+</p>
+
+<h2 id="roles">5. Roles and memberships</h2>
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">roles with attributes and memberships</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select r.rolname as role,
+       r.rolcanlogin as can_login,
+       r.rolsuper    as superuser,
+       r.rolcreaterole as createrole,
+       r.rolcreatedb   as createdb,
+       r.rolconnlimit  as conn_limit,
+       r.rolvaliduntil as valid_until,
+       coalesce((select string_agg(g.rolname, ', ' order by g.rolname)
+                 from pg_auth_members m
+                 join pg_roles g on g.oid = m.roleid
+                 where m.member = r.oid), '') as member_of
+from pg_roles r
+where r.rolname !~ '^pg_'
+order by r.rolname;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+<p>
+  <code>pg_roles</code> is the readable view of <code>pg_authid</code>, with the password hash hidden. Membership
+  is in <code>pg_auth_members</code>. In PostgreSQL 16 and later each membership carries three options:
+  <code>admin_option</code> (may grant the role to others), <code>inherit_option</code> (privileges apply
+  automatically) and <code>set_option</code> (may <code>SET ROLE</code> to it). See
+  <a href="../lessons/03-roles-and-users.html">lesson 3</a>.
+</p>
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">memberships with their options</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select g.rolname as group_role,
+       m.rolname as member,
+       am.admin_option,
+       am.inherit_option,
+       am.set_option,
+       gr.rolname as granted_by
+from pg_auth_members am
+join pg_roles g  on g.oid  = am.roleid
+join pg_roles m  on m.oid  = am.member
+join pg_roles gr on gr.oid = am.grantor
+where m.rolname !~ '^pg_'
+order by 1, 2;</code></pre>
+</figure>
+
+<h2 id="privileges">6. Privileges</h2>
+<h3 id="table-privs">Table privileges with aclexplode</h3>
+<p>
+  Privileges are stored as an <em>ACL</em> (access control list) array on each object, such as
+  <code>{postgres=arwdDxtm/postgres,lab_reader=r/postgres}</code>. <code>aclexplode</code> turns it into one row per
+  grantee and privilege. A NULL ACL means “the defaults”, which is why the query substitutes
+  <code>acldefault('r', owner)</code>: the owner has everything, nobody else has anything.
+</p>
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">table privileges, one row per grantee and privilege</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select c.oid::regclass as table,
+       case when a.grantee = 0 then 'PUBLIC' else pg_get_userbyid(a.grantee) end as grantee,
+       a.privilege_type,
+       a.is_grantable,
+       pg_get_userbyid(a.grantor) as grantor
+from pg_class c
+join pg_namespace n on n.oid = c.relnamespace
+cross join lateral aclexplode(coalesce(c.relacl, acldefault('r', c.relowner))) a
+where c.relkind in ('r', 'p', 'v', 'm')
+  and n.nspname = 'shop'
+order by 1, 2, 3;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+<p>
+  Grantee <code>PUBLIC</code> (stored as OID 0) means every role. The same information from the standard views,
+  limited to tables you can see:
+</p>
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">the same from information_schema</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select grantee, table_schema, table_name, privilege_type
+from information_schema.role_table_grants
+where table_schema = 'shop'
+order by grantee, table_name, privilege_type;</code></pre>
+</figure>
+<p>
+  The two differ in one detail: <code>information_schema</code> does not know the <code>MAINTAIN</code> privilege
+  (<code>VACUUM</code>, <code>ANALYZE</code>, <code>REINDEX</code> and friends, granted by the letter <code>m</code>),
+  so it shows seven privileges where <code>aclexplode</code> shows eight.
+</p>
+
+<h3 id="schema-privs">Schema privileges</h3>
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">schema privileges</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select n.nspname as schema,
+       pg_get_userbyid(n.nspowner) as owner,
+       case when a.grantee = 0 then 'PUBLIC' else pg_get_userbyid(a.grantee) end as grantee,
+       a.privilege_type
+from pg_namespace n
+cross join lateral aclexplode(coalesce(n.nspacl, acldefault('n', n.nspowner))) a
+where n.nspname !~ '^pg_' and n.nspname &lt;&gt; 'information_schema'
+order by 1, 3, 4;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+<p>
+  On PostgreSQL 15 and later, the <code>public</code> schema is owned by <code>pg_database_owner</code> and
+  <code>PUBLIC</code> has only <code>USAGE</code> on it, not <code>CREATE</code>. The course database shows exactly that.
+</p>
+
+<h3 id="default-privs">Default privileges</h3>
+<p>
+  Default privileges apply to objects created <em>in the future</em> by a given role
+  (<code>ALTER DEFAULT PRIVILEGES</code>, <a href="../lessons/04-privileges-and-grants.html">lesson 4</a>). An empty
+  result means none are defined, as in a fresh course database.
+</p>
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">default privileges</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select pg_get_userbyid(d.defaclrole) as for_objects_created_by,
+       coalesce(n.nspname, '(all schemas)') as in_schema,
+       case d.defaclobjtype when 'r' then 'tables' when 'S' then 'sequences'
+            when 'f' then 'functions' when 'T' then 'types' when 'n' then 'schemas' end as object_type,
+       case when a.grantee = 0 then 'PUBLIC' else pg_get_userbyid(a.grantee) end as grantee,
+       a.privilege_type
+from pg_default_acl d
+left join pg_namespace n on n.oid = d.defaclnamespace
+cross join lateral aclexplode(d.defaclacl) a
+order by 1, 2, 3, 4, 5;</code></pre>
+</figure>
+
+<h2 id="activity">7. Sessions and activity</h2>
+<p>
+  <code>pg_stat_activity</code> has one row per server process. Filter on <code>backend_type = 'client backend'</code>
+  to see only client connections, not autovacuum, the checkpointer and the other background processes. The
+  <code>state</code> column is <code>active</code> (running a query), <code>idle</code> (waiting for the client), or
+  <code>idle in transaction</code> (a transaction is open and nothing is happening, which holds locks and blocks vacuum).
+</p>
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">who is connected and what they are doing</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select pid,
+       usename        as role,
+       datname        as database,
+       application_name,
+       client_addr,
+       state,
+       wait_event_type,
+       wait_event,
+       now() - backend_start as connected_for,
+       now() - xact_start    as in_transaction_for,
+       left(query, 60)       as current_or_last_query
+from pg_stat_activity
+where backend_type = 'client backend'
+order by backend_start;</code></pre>
+</figure>
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">connections by state, against the limit</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select count(*)                                          as total,
+       count(*) filter (where state = 'active')          as active,
+       count(*) filter (where state = 'idle')            as idle,
+       count(*) filter (where state like 'idle in transaction%') as idle_in_tx,
+       current_setting('max_connections')::int           as max_connections
+from pg_stat_activity
+where backend_type = 'client backend';</code></pre>
+</figure>
+
+<h3 id="long">Long-running queries and transactions</h3>
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">long-running queries and long-open transactions</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select pid,
+       usename as role,
+       state,
+       now() - query_start as running_for,
+       now() - xact_start  as transaction_age,
+       wait_event_type, wait_event,
+       left(query, 100)    as query
+from pg_stat_activity
+where backend_type = 'client backend'
+  and pid &lt;&gt; pg_backend_pid()
+  and (   (state = 'active' and now() - query_start &gt; interval '30 seconds')
+       or (state like 'idle in transaction%' and now() - xact_start &gt; interval '30 seconds'))
+order by query_start;</code></pre>
+</figure>
+<p>
+  Change the threshold to suit you. To stop one, <code>select pg_cancel_backend(pid)</code> cancels its current query;
+  <code>select pg_terminate_backend(pid)</code> closes its connection. Both need you to be the same role or have
+  the <code>pg_signal_backend</code> role (or be a superuser).
+</p>
+
+<h2 id="locks">8. Locks</h2>
+<p>
+  The first question is usually not “which locks exist?” but “who is waiting, and on whom?”.
+  <code>pg_blocking_pids(pid)</code> answers that directly:
+</p>
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">who is blocking whom</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select blocked.pid                 as blocked_pid,
+       blocked.usename             as blocked_role,
+       left(blocked.query, 60)     as blocked_query,
+       now() - blocked.query_start as waiting_for,
+       blocking.pid                as blocking_pid,
+       blocking.usename            as blocking_role,
+       blocking.state              as blocking_state,
+       left(blocking.query, 60)    as blocking_query
+from pg_stat_activity blocked
+cross join lateral unnest(pg_blocking_pids(blocked.pid)) as b(pid)
+join pg_stat_activity blocking on blocking.pid = b.pid
+order by waiting_for desc;</code></pre>
+</figure>
+<p>
+  The full lock table is <code>pg_locks</code>. A row with <code>granted = false</code> is a waiter. The details of
+  lock modes are in <a href="../lessons/16-locking.html">lesson 16</a>.
+</p>
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">every interesting lock</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select l.pid,
+       l.locktype,
+       l.relation::regclass as relation,
+       l.mode,
+       l.granted,
+       a.state,
+       left(a.query, 50) as query
+from pg_locks l
+left join pg_stat_activity a on a.pid = l.pid
+where l.pid &lt;&gt; pg_backend_pid()
+  and l.locktype in ('relation', 'transactionid', 'tuple', 'advisory')
+order by l.granted, l.pid;</code></pre>
+</figure>
+
+<h2 id="unused">9. Unused indexes</h2>
+<p>
+  <code>pg_stat_user_indexes.idx_scan</code> counts how often each index was used since statistics were last reset.
+  An index with zero scans costs space and slows every write, and helps nobody. Leave out unique indexes: they
+  enforce a rule even if no query ever reads them.
+</p>
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">indexes never scanned since the statistics were reset</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select s.schemaname as schema,
+       s.relname    as table,
+       s.indexrelname as index,
+       s.idx_scan,
+       pg_size_pretty(pg_relation_size(s.indexrelid)) as size,
+       i.indisunique as is_unique
+from pg_stat_user_indexes s
+join pg_index i on i.indexrelid = s.indexrelid
+where s.idx_scan = 0
+  and not i.indisunique          -- unique indexes enforce rules even when never scanned
+order by pg_relation_size(s.indexrelid) desc;</code></pre>
+</figure>
+<p>
+  In the course database this returns no rows, because every index there is a primary key or unique constraint.
+  To see the counters for all indexes:
+</p>
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">every index with its scan count</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select s.relname as table, s.indexrelname as index, s.idx_scan, s.last_idx_scan, i.indisunique as is_unique
+from pg_stat_user_indexes s join pg_index i on i.indexrelid = s.indexrelid
+order by s.idx_scan;</code></pre>
+</figure>
+
+<div class="note warn">
+  <span class="note-title">Zero scans on this server is not zero scans everywhere</span>
+  <p>
+    The counters are per server and since the last reset. An index that a replica uses for reports, or that a
+    monthly job needs, shows <code>idx_scan = 0</code> on the primary. Check when the counters were last reset
+    (<code>stats_reset</code> in <code>pg_stat_database</code>; empty means never) and look at every replica before
+    dropping one.
+  </p>
+</div>
+
+<h2 id="bloat">10. Dead tuples and a rough bloat check</h2>
+<p>
+  A <em>dead tuple</em> is an old row version that an <code>UPDATE</code> or <code>DELETE</code> left behind, waiting
+  for vacuum. Many dead tuples, or a table much larger than its live rows need, is <em>bloat</em>
+  (<a href="../lessons/17-vacuum-and-bloat.html">lesson 17</a>).
+</p>
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">dead tuples per table</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select schemaname as schema,
+       relname    as table,
+       n_live_tup,
+       n_dead_tup,
+       round(100.0 * n_dead_tup / nullif(n_live_tup + n_dead_tup, 0), 1) as dead_pct,
+       last_autovacuum,
+       last_vacuum,
+       autovacuum_count
+from pg_stat_user_tables
+order by n_dead_tup desc
+limit 20;</code></pre>
+</figure>
+<p>
+  A rough size check: the table's actual size compared with the size its live rows would need (average row
+  width from <code>pg_stats</code>, plus a 24-byte row header, plus 15% for page overhead). It needs fresh
+  statistics (<code>ANALYZE</code>) and is a hint, not a measurement. A ratio near 1 is healthy; a large ratio on a
+  large table is worth a look. The <code>pgstattuple</code> extension gives exact numbers.
+</p>
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">rough bloat check: actual size versus estimated need</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>-- rough: compare the actual size with the size the live rows would need
+select c.oid::regclass as table,
+       pg_size_pretty(pg_relation_size(c.oid)) as actual_size,
+       c.reltuples::bigint as approx_rows,
+       pg_size_pretty((c.reltuples * coalesce(nullif(avg_width.w, 0), 1) * 1.15)::bigint) as rough_needed,
+       round((pg_relation_size(c.oid) / nullif(c.reltuples * coalesce(nullif(avg_width.w, 0), 1) * 1.15, 0))::numeric, 1) as ratio
+from pg_class c
+join pg_namespace n on n.oid = c.relnamespace
+cross join lateral (
+  select sum(s.avg_width) + 24 as w      -- + 24 bytes per-row header
+  from pg_stats s
+  where s.schemaname = n.nspname and s.tablename = c.relname
+) avg_width
+where c.relkind = 'r'
+  and n.nspname in ('shop', 'analytics')
+  and c.reltuples &gt; 0
+order by pg_relation_size(c.oid) desc;</code></pre>
+</figure>
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">one run in the course container, after other lessons had updated orders</span><span class="grow"></span><span class="lang">output</span></figcaption>
+<pre><code> table            | actual_size | approx_rows | rough_needed | ratio
+------------------+-------------+-------------+--------------+-------
+ analytics.events | 117 MB      |     1000000 | 125 MB       |   0.9
+ shop.orders      | 36 MB       |      255295 | 15 MB        |   2.4
+ shop.order_items | 30 MB       |      599702 | 28 MB        |   1.1
+ shop.customers   | 3656 kB     |       20000 | 3526 kB      |   1.0
+ shop.products    | 160 kB      |         500 | 133 kB       |   1.2
+ shop.categories  | 8192 bytes  |          13 | 598 bytes    |  13.7</code></pre>
+</figure>
+<p>
+  Read it with judgement: <code>shop.categories</code> has a ratio of 13.7 because a table never takes less than
+  one 8 kB page, and 13 rows fill a fraction of one. <code>shop.orders</code> at 2.4 is the interesting row:
+  updates in other lessons left space behind.
+</p>
+
+<h2 id="server">11. Databases, settings and the server</h2>
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">database sizes</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select datname as database,
+       pg_size_pretty(pg_database_size(datname)) as size
+from pg_database
+where datallowconn
+order by pg_database_size(datname) desc;</code></pre>
+</figure>
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">settings that differ from the built-in default</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select name, setting, unit, source, sourcefile
+from pg_settings
+where source not in ('default', 'override')
+order by name;</code></pre>
+</figure>
+<p>
+  <code>source</code> says where a value came from: <code>configuration file</code>, <code>command line</code>
+  (the course container sets a few with <code>-c</code>), <code>database</code>, <code>user</code>,
+  <code>client</code> or <code>session</code> (<a href="../lessons/21-configuration.html">lesson 21</a>).
+</p>
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">installed extensions</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select extname as extension, extversion as version, n.nspname as schema
+from pg_extension e join pg_namespace n on n.oid = e.extnamespace
+order by 1;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<h3 id="io">Cache hits and sequential scans</h3>
+<p>
+  <code>pg_statio_user_tables</code> counts table blocks found in shared buffers (<code>hit</code>) versus read from
+  the operating system (<code>read</code>; the OS may still have had them in its own cache).
+  <code>pg_stat_user_tables</code> counts sequential and index scans. A big table with many sequential scans and a
+  large <code>seq_tup_read</code> is often missing an index.
+</p>
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">how often table reads were served from shared buffers</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select relname as table,
+       heap_blks_read,
+       heap_blks_hit,
+       round(100.0 * heap_blks_hit / nullif(heap_blks_hit + heap_blks_read, 0), 1) as hit_pct
+from pg_statio_user_tables
+order by heap_blks_read + heap_blks_hit desc
+limit 10;</code></pre>
+</figure>
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">tables read mostly by sequential scans</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select relname as table, seq_scan, seq_tup_read, idx_scan,
+       n_live_tup
+from pg_stat_user_tables
+order by seq_tup_read desc
+limit 10;</code></pre>
+</figure>
+
+<h3 id="wraparound">Transaction ID age</h3>
+<p>
+  Each database's oldest unfrozen transaction ID must stay well below about two billion, or PostgreSQL stops
+  accepting writes to protect the data. Autovacuum takes care of this; this query lets you check that it does
+  (<a href="../lessons/17-vacuum-and-bloat.html">lesson 17</a>).
+</p>
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">transaction ID age per database</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select datname as database,
+       age(datfrozenxid) as xid_age,
+       round(100.0 * age(datfrozenxid) / 2147483648, 2) as pct_towards_wraparound
+from pg_database
+order by age(datfrozenxid) desc;</code></pre>
+</figure>
+
+<h2 id="statements">12. The most expensive statements</h2>
+<p>
+  The <code>pg_stat_statements</code> extension, installed in the course database, groups statements by their shape
+  and records calls and time. Sort by <code>total_exec_time</code> to find the queries that cost the server the most
+  overall. The workflow built on it is <a href="../lessons/14-query-tuning.html">lesson 14</a>.
+</p>
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">the most expensive statements (pg_stat_statements)</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select calls,
+       round(total_exec_time::numeric, 1) as total_ms,
+       round(mean_exec_time::numeric, 2)  as mean_ms,
+       rows,
+       left(regexp_replace(query, '\s+', ' ', 'g'), 70) as query
+from pg_stat_statements
+order by total_exec_time desc
+limit 10;</code></pre>
+</figure>
+<p>
+  <code>select pg_stat_statements_reset();</code> starts the counters over, which is useful before measuring a change.
+</p>
+
+<h2 id="next">Where to next</h2>
+<p>
+  The terms used on this page are in the <a href="d-glossary.html">glossary</a>. When a query here shows you a
+  problem, <a href="e-troubleshooting.html">annex E</a> lists the error messages you are likely to meet and what to
+  do about each, and <a href="../lessons/25-monitoring.html">lesson 25</a> turns these queries into a checklist.
+</p>

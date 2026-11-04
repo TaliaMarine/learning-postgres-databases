@@ -1,0 +1,1027 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Indexes &mdash; Learning PostgreSQL</title>
+<meta name="description" content="B-tree, composite, partial, expression and covering indexes; GIN, GiST, BRIN; what an index costs.">
+<link rel="stylesheet" href="../assets/css/course.css">
+</head>
+<body data-root="../" data-page="12-indexes">
+<a class="skip-link" href="#content">Skip to content</a>
+<header class="topbar">
+  <button class="icon-btn menu-btn" type="button" aria-label="Toggle navigation" aria-expanded="false" aria-controls="sidebar">&#9776;</button>
+  <a class="brand" href="../index.html"><span class="mark pgm">PG</span> Learning PostgreSQL <span class="sub">PostgreSQL 18</span></a>
+  <span class="spacer"></span>
+  <div class="search" role="search">
+    <span class="glyph" aria-hidden="true">&#9906;</span>
+    <input type="search" placeholder="Search the course&#8230;" aria-label="Search the course" autocomplete="off" spellcheck="false">
+    <kbd>/</kbd>
+    <div class="search-results" role="listbox"></div>
+  </div>
+  <nav class="topbar-links">
+    <a class="hide-sm" href="../appendices/d-glossary.html">Glossary</a>
+    <a class="hide-sm" href="../appendices/b-psql.html">psql</a>
+  </nav>
+  <button class="icon-btn theme-btn" type="button" aria-label="Toggle theme">&#9790;</button>
+</header>
+<div class="scrim"></div>
+<div class="shell">
+<nav class="sidebar" id="sidebar" aria-label="Course contents">
+  <h4>Start here</h4>
+  <ol>
+    <li><a href="../start/setup.html" data-page="setup"><span class="n">00</span><span>Set up your lab</span></a></li>
+  </ol>
+  <h4>Part 1 — Foundations: the server, databases, schemas and roles</h4>
+  <ol>
+    <li><a href="../lessons/01-architecture.html" data-page="01-architecture"><span class="n">01</span><span>How PostgreSQL is built</span></a></li>
+    <li><a href="../lessons/02-databases-and-schemas.html" data-page="02-databases-and-schemas"><span class="n">02</span><span>Databases and schemas</span></a></li>
+    <li><a href="../lessons/03-roles-and-users.html" data-page="03-roles-and-users"><span class="n">03</span><span>Roles and users</span></a></li>
+    <li><a href="../lessons/04-privileges-and-grants.html" data-page="04-privileges-and-grants"><span class="n">04</span><span>Privileges and grants</span></a></li>
+    <li><a href="../lessons/05-security-and-rls.html" data-page="05-security-and-rls"><span class="n">05</span><span>Hardening and row-level security</span></a></li>
+  </ol>
+  <h4>Part 2 — Modelling and SQL in depth</h4>
+  <ol>
+    <li><a href="../lessons/06-data-types.html" data-page="06-data-types"><span class="n">06</span><span>Data types</span></a></li>
+    <li><a href="../lessons/07-constraints-and-design.html" data-page="07-constraints-and-design"><span class="n">07</span><span>Constraints and schema design</span></a></li>
+    <li><a href="../lessons/08-advanced-queries.html" data-page="08-advanced-queries"><span class="n">08</span><span>Advanced queries</span></a></li>
+    <li><a href="../lessons/09-changing-data.html" data-page="09-changing-data"><span class="n">09</span><span>Changing data safely</span></a></li>
+    <li><a href="../lessons/10-json-and-arrays.html" data-page="10-json-and-arrays"><span class="n">10</span><span>JSONB and arrays</span></a></li>
+    <li><a href="../lessons/11-text-search.html" data-page="11-text-search"><span class="n">11</span><span>Text search and pattern matching</span></a></li>
+  </ol>
+  <h4>Part 3 — Performance</h4>
+  <ol>
+    <li><a href="../lessons/12-indexes.html" data-page="12-indexes"><span class="n">12</span><span>Indexes</span></a></li>
+    <li><a href="../lessons/13-explain-and-planner.html" data-page="13-explain-and-planner"><span class="n">13</span><span>EXPLAIN and the planner</span></a></li>
+    <li><a href="../lessons/14-query-tuning.html" data-page="14-query-tuning"><span class="n">14</span><span>A query-tuning workflow</span></a></li>
+  </ol>
+  <h4>Part 4 — Transactions and concurrency</h4>
+  <ol>
+    <li><a href="../lessons/15-transactions-and-mvcc.html" data-page="15-transactions-and-mvcc"><span class="n">15</span><span>Transactions and MVCC</span></a></li>
+    <li><a href="../lessons/16-locking.html" data-page="16-locking"><span class="n">16</span><span>Locking and concurrency</span></a></li>
+    <li><a href="../lessons/17-vacuum-and-bloat.html" data-page="17-vacuum-and-bloat"><span class="n">17</span><span>Vacuum, bloat and autovacuum</span></a></li>
+  </ol>
+  <h4>Part 5 — Programming the database</h4>
+  <ol>
+    <li><a href="../lessons/18-views-and-functions.html" data-page="18-views-and-functions"><span class="n">18</span><span>Views, functions and procedures</span></a></li>
+    <li><a href="../lessons/19-triggers-and-events.html" data-page="19-triggers-and-events"><span class="n">19</span><span>Triggers, LISTEN/NOTIFY and audit</span></a></li>
+    <li><a href="../lessons/20-partitioning.html" data-page="20-partitioning"><span class="n">20</span><span>Partitioning</span></a></li>
+  </ol>
+  <h4>Part 6 — Operating PostgreSQL</h4>
+  <ol>
+    <li><a href="../lessons/21-configuration.html" data-page="21-configuration"><span class="n">21</span><span>Configuration and tuning</span></a></li>
+    <li><a href="../lessons/22-wal-and-durability.html" data-page="22-wal-and-durability"><span class="n">22</span><span>WAL, checkpoints and durability</span></a></li>
+    <li><a href="../lessons/23-backup-and-recovery.html" data-page="23-backup-and-recovery"><span class="n">23</span><span>Backup, restore and PITR</span></a></li>
+    <li><a href="../lessons/24-replication.html" data-page="24-replication"><span class="n">24</span><span>Replication and high availability</span></a></li>
+    <li><a href="../lessons/25-monitoring.html" data-page="25-monitoring"><span class="n">25</span><span>Monitoring and diagnostics</span></a></li>
+    <li><a href="../lessons/26-connections-and-upgrades.html" data-page="26-connections-and-upgrades"><span class="n">26</span><span>Connections, pooling, extensions and upgrades</span></a></li>
+  </ol>
+  <h4>Part 7 — Putting it together</h4>
+  <ol>
+    <li><a href="../lessons/27-capstone.html" data-page="27-capstone"><span class="n">27</span><span>Capstone project</span></a></li>
+  </ol>
+  <h4>Annexes</h4>
+  <ol>
+    <li><a href="../appendices/a1-select-basics.html" data-page="a1-select-basics"><span class="n">A1</span><span>SELECT, filtering and sorting</span></a></li>
+    <li><a href="../appendices/a2-joins.html" data-page="a2-joins"><span class="n">A2</span><span>Joins and combining tables</span></a></li>
+    <li><a href="../appendices/a3-aggregation.html" data-page="a3-aggregation"><span class="n">A3</span><span>Aggregation and grouping</span></a></li>
+    <li><a href="../appendices/a4-subqueries-and-ctes.html" data-page="a4-subqueries-and-ctes"><span class="n">A4</span><span>Subqueries and CTEs</span></a></li>
+    <li><a href="../appendices/a5-ddl-and-dml.html" data-page="a5-ddl-and-dml"><span class="n">A5</span><span>Creating and changing things</span></a></li>
+    <li><a href="../appendices/b-psql.html" data-page="b-psql"><span class="n">B</span><span>psql cheat sheet</span></a></li>
+    <li><a href="../appendices/c-catalog-queries.html" data-page="c-catalog-queries"><span class="n">C</span><span>Catalog and diagnostic queries</span></a></li>
+    <li><a href="../appendices/d-glossary.html" data-page="d-glossary"><span class="n">D</span><span>Glossary</span></a></li>
+    <li><a href="../appendices/e-troubleshooting.html" data-page="e-troubleshooting"><span class="n">E</span><span>Troubleshooting</span></a></li>
+    <li><a href="../appendices/f-whats-next.html" data-page="f-whats-next"><span class="n">F</span><span>What to learn next</span></a></li>
+  </ol>
+</nav>
+<div class="main">
+<main class="content" id="content">
+<p class="eyebrow">Lesson 12 &middot; Part 3</p>
+<h1>Indexes</h1>
+<div class="meta-row"><span class="tag">lesson 12</span><span class="tag">Docker exercises</span><span class="tag">live playground</span></div>
+<p class="lede">
+  An index is a second, sorted copy of some columns that lets PostgreSQL find rows without reading the whole
+  table. It is the single most effective performance tool you have, and also one of the easiest to misuse. This
+  lesson shows what a B-tree index can and cannot do, how to choose the column order of a composite index, when
+  a partial, expression or covering index is the right shape, what GIN, GiST and BRIN are for, and what every
+  index costs you on every write.
+</p>
+
+<h2 id="goals">Learning goals</h2>
+<ul>
+  <li>Explain what a B-tree index stores and why it speeds up equality, range and <code>ORDER BY</code> queries.</li>
+  <li>Choose the column order of a composite index from the query's equality, range and sort columns.</li>
+  <li>Build partial, expression and covering (<code>INCLUDE</code>) indexes, and say when each one pays off.</li>
+  <li>Pick between B-tree, GIN, GiST and BRIN for a given column and operator.</li>
+  <li>Measure what an index costs: disk space, slower writes and bloat.</li>
+  <li>Create and drop indexes on a live table with <code>CONCURRENTLY</code>, and recover from a failed build.</li>
+</ul>
+
+<h2 id="lab">Set up for this lesson</h2>
+<p>
+  Use the <code>shop</code> database, and in particular <code>analytics.events</code>: one million rows and, on
+  purpose, no secondary indexes (only the primary key). Start with <code>./pg up</code> if the container is not
+  running.
+</p>
+
+<div class="note warn">
+  <span class="note-title">Experiment in a scratch copy, not in shop</span>
+  <p>
+    An index you create in <code>shop</code> stays there and changes every plan you read afterwards. Make a
+    throw-away copy for your experiments, and use it for the whole lesson:
+  </p>
+</div>
+
+<figure class="code" data-lang="bash">
+  <figcaption><span class="path">terminal</span><span class="grow"></span><span class="lang">bash</span></figcaption>
+<pre><code>./pg sql "create database lab_scratch template shop_template" postgres
+./pg psql lab_scratch</code></pre>
+</figure>
+
+<p>
+  The name starts with <code>lab_</code>, so <code>./pg clean-roles</code> removes it when you are done. The
+  exercises do not touch <code>shop</code> either: the checker runs your file in a fresh copy of the database.
+</p>
+
+<div class="note info">
+  <span class="note-title">Plans in this lesson</span>
+  <p>
+    Every plan shown below comes from the Docker database with its 1 000 000 events. Your costs may differ a
+    little; the <em>shape</em> (which scan, which index) is what matters. The in-browser playgrounds hold a few
+    dozen rows, so a real planner would never choose an index there. In them, we switch sequential scans off
+    just to <em>see</em> an index plan. Treat playground plans as illustrations only.
+  </p>
+</div>
+
+<h2 id="what">1. What an index is</h2>
+
+<p>
+  A table (the <em>heap</em>) stores rows in no particular order. To answer
+  <code>where customer_id = 42</code> without help, PostgreSQL must read every page of the table. That is a
+  <em>sequential scan</em>:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">no index yet</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>explain select * from analytics.events where customer_id = 42;</code></pre>
+</figure>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">plan</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code> Gather  (cost=1000.00..21179.63 rows=233 width=90)
+   Workers Planned: 2
+   -&gt;  Parallel Seq Scan on events  (cost=0.00..20156.33 rows=97 width=90)
+         Filter: (customer_id = 42)</code></pre>
+</figure>
+
+<p>
+  The table is 117 MB. This plan reads all of it (workers share the job) to return about 200 rows. An
+  <em>index</em> is a separate structure that maps column values to the location of their rows. The default
+  kind, a <em>B-tree</em>, keeps the values in sorted order in a balanced tree, so finding one value takes a
+  few page reads, however big the table is.
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">create one and look again</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create index events_customer_idx on analytics.events (customer_id);
+explain select * from analytics.events where customer_id = 42;</code></pre>
+</figure>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">plan</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code> Bitmap Heap Scan on events  (cost=6.23..850.43 rows=233 width=90)
+   Recheck Cond: (customer_id = 42)
+   -&gt;  Bitmap Index Scan on events_customer_idx  (cost=0.00..6.17 rows=233 width=0)
+         Index Cond: (customer_id = 42)</code></pre>
+</figure>
+
+<p>
+  The estimated cost fell from about 21 000 to about 850. The actual query returns 217 rows, and
+  <code>EXPLAIN (ANALYZE, BUFFERS)</code> shows it touched a few hundred pages instead of roughly 15 000. Three
+  scan types appear in plans, and you should be able to tell them apart:
+</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Plan node</th><th>What it does</th><th>Typical when</th></tr></thead>
+  <tbody>
+    <tr><td><code>Seq Scan</code></td><td class="wrap">Reads the whole table</td><td class="wrap">Many rows match, or no usable index</td></tr>
+    <tr><td><code>Index Scan</code></td><td class="wrap">Walks the index and fetches each row from the heap, in index order</td><td class="wrap">Few rows, or the order of the index is wanted</td></tr>
+    <tr><td><code>Bitmap Index Scan</code> + <code>Bitmap Heap Scan</code></td><td class="wrap">Collects all matching row locations from the index, sorts them by heap page, then reads each page once</td><td class="wrap">A middle number of rows</td></tr>
+    <tr><td><code>Index Only Scan</code></td><td class="wrap">Answers from the index alone, without visiting the heap (section 6)</td><td class="wrap">The index contains every column the query needs</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>
+  Reading plans in detail is the subject of <a href="13-explain-and-planner.html">lesson 13</a>. Here, you only
+  need to recognise which index (if any) a plan names.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">create two indexes and list them · tiny data, illustrative only</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">create index if not exists orders_customer_idx on shop.orders (customer_id);
+create index if not exists orders_total_idx on shop.orders (total);
+
+select indexname, indexdef
+from pg_indexes
+where schemaname = 'shop' and tablename = 'orders'
+order by indexname;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  The primary key already created <code>orders_pkey</code>. Every <code>PRIMARY KEY</code> and
+  <code>UNIQUE</code> constraint creates a B-tree index to enforce itself; that is why
+  <code>customers_email_key</code> exists.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">see the planner use an index · this table has 12 rows, so we forbid the seq scan</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">create index if not exists orders_customer_idx on shop.orders (customer_id);
+
+set enable_seqscan = off;     -- only for this demo: on 12 rows a seq scan is cheaper
+explain (costs off)
+select * from shop.orders where customer_id = 1;
+reset enable_seqscan;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<div class="note warn">
+  <span class="note-title">enable_seqscan = off is a demo switch</span>
+  <p>
+    It does not forbid sequential scans; it makes them look very expensive, so the planner avoids them if any
+    other plan exists. Use it to ask “could this index be used at all?”. Never put it in an application.
+  </p>
+</div>
+
+<h2 id="btree">2. What a B-tree is good at</h2>
+
+<p>
+  Because a B-tree keeps values <em>sorted</em>, it helps with three things, not one:
+</p>
+
+<ul>
+  <li><strong>Equality</strong>: <code>where customer_id = 42</code>.</li>
+  <li><strong>Ranges</strong>: <code>&lt;</code>, <code>&lt;=</code>, <code>&gt;</code>, <code>&gt;=</code>, <code>BETWEEN</code>, and <code>IS NULL</code>.</li>
+  <li><strong>Ordering</strong>: <code>order by occurred_at</code> can read the index in order instead of sorting.</li>
+</ul>
+
+<p>
+  The third is easy to forget. Without an index, “the 5 newest events” sorts a million rows:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">the newest five events</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>explain select * from analytics.events order by occurred_at desc limit 5;
+create index events_time_idx on analytics.events (occurred_at);
+explain select * from analytics.events order by occurred_at desc limit 5;</code></pre>
+</figure>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">plan before, then after</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code> Limit
+   -&gt;  Gather Merge
+         Workers Planned: 2
+         -&gt;  Sort
+               Sort Key: occurred_at DESC
+               -&gt;  Parallel Seq Scan on events
+
+ Limit  (cost=0.42..0.85 rows=5 width=90)
+   -&gt;  Index Scan Backward using events_time_idx on events  (cost=0.42..85771.21 rows=1000000 width=90)</code></pre>
+</figure>
+
+<p>
+  A B-tree can be read forwards or backwards, so one ascending index serves both <code>ORDER BY x</code> and
+  <code>ORDER BY x DESC</code>. With <code>LIMIT 5</code> the scan stops after five rows; it never reads the rest.
+  You only need <code>DESC</code> inside the index definition when a composite index mixes directions, for
+  example <code>(kind, occurred_at DESC)</code> for <code>ORDER BY kind, occurred_at DESC</code>.
+</p>
+
+<h3>An index is not always used, and that is fine</h3>
+
+<p>
+  Reading a row through an index means a random page read; reading the table sequentially is far cheaper per
+  page. So when a query returns a large share of the table, the planner is right to ignore the index. We created
+  one on <code>kind</code> to check:
+</p>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">where kind = 'page_view' (550 264 rows)  and  where kind = 'purchase' (29 000 rows)</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code> Seq Scan on events  (cost=0.00..27448.00 rows=548067 width=90)
+   Filter: (kind = 'page_view'::text)
+
+ Bitmap Heap Scan on events  (cost=325.18..15745.29 rows=29000 width=90)
+   Recheck Cond: (kind = 'purchase'::text)
+   -&gt;  Bitmap Index Scan on events_kind_idx  (cost=0.00..317.93 rows=29000 width=0)</code></pre>
+</figure>
+
+<p>
+  The first query matches 55% of the table: a seq scan wins. The second matches 3%: the index wins. The share of
+  rows a condition keeps is its <em>selectivity</em>. An index on a low-selectivity column (few distinct
+  values, like <code>kind</code> or a boolean) rarely helps by itself. Section 5 shows how a partial index fixes
+  exactly that.
+</p>
+
+<h2 id="composite">3. Composite indexes and column order</h2>
+
+<p>
+  An index can cover several columns: <code>(a, b, c)</code>. It is sorted by <code>a</code>, then by
+  <code>b</code> within equal <code>a</code>, then by <code>c</code>. That ordering decides what it can do, in
+  the way a phone book sorted by last name, then first name can find “Smith, Anna” but cannot find every “Anna”.
+</p>
+
+<ul>
+  <li>It can search on a <em>leading prefix</em>: <code>a</code>; <code>a, b</code>; <code>a, b, c</code>.</li>
+  <li>Columns after the first <em>range</em> condition are scanned, not seeked.</li>
+  <li>It can deliver sorted output for the columns after the equality-matched prefix.</li>
+</ul>
+
+<p>The rule of thumb for choosing the order:</p>
+<ol>
+  <li>Columns tested with <code>=</code> first.</li>
+  <li>Then the column used for a range condition <em>or</em> for <code>ORDER BY</code>.</li>
+  <li>Among equality columns, put the one used most often on its own first.</li>
+</ol>
+
+<p>Take this query, “the 10 latest page views of one customer”:</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">a feed query</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select * from analytics.events
+where customer_id = 42 and kind = 'page_view'
+order by occurred_at desc
+limit 10;</code></pre>
+</figure>
+
+<p>
+  Two equality columns and a sort column, so the index is <code>(customer_id, kind, occurred_at)</code>. We
+  tried three indexes on the 1 000 000-row table:
+</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Index</th><th>Plan for the feed query</th></tr></thead>
+  <tbody>
+    <tr><td><code>(occurred_at)</code></td><td class="wrap"><code>Index Scan Backward</code> over the whole index, with <code>Filter</code> on the other two columns, stopping when 10 rows pass: it works only because 10 matches turn up early; for a rare customer it would walk most of the index</td></tr>
+    <tr><td><code>(customer_id, kind)</code></td><td class="wrap">Bitmap scan, then a <code>Sort</code> of the 128 matching rows, then <code>Limit</code></td></tr>
+    <tr><td><code>(customer_id, kind, occurred_at)</code></td><td class="wrap"><code>Index Scan Backward</code> with <code>Index Cond: (customer_id = 42 AND kind = 'page_view')</code>. No sort, and it stops after 10 rows.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">the plan with (customer_id, kind, occurred_at)</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code> Limit  (cost=0.42..40.94 rows=10 width=90)
+   -&gt;  Index Scan Backward using events_user_feed_idx on events  (cost=0.42..518.98 rows=128 width=90)
+         Index Cond: ((customer_id = 42) AND (kind = 'page_view'::text))</code></pre>
+</figure>
+
+<p>
+  The equality columns can be in either order for this query: <code>(kind, customer_id, occurred_at)</code> gave
+  the same plan shape. The order matters for <em>other</em> queries. An index led by <code>customer_id</code>
+  also serves <code>where customer_id = 42</code> alone (the plan names the index), and the one led by
+  <code>kind</code> serves <code>where kind = ...</code>. But a query on <code>kind</code> alone cannot use
+  the <code>customer_id</code>-first index well: our test chose a sequential scan.
+</p>
+
+<div class="note info">
+  <span class="note-title">PostgreSQL 18 skip scan</span>
+  <p>
+    PostgreSQL 18 can sometimes use a multi-column B-tree without a condition on its first column, by
+    <em>skipping</em> through each distinct value of that column. It pays off only when the leading column has
+    few distinct values. Do not design indexes around it: with a leading column like <code>customer_id</code>
+    (thousands of values) we saw the sequential scan above.
+  </p>
+</div>
+
+<div class="note warn">
+  <span class="note-title">A composite index is bigger, and one index is not several</span>
+  <p>
+    <code>(customer_id, kind, occurred_at)</code> is 41 MB on this table, against 7 MB for
+    <code>(customer_id)</code> alone. Do not add every possible combination. List the important queries and
+    design a few indexes that serve several of them through their leading prefixes. An index on
+    <code>(a)</code> is redundant if you already have <code>(a, b)</code>.
+  </p>
+</div>
+
+<h2 id="partial">4. Partial indexes</h2>
+
+<p>
+  A <em>partial index</em> has a <code>WHERE</code> clause and contains entries only for rows that satisfy it.
+  It is smaller, cheaper to maintain, and can turn a low-selectivity column into a useful one. Suppose
+  customers are looked up in the events table only for purchases (3% of the rows):
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">index only the rows you query</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create index events_purchase_customer_idx
+  on analytics.events (customer_id)
+  where kind = 'purchase';
+
+select pg_size_pretty(pg_relation_size('analytics.events_purchase_customer_idx'));   -- 448 kB
+explain select * from analytics.events where customer_id = 42 and kind = 'purchase';
+explain select * from analytics.events where customer_id = 42 and kind = 'search';</code></pre>
+</figure>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">the two plans</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code> Bitmap Heap Scan on events  (cost=4.34..31.99 rows=7 width=90)
+   Recheck Cond: ((customer_id = 42) AND (kind = 'purchase'::text))
+   -&gt;  Bitmap Index Scan on events_purchase_customer_idx  (cost=0.00..4.34 rows=7 width=0)
+         Index Cond: (customer_id = 42)
+
+ Gather  (cost=1000.00..22203.90 rows=59 width=90)
+   Workers Planned: 2
+   -&gt;  Parallel Seq Scan on events  (cost=0.00..21198.00 rows=25 width=90)
+         Filter: ((customer_id = 42) AND (kind = 'search'::text))</code></pre>
+</figure>
+
+<p>
+  The index is 448 kB instead of 7 MB. The planner can use it only when it can <em>prove</em> that the query's
+  condition implies the index's condition. The <code>kind = 'search'</code> query cannot use it: a sequential
+  scan.
+</p>
+
+<p>Other classic uses: <code>where deleted_at is null</code> (only live rows), <code>where status = 'pending'</code> (a small work queue inside a big table), and a <code>UNIQUE</code> index that applies to a subset: <code>create unique index on t (email) where deleted_at is null</code>.</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">a partial index on open orders · tiny data, illustrative only</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">create index if not exists orders_open_idx on shop.orders (ordered_at)
+  where status in ('pending', 'paid');
+
+select indexname, indexdef from pg_indexes
+where schemaname = 'shop' and indexname = 'orders_open_idx';
+
+set enable_seqscan = off;
+explain (costs off)
+select id from shop.orders where status = 'pending' and ordered_at >= '2025-01-01';
+
+explain (costs off)
+select id from shop.orders where status = 'delivered' and ordered_at >= '2025-01-01';
+reset enable_seqscan;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  Read the two plans. The <code>pending</code> query uses <code>orders_open_idx</code>. The
+  <code>delivered</code> query cannot, so even with sequential scans penalised the plan still shows a
+  <code>Seq Scan</code> (marked <code>Disabled: true</code>, because the planner had no other way).
+</p>
+
+<h2 id="expression">5. Expression indexes</h2>
+
+<p>
+  An index on a column cannot serve a query on a <em>function of</em> that column. The plain index on
+  <code>email</code> does nothing for a case-insensitive search:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">index the expression you search by</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>explain select * from shop.customers where lower(email) = 'anna.jansen1@example.com';   -- Seq Scan
+
+create index customers_lower_email_idx on shop.customers (lower(email));
+
+explain select * from shop.customers where lower(email) = 'anna.jansen1@example.com';</code></pre>
+</figure>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">plan after the expression index</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code> Bitmap Heap Scan on customers  (cost=5.06..248.74 rows=100 width=133)
+   Recheck Cond: (lower(email) = 'anna.jansen1@example.com'::text)
+   -&gt;  Bitmap Index Scan on customers_lower_email_idx  (cost=0.00..5.04 rows=100 width=0)
+         Index Cond: (lower(email) = 'anna.jansen1@example.com'::text)</code></pre>
+</figure>
+
+<p>
+  The query must contain the <em>same expression</em> as the index. <code>where email = '...'</code> keeps using
+  <code>customers_email_key</code>; the new index is only for <code>lower(email)</code>. (The row estimate of
+  100 is a default guess; the planner has no statistics for the expression until the next
+  <code>ANALYZE</code>, which autovacuum runs for you after enough changes. <a href="13-explain-and-planner.html">Lesson 13</a>
+  explains statistics.)
+</p>
+
+<div class="note danger">
+  <span class="note-title">The function must be IMMUTABLE</span>
+  <p>
+    An index stores computed values, so the function must always return the same result for the same input.
+    That excludes anything that depends on a setting such as the session time zone.
+    <code>create index on analytics.events (date_trunc('day', occurred_at))</code> fails with
+    <code>ERROR: functions in index expression must be marked IMMUTABLE</code>, because the day boundary of a
+    <code>timestamptz</code> depends on <code>TimeZone</code>. Fix the zone inside the expression:
+    <code>(occurred_at at time zone 'UTC')::date</code>, and use that same expression in queries. We built that
+    index and a query for one UTC day returned 2 773 events through it.
+  </p>
+</div>
+
+<p>
+  Another common expression index reads one key out of a JSONB document:
+  <code>create index on analytics.events ((payload-&gt;&gt;'device'))</code>. The extra pair of parentheses is
+  required around an expression that is not a plain function call. (JSONB indexing is the subject of
+  <a href="10-json-and-arrays.html">lesson 10</a>.)
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">an expression index and a GIN index · tiny data, illustrative only</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">create index if not exists products_tags_gin on shop.products using gin (tags);
+create index if not exists customers_lower_email_idx on shop.customers (lower(email));
+
+set enable_seqscan = off;
+explain (costs off) select id, name from shop.products where tags @> array['sale'];
+explain (costs off) select id from shop.customers where lower(email) = 'anna.jansen@example.com';
+reset enable_seqscan;
+
+select id, name from shop.products where tags @> array['sale'] order by id;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<h2 id="covering">6. Covering indexes: INCLUDE and index-only scans</h2>
+
+<p>
+  Normally an index finds the rows, then PostgreSQL visits the heap to read the columns you asked for. If the
+  index already contains every column the query needs, the heap visit can be skipped. That is an
+  <em>index-only scan</em>. To add columns that are only <em>carried</em> (not searched or sorted), use
+  <code>INCLUDE</code>:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">carry a payload column in the index</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create index events_cust_incl_idx on analytics.events (customer_id) include (kind);
+vacuum analyze analytics.events;      -- see below: this matters
+
+explain (analyze, costs off, timing off, summary off)
+select kind from analytics.events where customer_id = 42;</code></pre>
+</figure>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">plan</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code> Index Only Scan using events_cust_incl_idx on events (actual rows=217.00 loops=1)
+   Index Cond: (customer_id = 42)
+   Heap Fetches: 0
+   Index Searches: 1</code></pre>
+</figure>
+
+<p>
+  <code>Heap Fetches: 0</code> says that no row needed a trip to the table. Two conditions are needed for that.
+</p>
+<ul>
+  <li><strong>The query uses only indexed columns.</strong> Selecting <code>kind, payload</code> as well gives a plain <code>Bitmap Heap Scan</code> again.</li>
+  <li><strong>The visibility map is up to date.</strong> An index entry does not say whether a row is visible to your transaction (<a href="15-transactions-and-mvcc.html">lesson 15</a>). PostgreSQL keeps a <em>visibility map</em> of pages where all rows are visible to everyone, and <code>VACUUM</code> maintains it. On a table with lots of recent changes, an index-only scan still reads the heap for those pages, and <code>Heap Fetches</code> will be high.</li>
+</ul>
+
+<div class="note warn">
+  <span class="note-title">Covering indexes are big</span>
+  <p>
+    The index above is 32 MB, against 7 MB without <code>INCLUDE (kind)</code>, because every entry now carries
+    the text value. Use <code>INCLUDE</code> for a few small columns of one hot query, not as a habit.
+    Do not <code>INCLUDE</code> a column you also filter or sort on: make it a key column instead.
+  </p>
+</div>
+
+<h2 id="others">7. GIN, GiST and BRIN</h2>
+
+<p>
+  A B-tree needs values it can sort with <code>&lt;</code> and <code>=</code>. Other data needs other shapes.
+  PostgreSQL has a handful of <em>index access methods</em>, chosen with <code>USING</code>:
+</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Method</th><th>Good for</th><th>Operators it serves</th><th>Cost</th></tr></thead>
+  <tbody>
+    <tr><td><code>btree</code> (default)</td><td class="wrap">Scalars: numbers, text, dates</td><td class="wrap"><code>= &lt; &gt; BETWEEN</code>, sorting</td><td class="wrap">Moderate size; cheap writes</td></tr>
+    <tr><td><code>gin</code></td><td class="wrap">Values that <em>contain many items</em>: arrays, JSONB, full-text</td><td class="wrap"><code>@&gt; &lt;@ &amp;&amp;</code> on arrays, <code>@&gt;</code> and <code>?</code> on JSONB, <code>@@</code> on tsvector</td><td class="wrap">Slow to build, fast to read, slower writes</td></tr>
+    <tr><td><code>gist</code></td><td class="wrap">Ranges, geometry, “nearest”, exclusion constraints</td><td class="wrap"><code>&amp;&amp; @&gt; &lt;@</code> on ranges, distance operators</td><td class="wrap">Flexible; somewhat lossy</td></tr>
+    <tr><td><code>brin</code></td><td class="wrap">Huge tables whose values follow the physical row order</td><td class="wrap">Ranges and equality on a naturally ordered column</td><td class="wrap">Tiny; coarse</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>(Hash, SP-GiST and the <code>pg_trgm</code> operator classes also exist; trigram indexes are in <a href="11-text-search.html">lesson 11</a>.)</p>
+
+<h3>GIN: many items per value</h3>
+
+<p>
+  A <em>Generalized Inverted Index</em> stores, for every <em>item</em> inside a value, the list of rows that
+  contain it. That is what you want for “which rows have the tag <code>sale</code>?”:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">GIN on an array and on JSONB</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create index products_tags_gin on shop.products using gin (tags);
+explain select id from shop.products where tags @&gt; array['sale'];       -- Bitmap Index Scan on products_tags_gin
+
+create index events_payload_gin on analytics.events using gin (payload jsonb_path_ops);
+explain select count(*) from analytics.events
+where payload @&gt; '{"device":"tablet","path":"/cart"}';                  -- Bitmap Index Scan on events_payload_gin</code></pre>
+</figure>
+
+<p>
+  The JSONB query matches 55 601 of the 1 000 000 events, and the plan uses the GIN index through a bitmap scan.
+  The <code>jsonb_path_ops</code> operator class supports only <code>@&gt;</code>-style containment, but yields
+  a smaller index: 6.6 MB here. The default class also supports key-existence operators, at a larger size.
+</p>
+
+<h3>GiST: ranges and geometry</h3>
+
+<p>
+  A <em>Generalized Search Tree</em> arranges values by overlap. Its classic use is a range column: “which
+  promotions are running on this date?”. We built a 5 000-row table of promotions with a <code>daterange</code>
+  column to test it:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">GiST on a range column</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create table shop.promotions (
+  id int generated always as identity primary key,
+  name text,
+  during daterange
+);
+create index promotions_during_gist on shop.promotions using gist (during);
+
+select name from shop.promotions where during @&gt; date '2025-03-01';</code></pre>
+</figure>
+
+<p>
+  With 5 000 promotions of 10 days each, the plan was a <code>Bitmap Index Scan on promotions_during_gist</code>
+  returning 10 rows. GiST is also what powers an <code>EXCLUDE USING gist</code> constraint
+  (<a href="07-constraints-and-design.html">lesson 7</a>).
+</p>
+
+<h3>BRIN: tiny indexes for huge, ordered tables</h3>
+
+<p>
+  A <em>Block Range Index</em> stores only the minimum and maximum of each group of heap pages (128 pages by
+  default). It is tiny, but it can only skip page groups whose min–max range excludes your value, so it works
+  only if the column's values follow the physical row order. The statistic that tells you is
+  <em>correlation</em>, in <code>pg_stats</code>: 1 means perfectly ordered, 0 means random.
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">is this column ordered on disk?</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select attname, correlation
+from pg_stats
+where schemaname = 'analytics' and tablename = 'events'
+  and attname in ('id', 'occurred_at');</code></pre>
+</figure>
+
+<p>
+  In our table, <code>id</code> has correlation 1, but <code>occurred_at</code> has about 0.005: the seed data
+  was inserted in random time order. A BRIN index on <code>occurred_at</code> there would be nearly useless
+  (the planner chose a B-tree over it when both existed). Real event logs are written in time order, so we
+  rebuilt the table sorted by time to see the ideal case:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">BRIN on a time-ordered copy</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create table analytics.events_sorted as select * from analytics.events order by occurred_at;
+analyze analytics.events_sorted;      -- correlation of occurred_at is now 1
+
+create index events_sorted_brin  on analytics.events_sorted using brin (occurred_at);
+create index events_sorted_btree on analytics.events_sorted (occurred_at);
+
+select pg_size_pretty(pg_relation_size('analytics.events_sorted_brin'))  as brin,
+       pg_size_pretty(pg_relation_size('analytics.events_sorted_btree')) as btree;</code></pre>
+</figure>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">sizes, and the plan for one day (2 773 rows) with only the BRIN index</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code> brin  | btree
+-------+-------
+ 24 kB | 21 MB
+
+ Bitmap Heap Scan on events_sorted (actual rows=2773.00 loops=1)
+   Rows Removed by Index Recheck: 5790
+   Heap Blocks: lossy=128
+   -&gt;  Bitmap Index Scan on events_sorted_brin</code></pre>
+</figure>
+
+<p>
+  A 24 kB index replaced a 21 MB one. The price is visible in the plan: the index is <em>lossy</em>. It returns
+  whole block ranges, and PostgreSQL re-checks every row in them (“Rows Removed by Index Recheck”). It read 128 pages,
+  not 15 000, and that is what you want from a BRIN index on a table of billions of rows.
+</p>
+
+<div class="note warn">
+  <span class="note-title">BRIN depends on insert order</span>
+  <p>
+    If rows are later updated or deleted and new rows land in old free space, the physical order drifts and the
+    index loses its power, silently. Check <code>correlation</code> from time to time, and remember that a
+    BRIN index can never give you sorted output.
+  </p>
+</div>
+
+<h2 id="cost">8. What an index costs</h2>
+
+<p>An index is not free. Every index you add:</p>
+<ul>
+  <li><strong>takes disk space</strong>, often a large fraction of the table;</li>
+  <li><strong>slows every INSERT and DELETE</strong>, because each index must be updated too;</li>
+  <li><strong>slows UPDATEs that change an indexed column</strong>, and prevents the cheaper “HOT” update path described in <a href="17-vacuum-and-bloat.html">lesson 17</a>;</li>
+  <li><strong>can bloat</strong>: index pages fill with entries for dead rows, and plain <code>VACUUM</code> does not shrink the file.</li>
+</ul>
+
+<p>See the space first, for the whole schema, in a database where you have not added anything yet:</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">table size versus index size</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select t.relname,
+       pg_size_pretty(pg_table_size(t.oid))   as table_size,
+       pg_size_pretty(pg_indexes_size(t.oid)) as index_size
+from pg_class t join pg_namespace n on n.oid = t.relnamespace
+where n.nspname in ('shop', 'analytics') and t.relkind = 'r'
+order by pg_total_relation_size(t.oid) desc;</code></pre>
+</figure>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">output on a fresh shop database</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code>   relname   | table_size | index_size
+-------------+------------+------------
+ events      | 117 MB     | 21 MB
+ orders      | 36 MB      | 9800 kB
+ order_items | 30 MB      | 13 MB
+ customers   | 3696 kB    | 1768 kB
+ products    | 160 kB     | 64 kB
+ categories  | 16 kB      | 32 kB</code></pre>
+</figure>
+
+<p>
+  Even the primary key alone is 21 MB on the events table. Now watch an index grow from updates. In the scratch
+  copy, we indexed <code>customer_id</code> (7128 kB), then ran an update that changes it for half the rows:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">updates grow the index; vacuum does not shrink it</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create index events_customer_idx on analytics.events (customer_id);   -- 7128 kB
+update analytics.events set customer_id = customer_id + 1 where id &lt;= 500000;
+select pg_size_pretty(pg_relation_size('analytics.events_customer_idx'));   -- 13 MB
+vacuum analytics.events;
+select pg_size_pretty(pg_relation_size('analytics.events_customer_idx'));   -- still 13 MB
+reindex index concurrently analytics.events_customer_idx;
+select pg_size_pretty(pg_relation_size('analytics.events_customer_idx'));   -- 7128 kB</code></pre>
+</figure>
+
+<p>
+  <code>VACUUM</code> removed the dead entries so the space can be reused, but it does not give the file back.
+  <code>REINDEX</code> rebuilds the index compactly. The same <code>update</code> also grew the table itself from 117 MB to 175 MB; measuring and
+  controlling that is the job of <a href="17-vacuum-and-bloat.html">lesson 17</a>.
+</p>
+
+<div class="note tip">
+  <span class="note-title">Find indexes nobody uses</span>
+  <p>
+    <code>pg_stat_user_indexes.idx_scan</code> counts how many times each index was used since the statistics were
+    last reset. An index with zero scans over a representative period (a full business cycle, not an hour)
+    costs you writes and space for nothing. Unique indexes with zero scans still enforce a constraint: keep
+    them.
+  </p>
+</div>
+
+<h2 id="concurrently">9. Building indexes on a live table</h2>
+
+<p>
+  A plain <code>CREATE INDEX</code> takes a lock that blocks all writes (<code>INSERT</code>, <code>UPDATE</code>,
+  <code>DELETE</code>) to the table until it finishes. Reads continue. On a big table that can mean minutes of
+  outage. <code>CREATE INDEX CONCURRENTLY</code> builds the index without blocking writes:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">the production-safe form</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create index concurrently orders_customer_idx on shop.orders (customer_id);
+drop index concurrently orders_customer_idx;
+reindex index concurrently orders_customer_idx;</code></pre>
+</figure>
+
+<p>It has costs and caveats you must know before you use it:</p>
+<ul>
+  <li><strong>Slower.</strong> It scans the table twice and waits for older transactions to finish, so a long-running transaction anywhere in the database stalls it.</li>
+  <li><strong>Not allowed inside a transaction block.</strong> After <code>BEGIN</code>, it fails with <code>ERROR: CREATE INDEX CONCURRENTLY cannot run inside a transaction block</code>. Most migration tools wrap each migration in a transaction; you must turn that off for this statement.</li>
+  <li><strong>It can fail and leave an invalid index behind.</strong> A <code>UNIQUE</code> build that meets duplicates, a deadlock, or a cancelled session leaves an index that is still maintained on every write but never used by queries.</li>
+</ul>
+
+<p>We provoked the failure on purpose, because <code>shop.orders</code> has many orders per customer:</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">a concurrent build that fails (intentional error)</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create unique index concurrently orders_cust_uq on shop.orders (customer_id);
+-- ERROR:  could not create unique index "orders_cust_uq"
+-- DETAIL:  Key (customer_id)=(...) is duplicated.
+
+select indexrelid::regclass as index, indisvalid
+from pg_index where indrelid = 'shop.orders'::regclass;</code></pre>
+</figure>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">the leftover</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code>          index           | indisvalid
+--------------------------+------------
+ shop.orders_pkey         | t
+ shop.orders_customer_idx | t
+ shop.orders_cust_uq      | f</code></pre>
+</figure>
+
+<p>
+  <code>indisvalid = f</code> is the signature of a failed concurrent build. Drop it
+  (<code>drop index shop.orders_cust_uq</code>), fix the cause, and run the build again. A re-run under the
+  same name fails with “relation already exists” until you drop the leftover.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">covering index and its catalog entry · tiny data, illustrative only</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">create index if not exists products_cat_price_idx
+  on shop.products (category_id, price) include (name);
+
+select pg_size_pretty(pg_relation_size('shop.products_cat_price_idx')) as size,
+       indisunique, indnkeyatts as key_columns, indnatts as total_columns
+from pg_index
+where indexrelid = 'shop.products_cat_price_idx'::regclass;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  <code>indnkeyatts</code> counts the key columns (2) and <code>indnatts</code> all stored columns (3); the
+  difference is the <code>INCLUDE</code> list. Concurrent builds are not available in the playground (they need
+  several sessions), so try them in your scratch database.
+</p>
+
+<div class="note danger">
+  <span class="note-title">Indexes do not fix a query that is wrong</span>
+  <p>
+    A leading wildcard (<code>like '%abc'</code>), a function on the column (<code>where date(occurred_at) = ...</code>),
+    comparing a column with a value of a different type, or selecting most of the table all defeat an ordinary
+    index. Look at the plan before you build, and again afterwards.
+  </p>
+</div>
+
+<h2 id="when">When to use, when not to</h2>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Situation</th><th class="wrap">✅ Do this</th><th class="wrap">❌ Not this</th></tr></thead>
+  <tbody>
+    <tr><td class="wrap">Foreign key column joined or filtered often</td><td class="wrap">B-tree on the referencing column (PostgreSQL does not create it for you)</td><td class="wrap">Assume the foreign key made it fast</td></tr>
+    <tr><td class="wrap">Low-selectivity column (status, boolean)</td><td class="wrap">Partial index on the rare, interesting value</td><td class="wrap">A plain index on the whole column</td></tr>
+    <tr><td class="wrap">Case-insensitive or computed lookups</td><td class="wrap">Expression index with the exact expression</td><td class="wrap">Index the raw column and hope</td></tr>
+    <tr><td class="wrap">Array or JSONB containment</td><td class="wrap">GIN</td><td class="wrap">B-tree on the whole array or document</td></tr>
+    <tr><td class="wrap">Very large, append-only, time-ordered table</td><td class="wrap">BRIN on the timestamp</td><td class="wrap">A multi-GB B-tree, or BRIN on a randomly ordered column</td></tr>
+    <tr><td class="wrap">Heavy-write table with many indexes</td><td class="wrap">Keep only indexes that queries use (<code>idx_scan</code>)</td><td class="wrap">“Just in case” indexes on every column</td></tr>
+    <tr><td class="wrap">Adding an index to a busy production table</td><td class="wrap"><code>CREATE INDEX CONCURRENTLY</code>, then check <code>indisvalid</code></td><td class="wrap">Plain <code>CREATE INDEX</code> during business hours</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="inspect">Inspect it</h2>
+
+<p>
+  Run this in your scratch database before and after you create indexes. It shows every index with its size, how
+  often it was used, and its definition:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">all indexes, their size and their use</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select s.relname as table_name,
+       s.indexrelname as index_name,
+       s.idx_scan,
+       pg_size_pretty(pg_relation_size(s.indexrelid)) as size,
+       i.indisvalid as valid,
+       pg_get_indexdef(s.indexrelid) as definition
+from pg_stat_user_indexes s
+join pg_index i on i.indexrelid = s.indexrelid
+where s.schemaname in ('shop', 'analytics')
+order by pg_relation_size(s.indexrelid) desc, s.indexrelname;</code></pre>
+</figure>
+
+<p>
+  On a fresh database you see only primary keys and the unique keys on <code>customers.email</code>,
+  <code>products.sku</code> and <code>categories.name</code>. In <code>shop</code> the largest is
+  <code>events_pkey</code>, 21 MB.
+</p>
+
+<h2 id="exercises">Your turn</h2>
+
+<p>
+  Each exercise changes the database, so each has a check. The checker asks PostgreSQL for the plan
+  (<code>EXPLAIN (FORMAT JSON)</code>) and looks for your index in it, so the result does not depend on how fast
+  your computer is. The check runs your file in a fresh copy of the database; your own <code>shop</code> stays
+  untouched.
+</p>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 1</span><span class="grow"></span><span class="lvl">basic</span></div>
+  <div class="ex-body">
+    <p>
+      Create the index <code>events_customer_idx</code> on <code>analytics.events (customer_id)</code> so the
+      planner uses it for <code>where customer_id = 42</code>. Check it with <code>./pg check 12 1</code>.
+    </p>
+  </div>
+  <figure class="code" data-lang="sql">
+  <figcaption><span class="path">exercises/12/1.sql</span><span class="grow"></span><span class="lang">your starting file</span></figcaption>
+<pre><code>-- The query  select * from analytics.events where customer_id = 42
+-- reads the whole 1 000 000-row table. Create an index named
+-- events_customer_idx on analytics.events so that the planner can use it.
+-- Then run ./pg check 12 1.</code></pre>
+</figure>
+  <details><summary>Hint</summary><p>A single <code>CREATE INDEX name ON table (column)</code> statement is enough. The plan needs fresh statistics, and the table already has them.</p></details>
+  <details class="solution"><summary>Show a model solution for exercise 1 (try first!)</summary>
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">solutions/12/1.sql</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create index events_customer_idx on analytics.events (customer_id);</code></pre>
+</figure>
+</details>
+</section>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 2</span><span class="grow"></span><span class="lvl">intermediate</span></div>
+  <div class="ex-body">
+    <p>
+      Create <em>one</em> index named <code>events_user_feed_idx</code> on <code>analytics.events</code> that lets
+      PostgreSQL answer “the 10 latest page views of customer 42” (see the task in the file) from the index, with
+      no <code>Sort</code> node in the plan. Check it with <code>./pg check 12 2</code>.
+    </p>
+  </div>
+  <figure class="code" data-lang="sql">
+  <figcaption><span class="path">exercises/12/2.sql</span><span class="grow"></span><span class="lang">your starting file</span></figcaption>
+<pre><code>-- The "latest 10 page views of customer 42" query is:
+--
+--   select * from analytics.events
+--   where customer_id = 42 and kind = 'page_view'
+--   order by occurred_at desc
+--   limit 10;
+--
+-- Create ONE index on analytics.events so that PostgreSQL can answer it by
+-- walking the index, with no Sort step in the plan. Name it events_user_feed_idx.
+-- Then run ./pg check 12 2.</code></pre>
+</figure>
+  <details><summary>Hint</summary><p>Equality columns first, then the column in the <code>ORDER BY</code>. Three columns, in that order of roles.</p></details>
+  <details class="solution"><summary>Show a model solution for exercise 2 (try first!)</summary>
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">solutions/12/2.sql</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create index events_user_feed_idx on analytics.events (customer_id, kind, occurred_at);</code></pre>
+</figure>
+</details>
+</section>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 3</span><span class="grow"></span><span class="lvl">challenge</span></div>
+  <div class="ex-body">
+    <p>
+      Create the partial index <code>events_purchase_customer_idx</code> on <code>analytics.events</code> so that
+      <code>kind = 'purchase' and customer_id = 42</code> uses it, and so that the index is smaller than 1 MB.
+      Check it with <code>./pg check 12 3</code>.
+    </p>
+  </div>
+  <figure class="code" data-lang="sql">
+  <figcaption><span class="path">exercises/12/3.sql</span><span class="grow"></span><span class="lang">your starting file</span></figcaption>
+<pre><code>-- Only 'purchase' events (3% of the table) are ever looked up by customer, with
+--   select * from analytics.events where kind = 'purchase' and customer_id = 42
+-- Create a PARTIAL index named events_purchase_customer_idx on
+-- analytics.events that serves this query and stays under 1 MB.
+-- Then run ./pg check 12 3.</code></pre>
+</figure>
+  <details><summary>Hint</summary><p>Index <code>customer_id</code> only, and put the condition on <code>kind</code> in a <code>WHERE</code> clause of the index. The planner must be able to see that the query's <code>kind</code> condition implies it.</p></details>
+  <details class="solution"><summary>Show a model solution for exercise 3 (try first!)</summary>
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">solutions/12/3.sql</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create index events_purchase_customer_idx on analytics.events (customer_id)
+  where kind = 'purchase';</code></pre>
+</figure>
+</details>
+</section>
+
+<h2 id="summary">Summary</h2>
+<ul>
+  <li>A B-tree keeps values sorted, so it serves equality, ranges and <code>ORDER BY</code>; the planner still prefers a sequential scan when a query returns a large share of the table.</li>
+  <li>In a composite index, put equality columns first, then the range or sort column; the index serves its leading prefixes.</li>
+  <li>Partial indexes cover only the rows you query, expression indexes need the exact same expression (and an IMMUTABLE function), and <code>INCLUDE</code> enables index-only scans when the visibility map is current.</li>
+  <li>GIN is for containment in arrays, JSONB and text search; GiST for ranges and geometry; BRIN for huge tables whose column follows the physical row order (check <code>correlation</code>).</li>
+  <li>Every index costs disk and write time, and can bloat; <code>VACUUM</code> does not shrink it, <code>REINDEX</code> does. Drop indexes with zero scans.</li>
+  <li>On a live table use <code>CREATE INDEX CONCURRENTLY</code> outside a transaction, and check <code>indisvalid</code> afterwards.</li>
+</ul>
+
+<h2 id="next">Looking ahead</h2>
+<p>
+  You have been reading plans without learning their grammar. <a href="13-explain-and-planner.html">Lesson 13</a>
+  teaches how to read costs, row estimates and loops, how the planner uses statistics, and why it sometimes
+  picks the wrong index.
+</p>
+<div class="lesson-done" data-lesson="12-indexes"></div>
+<nav class="pager"><a class="prev" href="../lessons/11-text-search.html"><span class="dir">Previous</span><span class="lbl">11 · Text search and pattern matching</span></a><a class="next" href="../lessons/13-explain-and-planner.html"><span class="dir">Next</span><span class="lbl">13 · EXPLAIN and the planner</span></a></nav>
+</main>
+<aside class="toc" aria-label="On this page"></aside>
+</div>
+</div>
+<script src="../assets/js/search-index.js"></script>
+<script src="../assets/js/mini-seed.js"></script>
+<script src="../assets/js/course.js"></script>
+</body>
+</html>

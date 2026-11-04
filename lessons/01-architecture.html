@@ -1,0 +1,684 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How PostgreSQL is built &mdash; Learning PostgreSQL</title>
+<meta name="description" content="Cluster, postmaster, backends, shared buffers, WAL, the data directory and the life of a query.">
+<link rel="stylesheet" href="../assets/css/course.css">
+</head>
+<body data-root="../" data-page="01-architecture">
+<a class="skip-link" href="#content">Skip to content</a>
+<header class="topbar">
+  <button class="icon-btn menu-btn" type="button" aria-label="Toggle navigation" aria-expanded="false" aria-controls="sidebar">&#9776;</button>
+  <a class="brand" href="../index.html"><span class="mark pgm">PG</span> Learning PostgreSQL <span class="sub">PostgreSQL 18</span></a>
+  <span class="spacer"></span>
+  <div class="search" role="search">
+    <span class="glyph" aria-hidden="true">&#9906;</span>
+    <input type="search" placeholder="Search the course&#8230;" aria-label="Search the course" autocomplete="off" spellcheck="false">
+    <kbd>/</kbd>
+    <div class="search-results" role="listbox"></div>
+  </div>
+  <nav class="topbar-links">
+    <a class="hide-sm" href="../appendices/d-glossary.html">Glossary</a>
+    <a class="hide-sm" href="../appendices/b-psql.html">psql</a>
+  </nav>
+  <button class="icon-btn theme-btn" type="button" aria-label="Toggle theme">&#9790;</button>
+</header>
+<div class="scrim"></div>
+<div class="shell">
+<nav class="sidebar" id="sidebar" aria-label="Course contents">
+  <h4>Start here</h4>
+  <ol>
+    <li><a href="../start/setup.html" data-page="setup"><span class="n">00</span><span>Set up your lab</span></a></li>
+  </ol>
+  <h4>Part 1 — Foundations: the server, databases, schemas and roles</h4>
+  <ol>
+    <li><a href="../lessons/01-architecture.html" data-page="01-architecture"><span class="n">01</span><span>How PostgreSQL is built</span></a></li>
+    <li><a href="../lessons/02-databases-and-schemas.html" data-page="02-databases-and-schemas"><span class="n">02</span><span>Databases and schemas</span></a></li>
+    <li><a href="../lessons/03-roles-and-users.html" data-page="03-roles-and-users"><span class="n">03</span><span>Roles and users</span></a></li>
+    <li><a href="../lessons/04-privileges-and-grants.html" data-page="04-privileges-and-grants"><span class="n">04</span><span>Privileges and grants</span></a></li>
+    <li><a href="../lessons/05-security-and-rls.html" data-page="05-security-and-rls"><span class="n">05</span><span>Hardening and row-level security</span></a></li>
+  </ol>
+  <h4>Part 2 — Modelling and SQL in depth</h4>
+  <ol>
+    <li><a href="../lessons/06-data-types.html" data-page="06-data-types"><span class="n">06</span><span>Data types</span></a></li>
+    <li><a href="../lessons/07-constraints-and-design.html" data-page="07-constraints-and-design"><span class="n">07</span><span>Constraints and schema design</span></a></li>
+    <li><a href="../lessons/08-advanced-queries.html" data-page="08-advanced-queries"><span class="n">08</span><span>Advanced queries</span></a></li>
+    <li><a href="../lessons/09-changing-data.html" data-page="09-changing-data"><span class="n">09</span><span>Changing data safely</span></a></li>
+    <li><a href="../lessons/10-json-and-arrays.html" data-page="10-json-and-arrays"><span class="n">10</span><span>JSONB and arrays</span></a></li>
+    <li><a href="../lessons/11-text-search.html" data-page="11-text-search"><span class="n">11</span><span>Text search and pattern matching</span></a></li>
+  </ol>
+  <h4>Part 3 — Performance</h4>
+  <ol>
+    <li><a href="../lessons/12-indexes.html" data-page="12-indexes"><span class="n">12</span><span>Indexes</span></a></li>
+    <li><a href="../lessons/13-explain-and-planner.html" data-page="13-explain-and-planner"><span class="n">13</span><span>EXPLAIN and the planner</span></a></li>
+    <li><a href="../lessons/14-query-tuning.html" data-page="14-query-tuning"><span class="n">14</span><span>A query-tuning workflow</span></a></li>
+  </ol>
+  <h4>Part 4 — Transactions and concurrency</h4>
+  <ol>
+    <li><a href="../lessons/15-transactions-and-mvcc.html" data-page="15-transactions-and-mvcc"><span class="n">15</span><span>Transactions and MVCC</span></a></li>
+    <li><a href="../lessons/16-locking.html" data-page="16-locking"><span class="n">16</span><span>Locking and concurrency</span></a></li>
+    <li><a href="../lessons/17-vacuum-and-bloat.html" data-page="17-vacuum-and-bloat"><span class="n">17</span><span>Vacuum, bloat and autovacuum</span></a></li>
+  </ol>
+  <h4>Part 5 — Programming the database</h4>
+  <ol>
+    <li><a href="../lessons/18-views-and-functions.html" data-page="18-views-and-functions"><span class="n">18</span><span>Views, functions and procedures</span></a></li>
+    <li><a href="../lessons/19-triggers-and-events.html" data-page="19-triggers-and-events"><span class="n">19</span><span>Triggers, LISTEN/NOTIFY and audit</span></a></li>
+    <li><a href="../lessons/20-partitioning.html" data-page="20-partitioning"><span class="n">20</span><span>Partitioning</span></a></li>
+  </ol>
+  <h4>Part 6 — Operating PostgreSQL</h4>
+  <ol>
+    <li><a href="../lessons/21-configuration.html" data-page="21-configuration"><span class="n">21</span><span>Configuration and tuning</span></a></li>
+    <li><a href="../lessons/22-wal-and-durability.html" data-page="22-wal-and-durability"><span class="n">22</span><span>WAL, checkpoints and durability</span></a></li>
+    <li><a href="../lessons/23-backup-and-recovery.html" data-page="23-backup-and-recovery"><span class="n">23</span><span>Backup, restore and PITR</span></a></li>
+    <li><a href="../lessons/24-replication.html" data-page="24-replication"><span class="n">24</span><span>Replication and high availability</span></a></li>
+    <li><a href="../lessons/25-monitoring.html" data-page="25-monitoring"><span class="n">25</span><span>Monitoring and diagnostics</span></a></li>
+    <li><a href="../lessons/26-connections-and-upgrades.html" data-page="26-connections-and-upgrades"><span class="n">26</span><span>Connections, pooling, extensions and upgrades</span></a></li>
+  </ol>
+  <h4>Part 7 — Putting it together</h4>
+  <ol>
+    <li><a href="../lessons/27-capstone.html" data-page="27-capstone"><span class="n">27</span><span>Capstone project</span></a></li>
+  </ol>
+  <h4>Annexes</h4>
+  <ol>
+    <li><a href="../appendices/a1-select-basics.html" data-page="a1-select-basics"><span class="n">A1</span><span>SELECT, filtering and sorting</span></a></li>
+    <li><a href="../appendices/a2-joins.html" data-page="a2-joins"><span class="n">A2</span><span>Joins and combining tables</span></a></li>
+    <li><a href="../appendices/a3-aggregation.html" data-page="a3-aggregation"><span class="n">A3</span><span>Aggregation and grouping</span></a></li>
+    <li><a href="../appendices/a4-subqueries-and-ctes.html" data-page="a4-subqueries-and-ctes"><span class="n">A4</span><span>Subqueries and CTEs</span></a></li>
+    <li><a href="../appendices/a5-ddl-and-dml.html" data-page="a5-ddl-and-dml"><span class="n">A5</span><span>Creating and changing things</span></a></li>
+    <li><a href="../appendices/b-psql.html" data-page="b-psql"><span class="n">B</span><span>psql cheat sheet</span></a></li>
+    <li><a href="../appendices/c-catalog-queries.html" data-page="c-catalog-queries"><span class="n">C</span><span>Catalog and diagnostic queries</span></a></li>
+    <li><a href="../appendices/d-glossary.html" data-page="d-glossary"><span class="n">D</span><span>Glossary</span></a></li>
+    <li><a href="../appendices/e-troubleshooting.html" data-page="e-troubleshooting"><span class="n">E</span><span>Troubleshooting</span></a></li>
+    <li><a href="../appendices/f-whats-next.html" data-page="f-whats-next"><span class="n">F</span><span>What to learn next</span></a></li>
+  </ol>
+</nav>
+<div class="main">
+<main class="content" id="content">
+<p class="eyebrow">Lesson 01 &middot; Part 1</p>
+<h1>How PostgreSQL is built</h1>
+<div class="meta-row"><span class="tag">lesson 01</span><span class="tag">Docker exercises</span><span class="tag">live playground</span></div>
+<p class="lede">
+  PostgreSQL is a set of ordinary operating-system processes that share some memory and read and write files in
+  one directory. Once you can picture that, a lot of behaviour stops being mysterious: why connections cost
+  something, why a commit survives a power cut, why the first run of a query is slower than the second. This
+  lesson walks through the pieces, then shows where each one lives in the catalogue so you can look for yourself.
+</p>
+
+<h2 id="goals">Learning goals</h2>
+<ul>
+  <li>Explain what a <em>cluster</em> is and how it relates to databases, schemas and tables.</li>
+  <li>Name the postmaster, the backend and the main background processes, and say what each one does.</li>
+  <li>Explain the difference between shared buffers, the operating-system page cache and the files on disk.</li>
+  <li>Explain, in your own words, why a committed transaction survives a crash (write-ahead logging).</li>
+  <li>Describe the four stages a query goes through: parse, rewrite, plan, execute.</li>
+  <li>Find the answer to “what exists here?” in the system catalogs instead of guessing.</li>
+</ul>
+
+<h2 id="lab">Set up for this lesson</h2>
+<p>
+  Use the <code>shop</code> database. Start the container with <code>./pg up</code> if it is not running (see
+  <a href="../start/setup.html">Set up your lab</a>). Everything in this lesson only <em>reads</em>, so you cannot
+  damage anything. The playgrounds on this page run in your browser, and the browser engine is a single-process
+  build, so it cannot show you the separate server processes. Those parts are shown with output from the Docker
+  database, and the text says which is which.
+</p>
+
+<figure class="code" data-lang="bash">
+  <figcaption><span class="path">terminal</span><span class="grow"></span><span class="lang">bash</span></figcaption>
+<pre><code>./pg psql
+select current_database(), current_user;</code></pre>
+</figure>
+
+<h2 id="cluster">1. The cluster: one server, many databases</h2>
+
+<p>
+  A PostgreSQL <em>cluster</em> is one running server together with the directory of files it manages (the
+  <em>data directory</em>). The word “cluster” has nothing to do with several machines. One cluster has:
+</p>
+
+<ul>
+  <li>one <strong>postmaster</strong>, the first process, which listens for connections and starts everything else;</li>
+  <li>one set of <strong>background processes</strong> (section 3) and one block of shared memory;</li>
+  <li>one <strong>write-ahead log</strong> (section 5), shared by every database in it;</li>
+  <li>one list of <strong>roles</strong>, shared by every database (<a href="03-roles-and-users.html">lesson 3</a>);</li>
+  <li>any number of <strong>databases</strong>, each isolated from the others.</li>
+</ul>
+
+<p>
+  Inside a database the objects nest like folders: a database holds <strong>schemas</strong>, a schema holds
+  <strong>tables</strong> (and views, indexes, sequences, functions), a table holds <strong>rows</strong>. A name
+  like <code>shop.orders</code> means “table <code>orders</code> in schema <code>shop</code>, in the database I am
+  connected to”. A connection is always to <em>one</em> database: you cannot join a table in one database to a table
+  in another with plain SQL.
+</p>
+
+<figure class="dia">
+  <div class="dia-hold">
+    <svg class="d" viewBox="0 0 860 330" role="img" aria-labelledby="hier-t hier-d">
+      <title id="hier-t">The object hierarchy of a cluster</title>
+      <desc id="hier-d">A cluster contains roles and several databases. The database shop contains the schemas shop and analytics. The schema shop contains the table orders, which contains rows.</desc>
+      <rect class="box" x="20" y="20" width="820" height="290" rx="10"/>
+      <text class="hd" x="40" y="48">cluster (one data directory, one postmaster)</text>
+      <rect class="box teal" x="40" y="70" width="170" height="60" rx="8"/>
+      <text class="hd ctr" x="125" y="96">roles</text>
+      <text class="lbl ctr" x="125" y="116">shared by all databases</text>
+      <rect class="box" x="40" y="160" width="170" height="60" rx="8"/>
+      <text class="hd ctr" x="125" y="186">postgres</text>
+      <text class="lbl ctr" x="125" y="206">database</text>
+      <rect class="box accent" x="240" y="70" width="580" height="220" rx="8"/>
+      <text class="hd" x="260" y="98">database shop</text>
+      <rect class="box" x="260" y="115" width="260" height="150" rx="8"/>
+      <text class="hd" x="278" y="142">schema shop</text>
+      <rect class="box teal" x="280" y="160" width="220" height="40" rx="6"/>
+      <text class="lbl ctr" x="390" y="185">table orders  ·  rows</text>
+      <text class="lbl" x="280" y="226">customers, products, order_items …</text>
+      <rect class="box" x="550" y="115" width="250" height="150" rx="8"/>
+      <text class="hd" x="568" y="142">schema analytics</text>
+      <text class="lbl" x="568" y="190">table events</text>
+    </svg>
+  </div>
+  <figcaption>Roles belong to the cluster. Everything else lives inside one database, and inside a schema.</figcaption>
+</figure>
+
+<p>
+  <a href="02-databases-and-schemas.html">Lesson 2</a> takes this hierarchy apart, including templates and
+  <code>search_path</code>. For now it is enough to know the nesting.
+</p>
+
+<h2 id="processes">2. The postmaster and one process per connection</h2>
+
+<p>
+  When a client connects, the postmaster does not handle the work itself. It starts a new operating-system process
+  for that connection, called a <em>backend</em> (in the statistics views it appears as a <em>client backend</em>).
+  That backend authenticates the client, then reads your SQL, runs it and sends rows back, until you disconnect.
+</p>
+
+<ul>
+  <li>One connection means one backend process, with its own memory. A hundred idle connections are a hundred processes.</li>
+  <li>Starting a backend is not free. Applications that open and close a connection for every request pay for it every time. The fix, connection pooling, comes later in the course.</li>
+  <li>The limit is the setting <code>max_connections</code> (100 by default). The server refuses the 101st client.</li>
+  <li>If one backend crashes, the postmaster restarts all of them, because shared memory may be damaged. That is rare, but it is why a crash in one session can briefly disconnect everybody.</li>
+</ul>
+
+<h2 id="background">3. The background processes</h2>
+
+<p>
+  Next to the backends, the postmaster keeps a few helpers running for the whole life of the server. You can see
+  them in the view <code>pg_stat_activity</code>. This is the list from the Docker database (the output of the
+  first query in “Inspect it”):
+</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th><code>backend_type</code></th><th>What it does</th><th class="wrap">Do you tune it?</th></tr></thead>
+  <tbody>
+    <tr><td class="wrap"><code>client backend</code></td><td class="wrap">Serves one connection: parses, plans and runs your SQL</td><td class="wrap">Indirectly, through <code>max_connections</code> and pooling</td></tr>
+    <tr><td class="wrap"><code>checkpointer</code></td><td class="wrap">Periodically forces all changed pages to disk, so recovery after a crash is short</td><td class="wrap">Sometimes (<code>checkpoint_timeout</code>, <code>max_wal_size</code>)</td></tr>
+    <tr><td class="wrap"><code>background writer</code></td><td class="wrap">Writes some changed pages out ahead of time, so backends rarely have to</td><td class="wrap">Rarely</td></tr>
+    <tr><td class="wrap"><code>walwriter</code></td><td class="wrap">Flushes the write-ahead log buffer to disk</td><td class="wrap">Rarely</td></tr>
+    <tr><td class="wrap"><code>autovacuum launcher</code></td><td class="wrap">Starts workers that clean up dead row versions and refresh statistics</td><td class="wrap">Yes, per table when a table needs it (a later lesson)</td></tr>
+    <tr><td class="wrap"><code>logical replication launcher</code></td><td class="wrap">Starts workers for logical replication, when you use it</td><td class="wrap">Only if you replicate</td></tr>
+    <tr><td class="wrap"><code>io worker</code></td><td class="wrap">PostgreSQL 18 helpers that do asynchronous reads for the backends (the default <code>io_method</code> is <code>worker</code>)</td><td class="wrap">Rarely</td></tr>
+    <tr><td class="wrap"><code>archiver</code></td><td class="wrap">Copies finished WAL files to an archive. It only exists when <code>archive_mode</code> is on, which it is not in the course container</td><td class="wrap">Yes, when you run backups with point-in-time recovery</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>
+  You do not start or stop these processes yourself. They are part of the server, and their names are worth
+  knowing because they show up in logs and in monitoring.
+</p>
+
+<div class="note info">
+  <span class="note-title">The browser playground is different</span>
+  <p>
+    The in-page engine is PostgreSQL compiled to WebAssembly and it runs in a single process. There is no
+    postmaster, no background workers and no data directory on a disk. Its <code>pg_stat_activity</code> shows
+    one row, a <em>standalone backend</em>: your own session. Query results, catalogs and SQL behave like the real
+    thing; the process layout does not.
+  </p>
+</div>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">settings of this server, and the only process the browser has</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select name, setting, unit
+from pg_settings
+where name in ('block_size', 'shared_buffers', 'wal_level', 'max_connections')
+order by name;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">the only process the browser has</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select backend_type, state from pg_stat_activity;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  <code>block_size</code> is 8192 bytes: PostgreSQL reads and writes in <em>pages</em> of 8 kB. The unit of
+  <code>shared_buffers</code> is also pages, so 16384 pages is 128 MB. The second playground returns a single row of type
+  <code>standalone backend</code>. On the Docker database the same query returns the whole list in the table above.
+</p>
+
+<h2 id="memory">4. Shared buffers and the operating-system cache</h2>
+
+<p>
+  Tables and indexes are stored in files, cut into 8 kB pages. A backend never works on the file directly. It asks
+  for a page, and the page is loaded into <strong>shared buffers</strong>, a block of shared memory that all
+  backends use. If the page is already there (a <em>hit</em>), no disk is touched. If not, it is a <em>read</em>.
+</p>
+
+<ul>
+  <li>Changing a row changes the page <em>in memory</em>. The page is now <em>dirty</em>. It is written to its file later, by the background writer or the checkpointer.</li>
+  <li>There are two caches, not one. When PostgreSQL asks the operating system for a page, the operating system may serve it from its own <em>page cache</em> without touching the disk. So PostgreSQL does not need to cache the whole database itself; the default <code>shared_buffers</code> is 128 MB.</li>
+  <li>Each backend also has private memory for sorting and hashing (<code>work_mem</code>). That memory is per operation, not per server.</li>
+</ul>
+
+<h2 id="wal">5. The write-ahead log: why a commit survives a crash</h2>
+
+<p>
+  Dirty pages sit in memory, so how can a commit be safe? Because before a transaction is reported as committed,
+  PostgreSQL writes a short description of what it changed into the <strong>write-ahead log</strong> (WAL) and
+  forces that log to disk. The big, scattered data pages can be written later.
+</p>
+
+<ol>
+  <li>Your <code>UPDATE</code> changes a page in shared buffers.</li>
+  <li>The change is also recorded, as a small record, in the WAL. Each record has a position called an <em>LSN</em> (log sequence number).</li>
+  <li>On <code>COMMIT</code>, the WAL up to that point is flushed to disk (<code>fsync</code>). Only then do you get “COMMIT”.</li>
+  <li>The data page reaches its file at some later time.</li>
+</ol>
+
+<p>
+  If the server crashes between steps 3 and 4, nothing is lost: at the next start PostgreSQL replays the WAL from the
+  last checkpoint and redoes the changes. Writing the log is cheap, because it is one sequential append; writing
+  the data pages is expensive, because it is random. WAL also feeds backups and replication, which are later
+  lessons. You can read the current position with a function:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">the current WAL position and file</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select pg_current_wal_lsn(), pg_walfile_name(pg_current_wal_lsn());</code></pre>
+</figure>
+
+<p>
+  The values grow as the database is used, so yours will differ from anyone else's. That is the point: the position
+  only moves forward.
+</p>
+
+<div class="note warn">
+  <span class="note-title">fsync = off is not a tuning option</span>
+  <p>
+    The setting <code>fsync</code> controls whether the WAL is really forced to disk. With <code>off</code>, a power
+    cut can corrupt the whole cluster, not just lose the last transaction. It exists for throw-away loads and tests.
+    (The browser engine runs with it off, because it has no disk to protect. Your Docker database has it on.)
+  </p>
+</div>
+
+<h2 id="files">6. What is in the data directory</h2>
+
+<p>
+  Everything the cluster stores is in one directory, the one the server was started with. You do not edit it by
+  hand, but knowing the main folders explains a lot. These exist in the course container:
+</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Entry</th><th>What is in it</th></tr></thead>
+  <tbody>
+    <tr><td><code>base/</code></td><td class="wrap">One sub-folder per database (named by the database's OID). The table and index files live here, 8 kB pages in each file.</td></tr>
+    <tr><td><code>global/</code></td><td class="wrap">Cluster-wide catalogs: the list of databases and the list of roles.</td></tr>
+    <tr><td><code>pg_wal/</code></td><td class="wrap">The write-ahead log, as files of 16 MB each (<code>wal_segment_size</code>).</td></tr>
+    <tr><td><code>pg_xact/</code></td><td class="wrap">Which transactions committed and which aborted (section 8).</td></tr>
+    <tr><td><code>postgresql.conf</code>, <code>pg_hba.conf</code></td><td class="wrap">Server settings, and the rules that decide who may connect (lesson 3).</td></tr>
+    <tr><td><code>PG_VERSION</code></td><td class="wrap">The major version that created the directory. A directory made by one major version cannot be started by another without an upgrade.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="note danger">
+  <span class="note-title">Never touch the files while the server runs</span>
+  <p>
+    Do not copy, edit or delete files in the data directory of a running cluster, and above all never delete
+    files from <code>pg_wal/</code> to “free some space”. A file copy of a live cluster is not a valid backup, and
+    removing WAL can make the cluster unable to start. Use SQL and the backup tools instead.
+  </p>
+</div>
+
+<p>
+  You can ask SQL where a table's file is without leaving the database. The path is relative to the data directory:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">where does a table live on disk?</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select pg_relation_filepath('shop.orders') as file,
+       pg_size_pretty(pg_relation_size('shop.orders')) as size;</code></pre>
+</figure>
+
+<p>
+  The file name is made of numbers (the database OID and the table's file number). Those numbers differ from
+  cluster to cluster, which is why the catalogue, not the folder listing, is the place to look things up.
+</p>
+
+<h2 id="query">7. The life of a query</h2>
+
+<p>
+  When a backend receives <code>select … from shop.orders where …</code>, it runs it in four stages:
+</p>
+
+<ol>
+  <li><strong>Parse.</strong> The text is checked for correct syntax and turned into a tree. Tables and columns are looked up in the catalogs; a missing table fails here.</li>
+  <li><strong>Rewrite.</strong> Rules are applied. The most important rule: a view is replaced by the query that defines it.</li>
+  <li><strong>Plan.</strong> The <em>planner</em> considers different ways to get the answer (which index, which join order, which join algorithm) and picks the one with the lowest estimated cost. The result is a plan, a tree of steps.</li>
+  <li><strong>Execute.</strong> The <em>executor</em> runs the plan step by step, pulling pages through shared buffers and sending rows to the client.</li>
+</ol>
+
+<p>
+  <code>EXPLAIN</code> shows the plan without running the query. The numbers (<code>cost</code>, <code>rows</code>)
+  are the planner's <em>estimates</em>, based on statistics it keeps for each table.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">illustrative only: the browser has 12 orders, so its plan is not realistic</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">explain
+select o.id, c.full_name
+from shop.orders o
+join shop.customers c on c.id = o.customer_id
+where o.status = 'delivered';</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  Read it from the inside out. Both tables are read with a <code>Seq Scan</code> (a sequential scan: every page),
+  one side is turned into a hash table, and the <code>Hash Join</code> matches rows. The plan shape here is
+  the same one the Docker database chooses for the same query on 200 000 orders; only the numbers differ, with a
+  cost around 8400 there against about 2 in the browser. Do not take timings or costs from the playground. The
+  lessons on performance use the Docker database for that reason.
+</p>
+
+<h2 id="mvcc">8. Row versions and transaction IDs</h2>
+
+<p>
+  PostgreSQL never overwrites a row in place. An <code>UPDATE</code> writes a <em>new version</em> of the row and
+  marks the old version as ended; a <code>DELETE</code> only marks the version as ended. This is
+  <strong>MVCC</strong> (multi-version concurrency control), and it is why readers do not block writers. Every
+  transaction that changes data gets a <em>transaction ID</em> (xid), and every row version records the xid that
+  created it in a hidden column, <code>xmin</code>. The commit state of each xid is kept in <code>pg_xact/</code>.
+  The old versions that nobody can see any more are removed later by <em>vacuum</em>. The course covers the details in the
+  transactions part.
+</p>
+
+<p>First look at one row, and note its <code>xmin</code> and <code>ctid</code>:</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">step 1: the row as it is now</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select xmin::text as created_by_xid, ctid, id, name
+from shop.categories where id = 1;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>Now update it without changing any value, and ask for the same columns back with <code>RETURNING</code>:</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">step 2: an update creates a new row version (you can run it again)</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">update shop.categories set name = name where id = 1
+returning xmin::text as created_by_xid, ctid, id, name;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  The update did not change any value, yet both <code>xmin</code> and <code>ctid</code> are different after it.
+  <code>ctid</code> is the physical address of the row version: (page number, slot in the page). A new version means
+  a new slot, and a new <code>xmin</code> because a new transaction wrote it. Still only one version is
+  <em>visible</em>, so the row looks unchanged to every query.
+</p>
+
+<div class="note warn">
+  <span class="note-title">An update is a delete plus an insert</span>
+  <p>
+    A table that is updated heavily collects dead row versions until vacuum cleans them. That is called bloat. It
+    is the cost of MVCC, and it is the reason a table can be much larger on disk than the data you can see.
+  </p>
+</div>
+
+<h2 id="catalog">9. The catalogue knows everything</h2>
+
+<p>
+  PostgreSQL describes itself in ordinary tables, the <em>system catalogs</em>, all in the schema
+  <code>pg_catalog</code>. Anything you can create, you can find there with a <code>SELECT</code>. The four to know
+  first:
+</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Catalog</th><th>One row per</th><th>Scope</th></tr></thead>
+  <tbody>
+    <tr><td><code>pg_database</code></td><td>database</td><td>cluster-wide</td></tr>
+    <tr><td><code>pg_roles</code></td><td>role (a safe view over <code>pg_authid</code>)</td><td>cluster-wide</td></tr>
+    <tr><td><code>pg_namespace</code></td><td>schema</td><td>this database</td></tr>
+    <tr><td><code>pg_class</code></td><td>table, index, sequence, view … (<code>relkind</code> tells which)</td><td>this database</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>
+  <code>pg_database</code> and <code>pg_roles</code> show the same rows whichever database you are connected to,
+  because they belong to the cluster. <code>pg_namespace</code> and <code>pg_class</code> show only the objects of
+  the database you are connected to. Here is the hierarchy from section 1, read from the catalogs:
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">database, schema, relation: one row per level</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select current_database() as database,
+       n.nspname as schema,
+       c.relname as relation,
+       c.relkind
+from pg_class c
+join pg_namespace n on n.oid = c.relnamespace
+where n.nspname = 'shop'
+  and c.relkind in ('r', 'S')
+order by c.relkind desc, c.relname;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  <code>relkind</code> <code>r</code> is an ordinary table and <code>S</code> a sequence (the counters behind the
+  identity columns). Indexes (<code>i</code>) are in <code>pg_class</code> too; the query filters them out. The
+  browser database is named <code>postgres</code>; in the course container the same query shows <code>shop</code>.
+</p>
+
+<div class="note tip">
+  <span class="note-title">The catalogue is the truth, <code>\d</code> is a view of it</span>
+  <p>
+    Every <code>psql</code> command that starts with a backslash (<code>\dt</code>, <code>\dn</code>, <code>\l</code>)
+    is just a query over these catalogs. Run <code>psql -E</code> (or <code>\set ECHO_HIDDEN on</code>) and it
+    prints the SQL it ran. That is a good way to learn the catalogs.
+  </p>
+</div>
+
+<h2 id="when">When to use, when not to</h2>
+
+<p>This is not about choosing a feature but about choosing how to act on what you now know.</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Situation</th><th class="wrap">✅ Do this</th><th class="wrap">❌ Not this</th></tr></thead>
+  <tbody>
+    <tr><td class="wrap">Many short requests from a web application</td><td class="wrap">Keep a small pool of long-lived connections</td><td class="wrap">Open and close a connection per request, or raise <code>max_connections</code> to thousands</td></tr>
+    <tr><td class="wrap">“Where is this table's data?”</td><td class="wrap"><code>pg_relation_filepath()</code> and <code>pg_relation_size()</code></td><td class="wrap">Browsing the data directory with <code>ls</code></td></tr>
+    <tr><td class="wrap">“What databases, schemas or tables exist?”</td><td class="wrap">Query <code>pg_database</code>, <code>pg_namespace</code>, <code>pg_class</code></td><td class="wrap">Keeping your own list in a document</td></tr>
+    <tr><td class="wrap">Two datasets that must be joined</td><td class="wrap">Two schemas in one database</td><td class="wrap">Two databases (you cannot join across them with plain SQL)</td></tr>
+    <tr><td class="wrap">Bulk load you can repeat from scratch</td><td class="wrap">Normal settings; tune the load itself</td><td class="wrap">Turning <code>fsync</code> off on a database you care about</td></tr>
+    <tr><td class="wrap">The server is out of disk space</td><td class="wrap">Find big tables with the catalogs, and fix the cause (a stuck replication slot, a huge table, bloat)</td><td class="wrap">Deleting files in <code>pg_wal/</code></td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="inspect">Inspect it</h2>
+
+<p>
+  Run these in <code>./pg psql</code> against the Docker database. The first lists the server's processes. The
+  second shows the databases of the cluster. The third shows what a connection is currently doing, which is the
+  quickest way to see your own backend.
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">processes, databases, your own session</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select backend_type, count(*) from pg_stat_activity group by 1 order by 1;
+
+select datname, datistemplate from pg_database order by datname;
+
+select pid, usename, datname, state, left(query, 40) as query
+from pg_stat_activity
+where pid = pg_backend_pid();</code></pre>
+</figure>
+
+<p>
+  You should see the processes from section 3 (without an <code>archiver</code>), your databases including
+  <code>shop</code> and the two templates <code>template0</code> and <code>template1</code>, and one row for
+  yourself in state <code>active</code>. Your <code>pid</code> will differ from anyone else's.
+</p>
+
+<h2 id="exercises">Your turn</h2>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 1</span><span class="grow"></span><span class="lvl">basic</span></div>
+  <div class="ex-body">
+    <p>
+      Look at the two built-in template databases, <code>template0</code> and <code>template1</code>. Return the
+      columns <code>datname</code>, <code>encoding</code> (as text) and <code>allows_connections</code>, ordered by
+      <code>datname</code>.
+    </p>
+    <p>Open <code>exercises/01/1.sql</code>, write your answer, then run <code>./pg check 01 1</code>.</p>
+  </div>
+  <figure class="code" data-lang="sql">
+  <figcaption><span class="path">exercises/01/1.sql</span><span class="grow"></span><span class="lang">your starting file</span></figcaption>
+<pre><code>-- Look at the two built-in template databases, template0 and template1.
+-- Return three columns named datname, encoding (the encoding as text, for
+-- example UTF8) and allows_connections (the datallowconn flag), ordered by
+-- datname. Run ./pg check 01 1 when you are done.</code></pre>
+</figure>
+  <details><summary>Hint</summary><p>The catalog is <code>pg_database</code>. The encoding is stored as a number; the function <code>pg_encoding_to_char()</code> turns it into a name. The flag <code>datallowconn</code> says whether anyone may connect to the database.</p></details>
+  <details class="solution"><summary>Show a model solution for exercise 1 (try first!)</summary>
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">solutions/01/1.sql</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>-- ordered
+select datname,
+       pg_encoding_to_char(encoding) as encoding,
+       datallowconn as allows_connections
+from pg_database
+where datname in ('template0', 'template1')
+order by datname;</code></pre>
+</figure>
+</details>
+</section>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 2</span><span class="grow"></span><span class="lvl">intermediate</span></div>
+  <div class="ex-body">
+    <p>
+      For the schemas <code>analytics</code>, <code>public</code> and <code>shop</code>, count the ordinary tables
+      in each. Return <code>schema_name</code> and <code>tables</code>, ordered by <code>schema_name</code>. A
+      schema without tables must still be listed, with 0.
+    </p>
+    <p>Open <code>exercises/01/2.sql</code>, write your answer, then run <code>./pg check 01 2</code>.</p>
+  </div>
+  <figure class="code" data-lang="sql">
+  <figcaption><span class="path">exercises/01/2.sql</span><span class="grow"></span><span class="lang">your starting file</span></figcaption>
+<pre><code>-- For the schemas analytics, public and shop, count the ordinary tables in each
+-- (pg_class.relkind = 'r'). Return the columns schema_name and tables. A schema
+-- with no tables must still appear, with 0. Order by schema_name.
+-- Run ./pg check 01 2 when you are done.</code></pre>
+</figure>
+  <details><summary>Hint</summary><p>Join <code>pg_namespace</code> to <code>pg_class</code> on <code>c.relnamespace = n.oid</code>. To keep schemas that have no match, use a <code>LEFT JOIN</code> and put the <code>relkind = 'r'</code> test in the <code>ON</code> clause, not in <code>WHERE</code>. Then <code>count(c.oid)</code> counts only real matches.</p></details>
+  <details class="solution"><summary>Show a model solution for exercise 2 (try first!)</summary>
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">solutions/01/2.sql</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>-- ordered
+select n.nspname as schema_name, count(c.oid) as tables
+from pg_namespace n
+left join pg_class c on c.relnamespace = n.oid and c.relkind = 'r'
+where n.nspname in ('analytics', 'public', 'shop')
+group by n.nspname
+order by n.nspname;</code></pre>
+</figure>
+</details>
+</section>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 3</span><span class="grow"></span><span class="lvl">challenge</span></div>
+  <div class="ex-body">
+    <p>
+      Describe every ordinary table in the <code>shop</code> schema. Return <code>table_name</code>,
+      <code>columns</code> (the number of live columns: no system columns, no dropped ones) and
+      <code>indexes</code> (the number of indexes on the table), ordered by <code>table_name</code>. Use only
+      <code>pg_class</code>, <code>pg_attribute</code> and <code>pg_index</code>.
+    </p>
+    <p>Open <code>exercises/01/3.sql</code>, write your answer, then run <code>./pg check 01 3</code>.</p>
+  </div>
+  <figure class="code" data-lang="sql">
+  <figcaption><span class="path">exercises/01/3.sql</span><span class="grow"></span><span class="lang">your starting file</span></figcaption>
+<pre><code>-- Describe every ordinary table in the shop schema. Return table_name,
+-- columns (how many live columns it has: skip system columns and dropped ones)
+-- and indexes (how many indexes it has). Use only pg_class, pg_attribute and
+-- pg_index. Order by table_name. Run ./pg check 01 3 when you are done.</code></pre>
+</figure>
+  <details><summary>Hint</summary><p>Columns are rows of <code>pg_attribute</code> with <code>attrelid = c.oid</code>; system columns have <code>attnum &lt;= 0</code>, and dropped columns have <code>attisdropped</code> set. Indexes are rows of <code>pg_index</code> with <code>indrelid = c.oid</code>. Two scalar subqueries in the select list keep the counts from multiplying each other.</p></details>
+  <details class="solution"><summary>Show a model solution for exercise 3 (try first!)</summary>
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">solutions/01/3.sql</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>-- ordered
+select c.relname as table_name,
+       (select count(*) from pg_attribute a
+         where a.attrelid = c.oid and a.attnum &gt; 0 and not a.attisdropped) as columns,
+       (select count(*) from pg_index i where i.indrelid = c.oid) as indexes
+from pg_class c
+where c.relnamespace = 'shop'::regnamespace and c.relkind = 'r'
+order by c.relname;</code></pre>
+</figure>
+</details>
+</section>
+
+<h2 id="summary">Summary</h2>
+<ul>
+  <li>A cluster is one server with one data directory. It holds many databases, and one list of roles shared by all of them.</li>
+  <li>The postmaster starts one backend process per connection, so connections have a real cost.</li>
+  <li>Background processes (checkpointer, background writer, walwriter, autovacuum launcher …) do the housekeeping you never see.</li>
+  <li>Pages are cached twice: in shared buffers and in the operating system's page cache. Changed pages are written to disk later.</li>
+  <li>A commit is durable because the write-ahead log is flushed first; after a crash, the WAL is replayed.</li>
+  <li>A query is parsed, rewritten, planned and executed. <code>EXPLAIN</code> shows the plan, with estimates.</li>
+  <li>An update writes a new row version (new <code>xmin</code>, new <code>ctid</code>); vacuum removes the old ones.</li>
+  <li>The system catalogs (<code>pg_database</code>, <code>pg_namespace</code>, <code>pg_class</code>, <code>pg_roles</code>) describe everything that exists.</li>
+</ul>
+
+<h2 id="next">Looking ahead</h2>
+<p>
+  You now have the map of the server. <a href="02-databases-and-schemas.html">Lesson 2</a> zooms in on the part you
+  use every day: databases and schemas, how templates work, how <code>search_path</code> decides which table a name
+  means, and how to find any object with <code>psql</code>.
+</p>
+<div class="lesson-done" data-lesson="01-architecture"></div>
+<nav class="pager"><a class="prev" href="../start/setup.html"><span class="dir">Previous</span><span class="lbl">Set up your lab</span></a><a class="next" href="../lessons/02-databases-and-schemas.html"><span class="dir">Next</span><span class="lbl">02 · Databases and schemas</span></a></nav>
+</main>
+<aside class="toc" aria-label="On this page"></aside>
+</div>
+</div>
+<script src="../assets/js/search-index.js"></script>
+<script src="../assets/js/mini-seed.js"></script>
+<script src="../assets/js/course.js"></script>
+</body>
+</html>

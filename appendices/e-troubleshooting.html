@@ -1,0 +1,554 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>E. Troubleshooting &mdash; Learning PostgreSQL</title>
+<meta name="description" content="Error messages you will meet, what they mean and what to do.">
+<link rel="stylesheet" href="../assets/css/course.css">
+</head>
+<body data-root="../" data-page="e-troubleshooting">
+<a class="skip-link" href="#content">Skip to content</a>
+<header class="topbar">
+  <button class="icon-btn menu-btn" type="button" aria-label="Toggle navigation" aria-expanded="false" aria-controls="sidebar">&#9776;</button>
+  <a class="brand" href="../index.html"><span class="mark pgm">PG</span> Learning PostgreSQL <span class="sub">PostgreSQL 18</span></a>
+  <span class="spacer"></span>
+  <div class="search" role="search">
+    <span class="glyph" aria-hidden="true">&#9906;</span>
+    <input type="search" placeholder="Search the course&#8230;" aria-label="Search the course" autocomplete="off" spellcheck="false">
+    <kbd>/</kbd>
+    <div class="search-results" role="listbox"></div>
+  </div>
+  <nav class="topbar-links">
+    <a class="hide-sm" href="../appendices/d-glossary.html">Glossary</a>
+    <a class="hide-sm" href="../appendices/b-psql.html">psql</a>
+  </nav>
+  <button class="icon-btn theme-btn" type="button" aria-label="Toggle theme">&#9790;</button>
+</header>
+<div class="scrim"></div>
+<div class="shell">
+<nav class="sidebar" id="sidebar" aria-label="Course contents">
+  <h4>Start here</h4>
+  <ol>
+    <li><a href="../start/setup.html" data-page="setup"><span class="n">00</span><span>Set up your lab</span></a></li>
+  </ol>
+  <h4>Part 1 — Foundations: the server, databases, schemas and roles</h4>
+  <ol>
+    <li><a href="../lessons/01-architecture.html" data-page="01-architecture"><span class="n">01</span><span>How PostgreSQL is built</span></a></li>
+    <li><a href="../lessons/02-databases-and-schemas.html" data-page="02-databases-and-schemas"><span class="n">02</span><span>Databases and schemas</span></a></li>
+    <li><a href="../lessons/03-roles-and-users.html" data-page="03-roles-and-users"><span class="n">03</span><span>Roles and users</span></a></li>
+    <li><a href="../lessons/04-privileges-and-grants.html" data-page="04-privileges-and-grants"><span class="n">04</span><span>Privileges and grants</span></a></li>
+    <li><a href="../lessons/05-security-and-rls.html" data-page="05-security-and-rls"><span class="n">05</span><span>Hardening and row-level security</span></a></li>
+  </ol>
+  <h4>Part 2 — Modelling and SQL in depth</h4>
+  <ol>
+    <li><a href="../lessons/06-data-types.html" data-page="06-data-types"><span class="n">06</span><span>Data types</span></a></li>
+    <li><a href="../lessons/07-constraints-and-design.html" data-page="07-constraints-and-design"><span class="n">07</span><span>Constraints and schema design</span></a></li>
+    <li><a href="../lessons/08-advanced-queries.html" data-page="08-advanced-queries"><span class="n">08</span><span>Advanced queries</span></a></li>
+    <li><a href="../lessons/09-changing-data.html" data-page="09-changing-data"><span class="n">09</span><span>Changing data safely</span></a></li>
+    <li><a href="../lessons/10-json-and-arrays.html" data-page="10-json-and-arrays"><span class="n">10</span><span>JSONB and arrays</span></a></li>
+    <li><a href="../lessons/11-text-search.html" data-page="11-text-search"><span class="n">11</span><span>Text search and pattern matching</span></a></li>
+  </ol>
+  <h4>Part 3 — Performance</h4>
+  <ol>
+    <li><a href="../lessons/12-indexes.html" data-page="12-indexes"><span class="n">12</span><span>Indexes</span></a></li>
+    <li><a href="../lessons/13-explain-and-planner.html" data-page="13-explain-and-planner"><span class="n">13</span><span>EXPLAIN and the planner</span></a></li>
+    <li><a href="../lessons/14-query-tuning.html" data-page="14-query-tuning"><span class="n">14</span><span>A query-tuning workflow</span></a></li>
+  </ol>
+  <h4>Part 4 — Transactions and concurrency</h4>
+  <ol>
+    <li><a href="../lessons/15-transactions-and-mvcc.html" data-page="15-transactions-and-mvcc"><span class="n">15</span><span>Transactions and MVCC</span></a></li>
+    <li><a href="../lessons/16-locking.html" data-page="16-locking"><span class="n">16</span><span>Locking and concurrency</span></a></li>
+    <li><a href="../lessons/17-vacuum-and-bloat.html" data-page="17-vacuum-and-bloat"><span class="n">17</span><span>Vacuum, bloat and autovacuum</span></a></li>
+  </ol>
+  <h4>Part 5 — Programming the database</h4>
+  <ol>
+    <li><a href="../lessons/18-views-and-functions.html" data-page="18-views-and-functions"><span class="n">18</span><span>Views, functions and procedures</span></a></li>
+    <li><a href="../lessons/19-triggers-and-events.html" data-page="19-triggers-and-events"><span class="n">19</span><span>Triggers, LISTEN/NOTIFY and audit</span></a></li>
+    <li><a href="../lessons/20-partitioning.html" data-page="20-partitioning"><span class="n">20</span><span>Partitioning</span></a></li>
+  </ol>
+  <h4>Part 6 — Operating PostgreSQL</h4>
+  <ol>
+    <li><a href="../lessons/21-configuration.html" data-page="21-configuration"><span class="n">21</span><span>Configuration and tuning</span></a></li>
+    <li><a href="../lessons/22-wal-and-durability.html" data-page="22-wal-and-durability"><span class="n">22</span><span>WAL, checkpoints and durability</span></a></li>
+    <li><a href="../lessons/23-backup-and-recovery.html" data-page="23-backup-and-recovery"><span class="n">23</span><span>Backup, restore and PITR</span></a></li>
+    <li><a href="../lessons/24-replication.html" data-page="24-replication"><span class="n">24</span><span>Replication and high availability</span></a></li>
+    <li><a href="../lessons/25-monitoring.html" data-page="25-monitoring"><span class="n">25</span><span>Monitoring and diagnostics</span></a></li>
+    <li><a href="../lessons/26-connections-and-upgrades.html" data-page="26-connections-and-upgrades"><span class="n">26</span><span>Connections, pooling, extensions and upgrades</span></a></li>
+  </ol>
+  <h4>Part 7 — Putting it together</h4>
+  <ol>
+    <li><a href="../lessons/27-capstone.html" data-page="27-capstone"><span class="n">27</span><span>Capstone project</span></a></li>
+  </ol>
+  <h4>Annexes</h4>
+  <ol>
+    <li><a href="../appendices/a1-select-basics.html" data-page="a1-select-basics"><span class="n">A1</span><span>SELECT, filtering and sorting</span></a></li>
+    <li><a href="../appendices/a2-joins.html" data-page="a2-joins"><span class="n">A2</span><span>Joins and combining tables</span></a></li>
+    <li><a href="../appendices/a3-aggregation.html" data-page="a3-aggregation"><span class="n">A3</span><span>Aggregation and grouping</span></a></li>
+    <li><a href="../appendices/a4-subqueries-and-ctes.html" data-page="a4-subqueries-and-ctes"><span class="n">A4</span><span>Subqueries and CTEs</span></a></li>
+    <li><a href="../appendices/a5-ddl-and-dml.html" data-page="a5-ddl-and-dml"><span class="n">A5</span><span>Creating and changing things</span></a></li>
+    <li><a href="../appendices/b-psql.html" data-page="b-psql"><span class="n">B</span><span>psql cheat sheet</span></a></li>
+    <li><a href="../appendices/c-catalog-queries.html" data-page="c-catalog-queries"><span class="n">C</span><span>Catalog and diagnostic queries</span></a></li>
+    <li><a href="../appendices/d-glossary.html" data-page="d-glossary"><span class="n">D</span><span>Glossary</span></a></li>
+    <li><a href="../appendices/e-troubleshooting.html" data-page="e-troubleshooting"><span class="n">E</span><span>Troubleshooting</span></a></li>
+    <li><a href="../appendices/f-whats-next.html" data-page="f-whats-next"><span class="n">F</span><span>What to learn next</span></a></li>
+  </ol>
+</nav>
+<div class="main">
+<main class="content" id="content">
+<p class="eyebrow">Annex</p>
+<h1>E. Troubleshooting</h1>
+<p class="lede">
+  PostgreSQL's error messages are precise, and most tell you what to do next. This annex lists the ones you will
+  meet while working through the course: the exact text, what causes it, and how to fix it. Each message below was
+  reproduced on the course's PostgreSQL 18 container, in a scratch database that was dropped afterwards.
+</p>
+
+<h2 id="how">How to read an error</h2>
+<p>
+  An error has up to four parts: the <code>ERROR:</code> (or <code>FATAL:</code>) line, then optional
+  <code>DETAIL:</code>, <code>HINT:</code> and <code>CONTEXT:</code> lines. Read the <code>DETAIL</code> first; it
+  usually names the exact object or row. <code>ERROR</code> means this statement failed. <code>FATAL</code> means the
+  connection itself was refused or closed. In a transaction, any <code>ERROR</code> aborts the whole transaction until you
+  <code>ROLLBACK</code>.
+</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th class="wrap">Message starts with</th><th>Jump to</th></tr></thead>
+  <tbody>
+    <tr><td class="wrap">permission denied for schema / table</td><td><a href="#perm-schema">1</a>, <a href="#perm-table">2</a></td></tr>
+    <tr><td class="wrap">role … does not exist · password authentication failed · could not connect</td><td><a href="#role-missing">3</a>, <a href="#password">4</a>, <a href="#connect">5</a></td></tr>
+    <tr><td class="wrap">database … is being accessed by other users</td><td><a href="#in-use">6</a></td></tr>
+    <tr><td class="wrap">deadlock detected · could not serialize access · statement timeout</td><td><a href="#deadlock">7</a>, <a href="#serialize">8</a>, <a href="#timeout">9</a></td></tr>
+    <tr><td class="wrap">duplicate key · null value … violates not-null · relation … does not exist · cannot drop … because other objects depend on it</td><td><a href="#dup">10</a>, <a href="#notnull">11</a>, <a href="#relation">12</a>, <a href="#depend">13</a></td></tr>
+    <tr><td class="wrap">too many connections · out of shared memory · no space left on device</td><td><a href="#too-many">14</a>, <a href="#shmem">15</a>, <a href="#disk">16</a></td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="perm-schema">1. permission denied for schema</h2>
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">message</span><span class="grow"></span><span class="lang">output</span></figcaption>
+<pre><code>ERROR:  permission denied for schema private
+LINE 1: select * from private.t;
+                      ^</code></pre>
+</figure>
+<p>
+  <strong>Cause.</strong> To use anything inside a schema, a role needs <code>USAGE</code> on the schema itself, in
+  addition to a privilege on the object. Access to the table alone is not enough.
+</p>
+<p><strong>Fix.</strong> Grant the schema privilege (you need to be the schema's owner or a superuser):</p>
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">fix</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>grant usage on schema private to the_role;</code></pre>
+</figure>
+<p>
+  Check what the role has with <code>\dn+</code> or the schema-privileges query in
+  <a href="c-catalog-queries.html#schema-privs">annex C</a>. Details: <a href="../lessons/04-privileges-and-grants.html">lesson 4</a>.
+</p>
+
+<h2 id="perm-table">2. permission denied for table</h2>
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">message</span><span class="grow"></span><span class="lang">output</span></figcaption>
+<pre><code>ERROR:  permission denied for table t</code></pre>
+</figure>
+<p>
+  <strong>Cause.</strong> The role can reach the schema, but has no privilege on the table for this operation.
+  Note the name is the table's own name, without the schema. The same message appears for views, with the
+  word <em>view</em>, and for sequences (<em>permission denied for sequence</em>), which an
+  <code>INSERT</code> into a table with a serial or identity column may need.
+</p>
+<p><strong>Fix.</strong> Grant the specific privilege the statement needs:</p>
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">fix</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>grant select on private.t to the_role;                  -- reading
+grant insert, update, delete on private.t to the_role;  -- writing</code></pre>
+</figure>
+<div class="note tip">
+  <span class="note-title">Grants apply to existing objects only</span>
+  <p>
+    <code>GRANT … ON ALL TABLES IN SCHEMA</code> covers the tables that exist now. Tables created later need
+    <code>ALTER DEFAULT PRIVILEGES</code> (<a href="../lessons/04-privileges-and-grants.html">lesson 4</a>).
+  </p>
+</div>
+
+<h2 id="role-missing">3. role “…” does not exist</h2>
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">two ways to meet it</span><span class="grow"></span><span class="lang">output</span></figcaption>
+<pre><code>ERROR:  role "lab_s91_ghost" does not exist
+
+psql: error: connection to server on socket "/var/run/postgresql/.s.PGSQL.5432" failed: FATAL:  role "lab_s91_nobody" does not exist</code></pre>
+</figure>
+<p>
+  <strong>Cause.</strong> The first form comes from a statement such as <code>SET ROLE</code>, <code>GRANT</code>
+  or <code>ALTER ROLE</code> that names a role that is not there. The second is a failed login. Either you misspelled
+  it, or the role was never created, or it was dropped. Roles belong to the whole cluster, not to a database, so it is
+  never a matter of being in the wrong database.
+</p>
+<p>
+  <strong>Fix.</strong> List the roles with <code>\du</code> and compare the spelling. If the exercise you are on needs
+  the role, create it. Remember that case matters when a role is quoted: <code>"Maria"</code> and
+  <code>maria</code> are different roles. If the course checker removed your <code>lab_</code> roles for you,
+  that is expected (<a href="../lessons/03-roles-and-users.html">lesson 3</a>).
+</p>
+
+<h2 id="password">4. password authentication failed</h2>
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">message</span><span class="grow"></span><span class="lang">output</span></figcaption>
+<pre><code>psql: error: connection to server at "172.19.0.2", port 5432 failed: FATAL:  password authentication failed for user "lab_s91_app"</code></pre>
+</figure>
+<p>
+  <strong>Cause.</strong> The server asked for a password and the one supplied was wrong, missing, or belongs to
+  another role. In the course container this only happens on a connection that is not from the local socket or from
+  <code>127.0.0.1</code>, because those use <code>trust</code> and never ask. A connection from another address
+  (another container, or the container's own network address) must give the password
+  (<a href="../lessons/03-roles-and-users.html#hba">lesson 3</a>).
+</p>
+<p><strong>Fix.</strong></p>
+<ul>
+  <li>Check the password, and the user name in the connection string (it is case-sensitive when quoted).</li>
+  <li>A role created with no password cannot pass a password method at all. Set one: <code>alter role the_role password '…'</code>.</li>
+  <li>A role whose <code>VALID UNTIL</code> date has passed is rejected with the same message.</li>
+  <li>Look at the server log (<code>./pg logs</code>). The client always sees the same vague message, but the log adds the reason on a <code>DETAIL</code> line: <code>User "…" has no password assigned.</code>, <code>User "…" has an expired password.</code>, or, for a wrong password, no extra reason, just the <code>pg_hba.conf</code> line that matched.</li>
+</ul>
+<p>
+  For the course's own database the superuser password is <code>course</code>. That is a local-lab convenience; never
+  use it, or a password this simple, anywhere real.
+</p>
+
+<h2 id="connect">5. could not connect to server</h2>
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">server not listening on that port</span><span class="grow"></span><span class="lang">output</span></figcaption>
+<pre><code>psql: error: connection to server at "127.0.0.1", port 5999 failed: Connection refused
+	Is the server running on that host and accepting TCP/IP connections?</code></pre>
+</figure>
+<p>
+  <strong>Cause.</strong> Nothing is listening where the client looked. A wrong port gives exactly this. The
+  variant for a local socket reads <code>connection to server on socket "…/.s.PGSQL.5999" failed: No such file or
+  directory</code>. In the course the usual reasons are that the container is not running, is still starting, or
+  you used a different port from <code>55432</code>.
+</p>
+<p><strong>What to check, in order:</strong></p>
+<ol>
+  <li><code>./pg status</code> prints <em>ready</em> when the database accepts connections, or tells you to run <code>./pg up</code>.</li>
+  <li><code>docker ps</code> should list a container whose name starts with <code>pgcourse</code>. If Docker itself is not running, start Docker Desktop first.</li>
+  <li><code>./pg logs</code> shows why a container stopped. A seed script that failed on first start leaves it exiting; <code>./pg reset</code> starts again from a clean volume (it deletes your changes).</li>
+  <li>Another program may already use port 55432. Start the course on another with <code>PG_PORT=55433 ./pg up</code>.</li>
+  <li>Right after <code>./pg up</code> the server can need a few seconds. <code>./pg up</code> waits until it is ready; a client that connects at once may see <em>the database system is starting up</em>. Wait and retry.</li>
+</ol>
+<p>
+  From your own machine, the connection is host <code>127.0.0.1</code>, port <code>55432</code>, user
+  <code>postgres</code>, password <code>course</code>, database <code>shop</code>. From inside the container, no host or
+  port is needed at all.
+</p>
+
+<h2 id="in-use">6. database “…” is being accessed by other users</h2>
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">message</span><span class="grow"></span><span class="lang">output</span></figcaption>
+<pre><code>ERROR:  database "lab_s91_err" is being accessed by other users
+DETAIL:  There is 1 other session using the database.</code></pre>
+</figure>
+<p>
+  <strong>Cause.</strong> <code>DROP DATABASE</code> (and <code>CREATE DATABASE … TEMPLATE</code>, and renaming)
+  need that no one else is connected to the database. Often the "other session" is a forgotten <code>psql</code>
+  window or an application. It is never your own current connection: you cannot drop the database you are in.
+</p>
+<p><strong>Fix.</strong> Connect to a different database (for example <code>postgres</code>), find the sessions,
+and either close them yourself or let PostgreSQL do it:</p>
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">fix</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select pid, usename, state, left(query, 50)
+from pg_stat_activity
+where datname = 'lab_s91_err';
+
+drop database lab_s91_err with (force);   -- terminates the other sessions first</code></pre>
+</figure>
+<div class="note warn">
+  <span class="note-title">WITH (FORCE) disconnects people</span>
+  <p>
+    It kills every session on that database, without asking. Use it for scratch databases, never for one a colleague
+    or an application is using. The course helper uses it for its <code>lab_</code> databases.
+  </p>
+</div>
+
+<h2 id="deadlock">7. deadlock detected</h2>
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">message (process numbers vary)</span><span class="grow"></span><span class="lang">output</span></figcaption>
+<pre><code>ERROR:  deadlock detected
+DETAIL:  Process 46866 waits for ShareLock on transaction 3040; blocked by process 46867.
+Process 46867 waits for ShareLock on transaction 3039; blocked by process 46866.
+HINT:  See server log for query details.
+CONTEXT:  while updating tuple (0,2) in relation "dl"</code></pre>
+</figure>
+<p>
+  <strong>Cause.</strong> Two transactions each hold a lock the other needs: one updated row 1 then wants row 2,
+  while the other updated row 2 then wants row 1. Neither can go on. After <code>deadlock_timeout</code> (one second by
+  default) PostgreSQL picks one transaction and cancels it with this error. The other one then succeeds.
+</p>
+<p><strong>Fix.</strong></p>
+<ul>
+  <li>The cancelled transaction was rolled back completely. Your application should catch the error (SQLSTATE <code>40P01</code>) and retry the whole transaction.</li>
+  <li>Prevent it: always touch rows and tables in the same order in every code path (for example, lowest id first), and keep transactions short.</li>
+  <li><code>log_lock_waits</code> is on in the course container, so <code>./pg logs</code> shows who waited on whom.</li>
+</ul>
+<p>A walk-through with two sessions is in <a href="../lessons/16-locking.html">lesson 16</a>.</p>
+
+<h2 id="serialize">8. could not serialize access due to concurrent update</h2>
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">message</span><span class="grow"></span><span class="lang">output</span></figcaption>
+<pre><code>ERROR:  could not serialize access due to concurrent update</code></pre>
+</figure>
+<p>
+  <strong>Cause.</strong> Your transaction runs at <code>REPEATABLE READ</code> (or <code>SERIALIZABLE</code>), so it
+  works on a snapshot from when it began. It tried to change a row that another transaction changed and committed
+  after that snapshot. PostgreSQL will not let you overwrite a version you could not see. At the default
+  <code>READ COMMITTED</code> level you do not get this error; the update simply re-reads the new row.
+  Under <code>SERIALIZABLE</code> you may also see <em>could not serialize access due to read/write dependencies among
+  transactions</em>.
+</p>
+<p>
+  <strong>Fix.</strong> This is not a bug to remove but a signal to retry: roll back and run the whole transaction
+  again from the start (SQLSTATE <code>40001</code>). Applications that use these isolation levels need a retry
+  loop. If you do not need the stronger guarantee, use <code>READ COMMITTED</code>; if you do, keep the transaction short so
+  conflicts are rare. See <a href="../lessons/15-transactions-and-mvcc.html">lesson 15</a>.
+</p>
+
+<h2 id="timeout">9. canceling statement due to statement timeout</h2>
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">message</span><span class="grow"></span><span class="lang">output</span></figcaption>
+<pre><code>ERROR:  canceling statement due to statement timeout</code></pre>
+</figure>
+<p>
+  <strong>Cause.</strong> A statement ran longer than <code>statement_timeout</code>, which is 0 (no limit) by
+  default in the course container, but is often set per role, per database, or by the application's connection
+  string on real systems. The statement is cancelled; a surrounding transaction is aborted.
+</p>
+<p><strong>Fix.</strong> First find where the limit comes from:</p>
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">where is the limit set?</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>show statement_timeout;
+
+select name, setting, source from pg_settings where name = 'statement_timeout';
+
+select coalesce(r.rolname, '(all roles)') as role, coalesce(d.datname, '(all databases)') as db, s.setconfig
+from pg_db_role_setting s
+left join pg_roles r on r.oid = s.setrole
+left join pg_database d on d.oid = s.setdatabase;</code></pre>
+</figure>
+<p>
+  Then decide: a slow query is a tuning problem (<a href="../lessons/13-explain-and-planner.html">lesson 13</a>
+  and <a href="../lessons/14-query-tuning.html">lesson 14</a>), not a reason to remove the limit. For a one-off job
+  that legitimately takes long, raise it for that session only: <code>set statement_timeout = '10min';</code>.
+  Related, different messages: <em>canceling statement due to lock timeout</em> (<code>lock_timeout</code>) and
+  <em>terminating connection due to idle-in-transaction timeout</em>.
+</p>
+
+<h2 id="dup">10. duplicate key value violates unique constraint</h2>
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">message</span><span class="grow"></span><span class="lang">output</span></figcaption>
+<pre><code>ERROR:  duplicate key value violates unique constraint "categories_name_key"
+DETAIL:  Key (name)=(Electronics) already exists.</code></pre>
+</figure>
+<p>
+  <strong>Cause.</strong> The statement would create a second row with a value that a <code>UNIQUE</code> or
+  <code>PRIMARY KEY</code> constraint allows only once. The message names the constraint and the value. A frequent
+  surprise: an identity or serial column that is out of step with the data, usually after rows were inserted with
+  explicit ids or loaded with <code>COPY</code>, so the next generated id collides with an existing one.
+</p>
+<p><strong>Fix.</strong></p>
+<ul>
+  <li>If it is a real duplicate, decide what you want: skip it (<code>INSERT … ON CONFLICT DO NOTHING</code>), update the existing row (<code>ON CONFLICT … DO UPDATE</code>, <a href="../lessons/09-changing-data.html">lesson 9</a>), or fix the data.</li>
+  <li>If it is a sequence out of step, move it past the largest id: <code>select setval(pg_get_serial_sequence('shop.t', 'id'), (select max(id) from shop.t));</code></li>
+</ul>
+
+<h2 id="notnull">11. null value in column “…” violates not-null constraint</h2>
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">message</span><span class="grow"></span><span class="lang">output</span></figcaption>
+<pre><code>ERROR:  null value in column "created_at" of relation "customers" violates not-null constraint
+DETAIL:  Failing row contains (20001, x@example.com, X, NL, active, f, null, null, {}, null).</code></pre>
+</figure>
+<p>
+  <strong>Cause.</strong> The row has no value for a column declared <code>NOT NULL</code> and that has no
+  <code>DEFAULT</code>. Leaving a column out of an <code>INSERT</code> gives it its default, or NULL if there is none.
+  The <code>DETAIL</code> line prints the whole failing row, in column order, which is the quickest way to spot the
+  missing value (here the last one, <code>created_at</code>).
+</p>
+<p><strong>Fix.</strong> Supply the value in the <code>INSERT</code>, or give the column a default
+(<code>alter table … alter column … set default now()</code>). Do not remove <code>NOT NULL</code> just to make the error
+go away; the rule is there because the data is meaningless without it.</p>
+
+<h2 id="relation">12. relation “…” does not exist</h2>
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">message</span><span class="grow"></span><span class="lang">output</span></figcaption>
+<pre><code>ERROR:  relation "orders" does not exist
+LINE 1: select * from orders;
+                      ^</code></pre>
+</figure>
+<p>
+  <strong>Cause.</strong> “Relation” means table, view, index or sequence. In the course the usual reason is that
+  the table exists, but not in a schema on your <code>search_path</code>. A name written without a schema is looked up
+  only in the schemas of the path, and the default path is <code>"$user", public</code>. The shop tables are in the
+  <code>shop</code> schema. Other causes: a typo; the object was created in another database (you are connected to
+  <code>postgres</code> instead of <code>shop</code>); or the name was created with quotes and capitals
+  (<code>"Orders"</code> is not <code>orders</code>).
+</p>
+<p><strong>Fix.</strong></p>
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">fix</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select * from shop.orders;                 -- qualify the name
+
+show search_path;                           -- see the path
+set search_path = shop, public;             -- or add the schema (this session only)
+
+select current_database();                  -- are you in the database you think you are in?
+\dt *.*orders*                              -- psql: find it in any schema</code></pre>
+</figure>
+<p>
+  Also see "<em>schema … does not exist</em>" (a typo in the schema) and "<em>column … does not exist</em>" (look for a
+  misspelling, and remember that a column alias cannot be used in <code>WHERE</code>;
+  <a href="a1-select-basics.html#order-of-clauses">annex A1</a>). The <code>search_path</code> is explained in
+  <a href="../lessons/02-databases-and-schemas.html">lesson 2</a>.
+</p>
+
+<h2 id="depend">13. cannot drop … because other objects depend on it</h2>
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">message</span><span class="grow"></span><span class="lang">output</span></figcaption>
+<pre><code>ERROR:  cannot drop table shop.categories because other objects depend on it
+DETAIL:  constraint products_category_id_fkey on table shop.products depends on table shop.categories
+view shop.v1 depends on table shop.categories
+HINT:  Use DROP ... CASCADE to drop the dependent objects too.</code></pre>
+</figure>
+<p>
+  <strong>Cause.</strong> Something else is built on the object: a foreign key from another table, a view, a
+  function that uses its row type, or (for a role) objects it owns. PostgreSQL refuses by default, so you cannot break
+  things by accident. The <code>DETAIL</code> lists every dependent.
+</p>
+<p><strong>Fix.</strong> Read the list, then choose:</p>
+<ul>
+  <li>Drop or change the dependents first, in the right order.</li>
+  <li>Or add <code>CASCADE</code>, which drops them too. It is correct when you mean to remove the whole cluster of related things, and dangerous otherwise. Run the plain <code>DROP</code> inside <code>BEGIN … ROLLBACK</code> first to see the list, and only then decide.</li>
+</ul>
+<p>
+  The same pattern for roles reads <code>ERROR:  role "lab_s91_o" cannot be dropped because some objects depend on it</code>
+  with <code>DETAIL:  owner of table shop.owned_by_o</code>. Reassign or drop what it owns first:
+  <code>REASSIGN OWNED BY x TO y;</code> then <code>DROP OWNED BY x;</code>, in every database where it owns
+  something, then <code>DROP ROLE x;</code> (all three were run to check this).
+</p>
+
+<h2 id="too-many">14. too many connections</h2>
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">server-wide limit</span><span class="grow"></span><span class="lang">output</span></figcaption>
+<pre><code>psql: error: connection to server on socket "/var/run/postgresql/.s.PGSQL.5432" failed: FATAL:  sorry, too many clients already</code></pre>
+</figure>
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">per-role limit (CONNECTION LIMIT on the role)</span><span class="grow"></span><span class="lang">output</span></figcaption>
+<pre><code>psql: error: connection to server on socket "/var/run/postgresql/.s.PGSQL.5432" failed: FATAL:  too many connections for role "lab_s91_app"</code></pre>
+</figure>
+<p>
+  <strong>Cause.</strong> The server allows <code>max_connections</code> clients at once (100 in the course container),
+  and every one is taken; or a role with <code>CONNECTION LIMIT n</code> already has <em>n</em> sessions. A few slots
+  (<code>superuser_reserved_connections</code>, 3 here) stay free for superusers, so you can usually still log in as
+  <code>postgres</code> to investigate. There is a third variant, <em>too many connections for database</em>, for a
+  per-database limit.
+</p>
+<p><strong>Fix.</strong> See who is using the connections (the query is in <a href="c-catalog-queries.html#activity">annex C</a>):</p>
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">who holds the connections?</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select usename, application_name, state, count(*)
+from pg_stat_activity
+where backend_type = 'client backend'
+group by 1, 2, 3
+order by 4 desc;</code></pre>
+</figure>
+<p>
+  Many <code>idle</code> sessions from one application mean it opens connections it does not close or share: fix
+  the application's pool size, or put a pooler such as pgbouncer in front. Raising <code>max_connections</code>
+  is the last resort; each connection is a process with its own memory
+  (<a href="../lessons/26-connections-and-upgrades.html">lesson 26</a>).
+</p>
+
+<h2 id="shmem">15. out of shared memory</h2>
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">message</span><span class="grow"></span><span class="lang">output</span></figcaption>
+<pre><code>ERROR:  out of shared memory
+HINT:  You might need to increase "max_locks_per_transaction".</code></pre>
+</figure>
+<p>
+  <strong>Cause.</strong> Despite the name, this is rarely about memory. PostgreSQL keeps all locks in a shared table
+  sized at server start from <code>max_locks_per_transaction × (max_connections + prepared transactions)</code> (64 × 100 in the
+  course container, with some spare room). One transaction that touches a very large number of objects, such as
+  a table with thousands of partitions, a script that locks or drops thousands of tables, or a long transaction
+  that opens many tables, can use it all up. Every index of a table you read takes a lock too.
+</p>
+<p>
+  To reproduce it in a scratch database we created 25,000 small tables and locked them all in one transaction; a
+  smaller number did not fail, because the table has spare capacity.
+</p>
+<p><strong>Fix.</strong></p>
+<ul>
+  <li>Do the work in smaller transactions (commit every few hundred objects).</li>
+  <li>Or raise <code>max_locks_per_transaction</code>. It needs a server <em>restart</em>, because the table is allocated at start-up.</li>
+  <li>For partitioned tables, queries should filter on the partition key so only some partitions are locked (<a href="../lessons/20-partitioning.html">lesson 20</a>).</li>
+</ul>
+
+<h2 id="disk">16. no space left on device</h2>
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">the usual forms</span><span class="grow"></span><span class="lang">output</span></figcaption>
+<pre><code>ERROR:  could not extend file "base/16384/16652": No space left on device
+HINT:  Check free disk space.
+
+PANIC:  could not write to file "pg_wal/xlogtemp.123": No space left on device</code></pre>
+</figure>
+<p>
+  <strong>These two lines are the standard shape of the message and were not reproduced, because doing so would
+  fill the disk the whole Docker setup runs on.</strong> The relation number and path will differ on your machine.
+  The first form fails one statement. The second, from the write-ahead log, is a <code>PANIC</code> and stops the
+  server; it restarts and recovers once there is space again, but cannot start if there is still none.
+</p>
+<p>
+  <strong>Cause, in the course.</strong> Docker stores the database in a volume (<code>pgcourse_pgdata</code>) on
+  Docker's own disk, which is shared with every image, container, and build cache you have. When that fills,
+  PostgreSQL cannot write. In production, the usual culprits are a growing table or index, WAL piling up behind an
+  abandoned replication slot or a failing archive command, a runaway temporary file from a huge sort, or logs.
+</p>
+<p><strong>Fix.</strong></p>
+<ol>
+  <li>Measure. In the container: <code>./pg exec df -h /var/lib/postgresql</code>. On your machine: <code>docker system df</code> (this shows images, containers, volumes and build cache).</li>
+  <li>Free space Docker is holding that you do not need: <code>docker system prune</code> removes stopped containers, unused networks and dangling images. <code>docker builder prune</code> clears build cache. Neither touches the running course database; <strong>do not</strong> add <code>--volumes</code> unless you want to delete data.</li>
+  <li>In Docker Desktop, increase the disk image size (Settings, Resources).</li>
+  <li>If the course data is the problem, <code>./pg reset</code> recreates the database from scratch and gives the space back. It deletes your changes.</li>
+  <li>In production, find what grew with the size queries in <a href="c-catalog-queries.html#sizes">annex C</a> and check replication slots (<a href="../lessons/24-replication.html">lesson 24</a>) and the WAL archive (<a href="../lessons/23-backup-and-recovery.html">lesson 23</a>).</li>
+</ol>
+
+<h2 id="more">Other messages worth knowing</h2>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Message</th><th class="wrap">Usually means</th></tr></thead>
+  <tbody>
+    <tr><td class="wrap"><code>column "x" must appear in the GROUP BY clause or be used in an aggregate function</code></td><td class="wrap">A selected column is neither grouped nor aggregated (<a href="a3-aggregation.html#group-by">annex A3</a>)</td></tr>
+    <tr><td class="wrap"><code>current transaction is aborted, commands ignored until end of transaction block</code></td><td class="wrap">An earlier statement failed inside <code>BEGIN</code>; run <code>ROLLBACK</code></td></tr>
+    <tr><td class="wrap"><code>insert or update on table "orders" violates foreign key constraint "orders_customer_id_fkey"</code></td><td class="wrap">Inserting a child with no parent (<em>Key (customer_id)=(999999) is not present in table "customers"</em>). Deleting a parent that still has children says <em>update or delete on table … violates foreign key constraint</em></td></tr>
+    <tr><td class="wrap"><code>new row for relation "t" violates check constraint "c"</code></td><td class="wrap">The row breaks a <code>CHECK</code> rule (<a href="a5-ddl-and-dml.html#constraint-errors">annex A5</a>)</td></tr>
+    <tr><td class="wrap"><code>must be owner of table categories</code></td><td class="wrap">Only the owner (or a member of the owning role) can alter or drop it</td></tr>
+    <tr><td class="wrap"><code>permission denied to create role</code></td><td class="wrap">Creating roles needs the <code>CREATEROLE</code> attribute (<code>DETAIL: Only roles with the CREATEROLE attribute may create roles.</code>)</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="next">Where to next</h2>
+<p>
+  Terms used in these messages are in the <a href="d-glossary.html">glossary</a>. If the problem is a slow or stuck
+  database rather than an error, work through the checklist in
+  <a href="../lessons/25-monitoring.html">lesson 25</a>.
+</p>
+<nav class="pager"><a class="prev" href="../appendices/d-glossary.html"><span class="dir">Previous</span><span class="lbl">D. Glossary</span></a><a class="next" href="../appendices/f-whats-next.html"><span class="dir">Next</span><span class="lbl">F. What to learn next</span></a></nav>
+</main>
+<aside class="toc" aria-label="On this page"></aside>
+</div>
+</div>
+<script src="../assets/js/search-index.js"></script>
+<script src="../assets/js/mini-seed.js"></script>
+<script src="../assets/js/course.js"></script>
+</body>
+</html>

@@ -1,0 +1,7 @@
+-- Run this statement three times, once for each country 'NL', 'DE' and 'FR':
+--   select count(*) from shop.customers where country = 'NL';
+-- Then ask pg_stat_statements how often PostgreSQL saw that statement in
+-- THIS database. Return the columns calls and query, for the one normalised
+-- statement whose text is exactly:
+--   select count(*) from shop.customers where country = $1
+-- Then run ./pg check 14 1.

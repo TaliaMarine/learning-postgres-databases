@@ -1,0 +1,4 @@
+-- For the schemas analytics, public and shop, count the ordinary tables in each
+-- (pg_class.relkind = 'r'). Return the columns schema_name and tables. A schema
+-- with no tables must still appear, with 0. Order by schema_name.
+-- Run ./pg check 01 2 when you are done.

@@ -1,0 +1,479 @@
+<p class="lede">
+  When <code>COMMIT</code> returns, your data is safe even if the power goes out one millisecond later. PostgreSQL
+  achieves that without writing every table page to disk at commit. It writes a short, sequential log first, the
+  write-ahead log (WAL), and tidies the tables later. This lesson shows how that works, how to watch it, and which
+  settings trade safety for speed, with a real crash to prove the point.
+</p>
+
+<h2 id="goals">Learning goals</h2>
+<ul>
+  <li>Explain, in two sentences, what a crash loses and what it cannot lose, and why.</li>
+  <li>Read a WAL position (<code>pg_lsn</code>), find its segment file, and compute how much WAL lies between two positions.</li>
+  <li>Say what a checkpoint is, what triggers one, and read <code>pg_stat_checkpointer</code>.</li>
+  <li>Explain what <code>fsync</code> and <code>full_page_writes</code> protect against, and why you leave both on.</li>
+  <li>Describe each <code>synchronous_commit</code> level and what you can lose with it.</li>
+  <li>Use <code>UNLOGGED</code> tables and per-transaction <code>synchronous_commit</code> for data you can afford to lose.</li>
+</ul>
+
+<h2 id="lab">Set up for this lesson</h2>
+<p>
+  Use the <code>shop</code> database. The Docker examples only read WAL information or change your own session, so they are
+  safe in <code>shop</code>. The crash demonstration in section 1 needs a server that you can kill. It was run on a
+  separate throwaway PostgreSQL 18 container, and the output is quoted; do not try it on the course database.
+</p>
+<p>
+  The playgrounds run a real PostgreSQL in your browser. They are small and single-user, and their server runs with
+  <code>fsync = off</code> (you will see that in the first playground), because nothing in a browser tab survives a power cut
+  anyway. They are good for LSNs, WAL volume and logged versus unlogged tables, and useless for timing or crash behaviour.
+  Where the playground cannot show the real thing, the text says so.
+</p>
+
+<h2 id="crash">1. What a crash loses</h2>
+
+<p>
+  A table is stored in 8 kB pages. When you change a row, PostgreSQL changes the page in memory (in
+  <a href="01-architecture.html">shared buffers</a>) and marks it dirty. Writing that page to its table file can wait. What
+  must not wait is the record of the change. So before it tells you “commit OK”, PostgreSQL appends a
+  <strong>WAL record</strong> describing the change to the log and forces that log to disk. The log is written in order,
+  which is fast. If the server dies, the next start <strong>replays</strong> the log from the last checkpoint (section 3): any
+  committed change whose page never reached the table file is redone.
+</p>
+
+<figure class="dia">
+  <div class="dia-hold">
+    <svg class="d" viewBox="0 0 860 260" role="img" aria-labelledby="wal-t wal-d">
+      <title id="wal-t">The write-ahead rule</title>
+      <desc id="wal-d">A change goes first into a shared buffer in memory and a WAL record. At commit, the WAL record is flushed to the WAL file on disk. Later, a checkpoint writes the dirty page to the table file.</desc>
+      <defs>
+        <marker id="wa" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z"/></marker>
+      </defs>
+      <rect class="box accent" x="30" y="30" width="230" height="64" rx="8"/>
+      <text class="hd ctr" x="145" y="58">UPDATE in memory</text>
+      <text class="lbl ctr" x="145" y="78">dirty page + WAL record</text>
+      <rect class="box teal" x="330" y="30" width="230" height="64" rx="8"/>
+      <text class="hd ctr" x="445" y="58">WAL file</text>
+      <text class="lbl ctr" x="445" y="78">flushed at COMMIT</text>
+      <rect class="box" x="630" y="30" width="200" height="64" rx="8"/>
+      <text class="hd ctr" x="730" y="58">table file</text>
+      <text class="lbl ctr" x="730" y="78">written later</text>
+      <path class="line" d="M260 62 L328 62" marker-end="url(#wa)"/>
+      <text class="mut tiny" x="294" y="52" text-anchor="middle">1</text>
+      <path class="line" d="M145 94 C145 190 600 190 730 96" marker-end="url(#wa)"/>
+      <text class="mut tiny" x="440" y="200" text-anchor="middle">3 · checkpoint writes the dirty page (any time after)</text>
+      <text class="mut tiny" x="445" y="124" text-anchor="middle">2 · COMMIT returns only after this flush</text>
+    </svg>
+  </div>
+  <figcaption>The WAL is written and flushed first; the table file catches up later. After a crash, replay closes the gap.</figcaption>
+</figure>
+
+<p>
+  This was tested for real, on a throwaway PostgreSQL 18 container. A table <code>t</code> got a row, then a checkpoint, then a
+  second row. A third row was inserted in a transaction that stayed open. Then the server process was killed with
+  <code>SIGKILL</code> (<code>docker kill -s KILL</code>), the harshest stop there is, with no chance to clean up:
+</p>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">after restarting the killed server</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code>select id, note from t order by id;
+
+ id |              note
+----+---------------------------------
+  1 | committed before the checkpoint
+  2 | committed after the checkpoint</code></pre>
+</figure>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">from the server log of that restart</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code>LOG:  database system was not properly shut down; automatic recovery in progress
+LOG:  redo starts at 0/1794DF8
+LOG:  invalid record length at 0/179C5D0: expected at least 24, got 0
+LOG:  redo done at 0/179C598
+LOG:  checkpoint starting: end-of-recovery immediate wait</code></pre>
+</figure>
+
+<p>
+  Both committed rows survived, including the one written <em>after</em> the last checkpoint, whose page had not been written to
+  the table file. That is the replay (<em>redo</em>) at work. The row from the open transaction is gone: it was never committed.
+  The line “invalid record length” is normal: it marks the end of the usable WAL, where the crash cut it off.
+</p>
+
+<p>So, in one sentence each:</p>
+<ul>
+  <li><strong>A crash loses</strong> uncommitted transactions, anything in unlogged tables, and (only if you chose to allow it, section 5) the last few commits.</li>
+  <li><strong>A crash cannot lose</strong> a commit that returned successfully, as long as the disk really kept what it was told to flush.</li>
+</ul>
+
+<h2 id="lsn">2. WAL positions and segment files</h2>
+
+<p>
+  Every byte of WAL has an address, the <strong>LSN</strong> (log sequence number), shown as two hexadecimal numbers such as
+  <code>14/B943C1C8</code>. The type is <code>pg_lsn</code>, and you can subtract two of them to get a distance in bytes. The WAL
+  lives in files called <strong>segments</strong> in the <code>pg_wal</code> directory, 16 MB each by default
+  (<code>wal_segment_size</code>, fixed when the cluster is created), and the file name encodes the position.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">the WAL settings in your browser, and what they say about this server</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select name, setting, context
+from pg_settings
+where name in ('fsync', 'full_page_writes', 'synchronous_commit', 'wal_level',
+               'wal_segment_size', 'checkpoint_timeout', 'max_wal_size')
+order by name;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  Notice <code>fsync = off</code> in the browser. On the course container the same query returns <code>on</code>, and so does
+  every production server. The other settings match the Docker database: 16 MB segments (16777216 bytes), a 5-minute
+  <code>checkpoint_timeout</code> and 1 GB <code>max_wal_size</code>.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">LSN arithmetic and file names (literal positions, so the numbers are stable)</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select '0/3000000'::pg_lsn - '0/1000000'::pg_lsn            as bytes,
+       pg_size_pretty('0/3000000'::pg_lsn - '0/1000000'::pg_lsn) as distance,
+       pg_walfile_name('0/3001234'::pg_lsn)                      as segment_file;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  Two positions 32 MB apart are exactly two segments apart; position <code>0/3001234</code> is in segment
+  <code>000000010000000000000003</code>. The name is 24 hex digits: 8 for the timeline (1 until you promote a replica or restore to a
+  point in time), 8 for the high part of the LSN, and 8 for the segment number. On the Docker database, ask for the live values:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">where is the WAL now?</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select pg_current_wal_lsn() as lsn,
+       pg_walfile_name(pg_current_wal_lsn()) as segment,
+       pg_walfile_name_offset(pg_current_wal_lsn()) as segment_and_offset;
+
+-- how much WAL did a statement write? take the position before and after
+select pg_current_wal_lsn() as start_lsn \gset
+create table public.wal_demo (id int primary key, note text);
+insert into public.wal_demo select g, repeat('x', 100) from generate_series(1, 10000) g;
+select pg_size_pretty(pg_current_wal_lsn() - :'start_lsn'::pg_lsn) as wal_written;</code></pre>
+</figure>
+
+<p>
+  Inserting 10,000 rows of about 100 bytes wrote about 2.2 MB of WAL on the Docker server, more than the 1 MB of row data,
+  because the table, its primary-key index and the page bookkeeping are all logged. The exact figure changes from run to run
+  and with other sessions' activity, so do not build a check on it. (Drop <code>public.wal_demo</code> when you are done.)
+</p>
+
+<h3>How much WAL did this statement write?</h3>
+<p>
+  <code>EXPLAIN (ANALYZE, WAL)</code> adds a <code>WAL:</code> line with the records and bytes for that statement alone. That is
+  the cleanest way to compare, and it also shows the effect of <code>UNLOGGED</code>:
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">a logged table writes WAL</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">create table public.logged_t (id int, note text);
+
+explain (analyze, wal, costs off, timing off, summary off, buffers off)
+insert into public.logged_t select g, 'x' from generate_series(1, 1000) g;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">an unlogged table does not</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">create unlogged table public.unlogged_t (id int, note text);
+
+explain (analyze, wal, costs off, timing off, summary off, buffers off)
+insert into public.unlogged_t select g, 'x' from generate_series(1, 1000) g;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  The first plan has a <code>WAL: records=... bytes=...</code> line. The second has none: an <strong>unlogged table</strong> skips the WAL entirely,
+  which makes writes cheaper. The price is that after a crash PostgreSQL cannot replay the table's changes, so it truncates the
+  table (it comes back empty), and its contents are not sent to replicas. Use it for caches, staging tables and scratch data
+  you can rebuild.
+</p>
+
+<div class="note warn">
+  <span class="note-title">WAL fills the disk if nothing can remove it</span>
+  <p>
+    PostgreSQL recycles old segments after a checkpoint, unless something still needs them: an archive command that keeps failing
+    (<a href="23-backup-and-recovery.html">lesson 23</a>), or a replica or replication slot that has fallen behind
+    (<a href="24-replication.html">lesson 24</a>). Then <code>pg_wal</code> grows until the disk is full and the server stops. A growing
+    <code>pg_wal</code> directory is an alarm to investigate, not a number to tune away. You can list it with
+    <code>select count(*), pg_size_pretty(sum(size)) from pg_ls_waldir();</code>.
+  </p>
+</div>
+
+<h2 id="checkpoint">3. Checkpoints</h2>
+
+<p>
+  A <strong>checkpoint</strong> writes every dirty page in shared buffers to its table file, flushes those files, and records in the WAL
+  “everything up to here is safely in the table files”. Recovery after a crash only has to replay the WAL written
+  <em>since the last checkpoint</em>. So checkpoints bound the recovery time and let old WAL be recycled. They also cost I/O, because
+  they write a lot of pages, so PostgreSQL spreads that work out over time (<code>checkpoint_completion_target</code>, 0.9 by default).
+</p>
+
+<p>A checkpoint starts when one of these happens:</p>
+<ul>
+  <li><code>checkpoint_timeout</code> (5 minutes by default) has passed since the last one. This is a <em>timed</em> checkpoint.</li>
+  <li>The WAL written since the last checkpoint approaches <code>max_wal_size</code> (1 GB in the course container). This is a <em>requested</em> checkpoint.</li>
+  <li>Someone runs <code>CHECKPOINT</code>, or a shutdown, base backup or <code>CREATE DATABASE</code> asks for one. These count as requested too.</li>
+</ul>
+
+<p>
+  The view <code>pg_stat_checkpointer</code> counts them (in PostgreSQL 18 it is this view that holds checkpoint statistics; older
+  releases kept them in <code>pg_stat_bgwriter</code>):
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">are checkpoints timed or forced?</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select num_timed, num_requested, num_done,
+       write_time, sync_time, buffers_written, stats_reset
+from pg_stat_checkpointer;</code></pre>
+</figure>
+
+<p>
+  <code>num_timed</code> is checkpoints because of the clock, <code>num_requested</code> those started early (by WAL volume or by hand).
+  <code>write_time</code> and <code>sync_time</code> are milliseconds spent writing and syncing. Verified on the Docker server: running
+  <code>CHECKPOINT</code> and reading the view again raised <code>num_requested</code> by exactly 1. (Statistics reach the view
+  a moment after the event, so read it a second later.)
+</p>
+
+<div class="note tip">
+  <span class="note-title">What good looks like</span>
+  <p>
+    On a busy server, most checkpoints should be timed. If <code>num_requested</code> keeps growing, WAL volume reaches
+    <code>max_wal_size</code> before the timer fires, so the checkpoints come too often, each one writes many pages, and the log shows
+    “checkpoints are occurring too frequently”. The cure is a larger <code>max_wal_size</code> (a reload is enough,
+    <a href="21-configuration.html">lesson 21</a>), not more frequent tuning of anything else. A larger value costs disk space and a longer
+    crash recovery, and nothing else.
+  </p>
+</div>
+
+<p>
+  With <code>log_checkpoints = on</code> (the default in PostgreSQL 18, and the case in the course container) each checkpoint writes a line like this to the server log
+  (<code>./pg logs</code>). This one is from the course container, produced by someone running <code>CHECKPOINT</code> on an idle database:
+</p>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">server log</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code>LOG:  checkpoint complete: wrote 3 buffers (0.0%), wrote 1 SLRU buffers; 0 WAL file(s) added, 0 removed, 13 recycled;
+      write=0.001 s, sync=0.001 s, total=0.013 s; sync files=4, longest=0.001 s, average=0.001 s;
+      distance=215430 kB, estimate=236271 kB; lsn=15/8636C68, redo lsn=15/8636C10</code></pre>
+</figure>
+
+<p>
+  Reading it: only 3 dirty buffers had to be written, 13 old segments were recycled, and the WAL written since the previous
+  checkpoint (<code>distance</code>) was about 210 MB. The <code>redo lsn</code> is where recovery would start if the server crashed right now.
+</p>
+
+<h2 id="fsync">4. fsync and full_page_writes</h2>
+
+<p>
+  Writing to a file does not mean the data is on disk: the operating system keeps it in memory and writes it out
+  later. To be sure, PostgreSQL calls <code>fsync</code> (or <code>fdatasync</code>, the course container's
+  <code>wal_sync_method</code>), which does not return until the device says the data is stable. The setting <code>fsync</code>
+  turns these calls on.
+</p>
+
+<div class="note danger">
+  <span class="note-title">fsync = off can destroy your database</span>
+  <p>
+    With <code>fsync = off</code>, a crash or power loss can leave the data files <em>corrupt</em>, not merely a few commits short,
+    and PostgreSQL cannot tell afterwards. The only legitimate uses are a throwaway database you can recreate, such as a bulk load
+    that you will redo if it fails, or a test suite's database. Never use it on data you care about. The browser playground runs
+    this way for the reason above.
+  </p>
+</div>
+
+<p>
+  The second protection is <code>full_page_writes</code> (on). The operating system may write an 8 kB page in smaller pieces, and a crash
+  in the middle leaves a <em>torn page</em>: half old, half new, which WAL replay alone cannot repair because the records assume a
+  consistent starting page. So the first time a page changes after a checkpoint, PostgreSQL writes the whole page into the WAL
+  (a <strong>full-page image</strong>, “fpi” in <code>EXPLAIN (WAL)</code> and in <code>pg_stat_wal.wal_fpi</code>). Replay starts from that complete copy.
+  This is a large part of the WAL volume right after each checkpoint, which is one more reason not to checkpoint too often. Turning it
+  off is only safe on storage that guarantees atomic 8 kB writes, and you would have to know that. The course container also has
+  <strong>data checksums</strong> on (<code>show data_checksums</code>), which detect a corrupt page when it is read, but cannot repair it.
+</p>
+
+<p>
+  <code>wal_compression</code> (off by default) compresses those full-page images and trades a little CPU for less WAL. It is a
+  reasonable thing to try on a write-heavy server; measure the WAL volume before and after.
+</p>
+
+<h2 id="synchronous">5. synchronous_commit: how long COMMIT waits</h2>
+
+<p>
+  At commit, PostgreSQL flushes the WAL and waits for the confirmation before it answers you. <code>synchronous_commit</code> controls how
+  long it waits. It is a plain <code>user</code> setting, so you can change it per session, per transaction (<code>SET LOCAL</code>) or per role.
+</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th><code>synchronous_commit</code></th><th>COMMIT returns when…</th><th>A crash can lose…</th></tr></thead>
+  <tbody>
+    <tr><td><code>on</code> (default)</td><td class="wrap">the WAL is flushed on the primary (and on the synchronous standbys, if you configured any)</td><td class="wrap">nothing that was acknowledged</td></tr>
+    <tr><td><code>off</code></td><td class="wrap">the transaction is in the WAL buffer. The WAL writer flushes it shortly after</td><td class="wrap">the last few commits (documented as up to three times <code>wal_writer_delay</code>, 200 ms by default, so under a second). No corruption</td></tr>
+    <tr><td><code>local</code></td><td class="wrap">the primary's WAL is flushed; waiting for standbys is skipped</td><td class="wrap">nothing on the primary; a failover may lose it</td></tr>
+    <tr><td><code>remote_write</code></td><td class="wrap">flushed locally and a synchronous standby has written it to its OS (not yet to disk)</td><td class="wrap">little: needs the primary and standby to fail together</td></tr>
+    <tr><td><code>remote_apply</code></td><td class="wrap">a synchronous standby has replayed it, so a read there sees it</td><td class="wrap">nothing; slowest</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>
+  The last three only matter once you have standby servers and a non-empty <code>synchronous_standby_names</code>
+  (<a href="24-replication.html">lesson 24</a>); on a single server they behave like <code>on</code>. You can list the valid values yourself:
+  <code>select enumvals from pg_settings where name = 'synchronous_commit';</code> returns
+  <code>{local,remote_write,remote_apply,on,off}</code>.
+</p>
+
+<p>
+  The difference between <code>on</code> and <code>off</code> is visible in the WAL positions. On the Docker server (flush position
+  versus insert position, read right after <code>COMMIT</code>):
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">is the commit record on disk yet?</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select pg_current_wal_insert_lsn() = pg_current_wal_flush_lsn() as flushed;   -- after a commit with 'on':        true
+set synchronous_commit = off;
+begin; insert into w values (3, 'c'); commit;
+select pg_current_wal_insert_lsn() = pg_current_wal_flush_lsn() as flushed;   -- right after commit with 'off':   false
+select pg_sleep(1);
+select pg_current_wal_insert_lsn() = pg_current_wal_flush_lsn() as flushed;   -- a moment later:                  true</code></pre>
+</figure>
+
+<p>
+  With <code>off</code> the commit was acknowledged before its WAL reached the disk, and the WAL writer flushed it within the next
+  second. If the server had crashed in that window, the commit would be gone (and every <em>later</em> commit would be gone too:
+  the database is always consistent, it just rewinds slightly).
+</p>
+
+<p>The sensible use is per transaction, for work you can redo:</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">fast, losable writes inside one transaction</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>begin;
+set local synchronous_commit = off;     -- only this transaction
+insert into analytics.events (occurred_at, kind) values (now(), 'page_view');
+commit;</code></pre>
+</figure>
+
+<p>
+  Page views and click events are the textbook case: losing the last 200 ms in a crash matters less than the throughput gain when
+  thousands of tiny transactions each wait for a disk flush. Payments are the opposite case. Keep <code>on</code> as the default and opt out narrowly.
+</p>
+
+<div class="note warn">
+  <span class="note-title">Three ways to give up durability, three different risks</span>
+  <p>
+    <code>synchronous_commit = off</code> loses the <em>latest commits</em> and keeps the database consistent. An <code>UNLOGGED</code> table loses <em>that
+    table's contents</em> after a crash. <code>fsync = off</code> can lose <em>the whole database</em>. They are not interchangeable, and only the first two are ever appropriate on real data.
+  </p>
+</div>
+
+<h2 id="when">When to use, when not to</h2>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Situation</th><th class="wrap">✅ Do this</th><th class="wrap">❌ Not this</th></tr></thead>
+  <tbody>
+    <tr><td class="wrap">Normal business data</td><td class="wrap">Defaults: <code>fsync</code>, <code>full_page_writes</code>, <code>synchronous_commit = on</code></td><td class="wrap">Turning anything off “for speed” without measuring</td></tr>
+    <tr><td class="wrap">High-rate events you can afford to lose a fraction of a second of</td><td class="wrap"><code>SET LOCAL synchronous_commit = off</code> in those transactions</td><td class="wrap">Setting it off for the whole server</td></tr>
+    <tr><td class="wrap">A cache or staging table you can rebuild</td><td class="wrap"><code>CREATE UNLOGGED TABLE</code></td><td class="wrap">An unlogged table for anything a replica or a restore must contain</td></tr>
+    <tr><td class="wrap">Checkpoints are happening too often</td><td class="wrap">Raise <code>max_wal_size</code> and check disk space</td><td class="wrap">Lowering <code>checkpoint_timeout</code> to “be safer”</td></tr>
+    <tr><td class="wrap">Recovery after a crash must be quick</td><td class="wrap">Keep checkpoints frequent enough, and measure recovery time</td><td class="wrap">Assuming recovery time is zero</td></tr>
+    <tr><td class="wrap">A one-off bulk load into a database you can recreate</td><td class="wrap">Load into an unlogged table, or a throwaway server with <code>fsync = off</code></td><td class="wrap"><code>fsync = off</code> on a server that holds anything else</td></tr>
+    <tr><td class="wrap">Worried about disk corruption</td><td class="wrap">Data checksums, backups you have restored (<a href="23-backup-and-recovery.html">lesson 23</a>)</td><td class="wrap">Trusting WAL alone to repair a bad disk</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="inspect">Inspect it</h2>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">the durability settings, the WAL position and the checkpoint counters</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select name, setting, unit, source
+from pg_settings
+where name in ('fsync', 'full_page_writes', 'synchronous_commit', 'wal_sync_method',
+               'wal_compression', 'checkpoint_timeout', 'max_wal_size', 'wal_level')
+order by name;
+
+select pg_current_wal_lsn() as lsn, pg_walfile_name(pg_current_wal_lsn()) as segment;
+
+select num_timed, num_requested, write_time, sync_time, buffers_written from pg_stat_checkpointer;
+select wal_records, wal_fpi, pg_size_pretty(wal_bytes) as wal_bytes from pg_stat_wal;</code></pre>
+</figure>
+
+<p>
+  The counters in the last two views accumulate since <code>stats_reset</code>, so on a shared practice database they include everything
+  every lesson has done. Compare two readings instead of trusting a single number.
+</p>
+
+<h2 id="exercises">Your turn</h2>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 1</span><span class="grow"></span><span class="lvl">basic</span></div>
+  <div class="ex-body">
+    <p>
+      Return <code>name</code>, <code>setting</code> and <code>context</code> from <code>pg_settings</code> for five durability settings
+      named in the file, ordered by name.
+    </p>
+    <p>Open <code>exercises/22/1.sql</code>, write your answer, then run <code>./pg check 22 1</code>.</p>
+  </div>
+  {{stub 22 1}}
+  <details><summary>Hint</summary><p><code>where name in (...)</code> and <code>order by name</code>. The column is called <code>name</code>, not <code>setting_name</code>.</p></details>
+  {{solution 22 1}}
+</section>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 2</span><span class="grow"></span><span class="lvl">intermediate</span></div>
+  <div class="ex-body">
+    <p>
+      Create one ordinary table and one unlogged table in <code>public</code>, each holding the same 1000 rows. The check reads
+      <code>pg_class.relpersistence</code> to tell them apart.
+    </p>
+    <p>Open <code>exercises/22/2.sql</code>, write your answer, then run <code>./pg check 22 2</code>.</p>
+  </div>
+  {{stub 22 2}}
+  <details><summary>Hint</summary><p><code>create unlogged table ...</code>. Fill both with <code>insert ... select g, 'event ' || g from generate_series(1, 1000) g</code>.</p></details>
+  {{solution 22 2}}
+</section>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 3</span><span class="grow"></span><span class="lvl">challenge</span></div>
+  <div class="ex-body">
+    <p>
+      Write the function <code>public.lab_wal_distance(a pg_lsn, b pg_lsn)</code> and the view <code>public.lab_wal_position</code>
+      described in the file. The check calls the function with fixed positions and compares the view's segment name with
+      <code>pg_walfile_name</code>.
+    </p>
+    <p>Open <code>exercises/22/3.sql</code>, write your answer, then run <code>./pg check 22 3</code>.</p>
+  </div>
+  {{stub 22 3}}
+  <details><summary>Hint</summary><p>Subtracting two <code>pg_lsn</code> values gives bytes. <code>current_setting('wal_segment_size')</code> returns text such as <code>16MB</code>; <code>pg_size_bytes()</code> turns that into a number you can divide.</p></details>
+  {{solution 22 3}}
+</section>
+
+<h2 id="summary">Summary</h2>
+<ul>
+  <li>The write-ahead rule: flush the WAL before acknowledging a commit; table pages can be written later. A crash loses uncommitted work, never an acknowledged commit.</li>
+  <li>WAL positions are LSNs. Subtract them for a byte distance; <code>pg_walfile_name()</code> gives the 16 MB segment file.</li>
+  <li>A checkpoint writes dirty pages and bounds crash recovery. Timed checkpoints are healthy; many requested ones mean <code>max_wal_size</code> is too small. Read <code>pg_stat_checkpointer</code>.</li>
+  <li><code>fsync = off</code> risks the whole database; <code>full_page_writes</code> protects against torn pages. Keep both on.</li>
+  <li><code>synchronous_commit = off</code> can lose the last few commits but never corrupts; use it per transaction for losable data. <code>UNLOGGED</code> tables skip the WAL and are emptied by a crash.</li>
+  <li>A WAL directory that keeps growing means something (archiving, a replica) is holding the log back.</li>
+</ul>
+
+<h2 id="next">Looking ahead</h2>
+<p>
+  The WAL is also the raw material for backups and replicas. <a href="23-backup-and-recovery.html">Lesson 23</a> shows how
+  <code>pg_dump</code>, base backups and WAL archiving turn it into point-in-time recovery, and why a backup you have not restored is only a hope.
+</p>

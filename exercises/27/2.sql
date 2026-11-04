@@ -1,0 +1,34 @@
+-- CAPSTONE, part 2 of 3: data and indexes. Every check starts from a fresh
+-- copy of the course database, so this part brings its own starting point.
+-- Paste this setup at the top of your file (it makes a blank database and the
+-- two tables from part 1, without the roles):
+--
+--   create database lab_27_service template template0;
+--   \c lab_27_service
+--   create schema tickets;
+--   create table tickets.agents (id integer generated always as identity primary key,
+--     email text not null unique, full_name text not null);
+--   create table tickets.tickets (id integer generated always as identity primary key,
+--     agent_id integer not null references tickets.agents (id), title text not null,
+--     status text not null default 'open' check (status in ('open', 'closed')),
+--     priority smallint not null default 2 check (priority between 1 and 3),
+--     created_at timestamptz not null default now());
+--
+-- Then, in lab_27_service:
+--   1. Load 5 agents: email 'agent1@example.com' ... 'agent5@example.com',
+--      full_name 'Agent 1' ... 'Agent 5'.
+--   2. Load 20000 tickets with ONE insert ... select from generate_series(1, 20000) g:
+--        agent_id   = 1 + g % 5
+--        title      = 'Ticket ' || g
+--        status     = 'open' when g % 47 = 0, otherwise 'closed'
+--        priority   = 1 + g % 3
+--        created_at = timestamptz '2026-01-01 00:00+00' + g * interval '10 minutes'
+--   3. The support screen runs this query all day:
+--        select id, title from tickets.tickets
+--        where status = 'open' and agent_id = 3
+--        order by created_at desc limit 10;
+--      Create ONE index that is as small as it can be and lets that query read
+--      its rows already in order (an index scan, no Sort step).
+--   4. Refresh the planner's statistics for the table.
+-- Then run ./pg check 27 2.
+

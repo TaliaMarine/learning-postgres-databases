@@ -1,0 +1,5 @@
+-- Create a login role lab_16_app. Whenever it connects, a statement that waits
+-- longer than 2 seconds for a lock must give up (lock_timeout = 2s), and a session
+-- that sits idle inside a transaction for more than 1 minute must be ended
+-- (idle_in_transaction_session_timeout = 1min). Store both as settings of the role.
+-- Then run ./pg check 16 1.

@@ -1,0 +1,853 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EXPLAIN and the planner &mdash; Learning PostgreSQL</title>
+<meta name="description" content="Reading plans, statistics, selectivity, join algorithms, and why the planner sometimes picks badly.">
+<link rel="stylesheet" href="../assets/css/course.css">
+</head>
+<body data-root="../" data-page="13-explain-and-planner">
+<a class="skip-link" href="#content">Skip to content</a>
+<header class="topbar">
+  <button class="icon-btn menu-btn" type="button" aria-label="Toggle navigation" aria-expanded="false" aria-controls="sidebar">&#9776;</button>
+  <a class="brand" href="../index.html"><span class="mark pgm">PG</span> Learning PostgreSQL <span class="sub">PostgreSQL 18</span></a>
+  <span class="spacer"></span>
+  <div class="search" role="search">
+    <span class="glyph" aria-hidden="true">&#9906;</span>
+    <input type="search" placeholder="Search the course&#8230;" aria-label="Search the course" autocomplete="off" spellcheck="false">
+    <kbd>/</kbd>
+    <div class="search-results" role="listbox"></div>
+  </div>
+  <nav class="topbar-links">
+    <a class="hide-sm" href="../appendices/d-glossary.html">Glossary</a>
+    <a class="hide-sm" href="../appendices/b-psql.html">psql</a>
+  </nav>
+  <button class="icon-btn theme-btn" type="button" aria-label="Toggle theme">&#9790;</button>
+</header>
+<div class="scrim"></div>
+<div class="shell">
+<nav class="sidebar" id="sidebar" aria-label="Course contents">
+  <h4>Start here</h4>
+  <ol>
+    <li><a href="../start/setup.html" data-page="setup"><span class="n">00</span><span>Set up your lab</span></a></li>
+  </ol>
+  <h4>Part 1 — Foundations: the server, databases, schemas and roles</h4>
+  <ol>
+    <li><a href="../lessons/01-architecture.html" data-page="01-architecture"><span class="n">01</span><span>How PostgreSQL is built</span></a></li>
+    <li><a href="../lessons/02-databases-and-schemas.html" data-page="02-databases-and-schemas"><span class="n">02</span><span>Databases and schemas</span></a></li>
+    <li><a href="../lessons/03-roles-and-users.html" data-page="03-roles-and-users"><span class="n">03</span><span>Roles and users</span></a></li>
+    <li><a href="../lessons/04-privileges-and-grants.html" data-page="04-privileges-and-grants"><span class="n">04</span><span>Privileges and grants</span></a></li>
+    <li><a href="../lessons/05-security-and-rls.html" data-page="05-security-and-rls"><span class="n">05</span><span>Hardening and row-level security</span></a></li>
+  </ol>
+  <h4>Part 2 — Modelling and SQL in depth</h4>
+  <ol>
+    <li><a href="../lessons/06-data-types.html" data-page="06-data-types"><span class="n">06</span><span>Data types</span></a></li>
+    <li><a href="../lessons/07-constraints-and-design.html" data-page="07-constraints-and-design"><span class="n">07</span><span>Constraints and schema design</span></a></li>
+    <li><a href="../lessons/08-advanced-queries.html" data-page="08-advanced-queries"><span class="n">08</span><span>Advanced queries</span></a></li>
+    <li><a href="../lessons/09-changing-data.html" data-page="09-changing-data"><span class="n">09</span><span>Changing data safely</span></a></li>
+    <li><a href="../lessons/10-json-and-arrays.html" data-page="10-json-and-arrays"><span class="n">10</span><span>JSONB and arrays</span></a></li>
+    <li><a href="../lessons/11-text-search.html" data-page="11-text-search"><span class="n">11</span><span>Text search and pattern matching</span></a></li>
+  </ol>
+  <h4>Part 3 — Performance</h4>
+  <ol>
+    <li><a href="../lessons/12-indexes.html" data-page="12-indexes"><span class="n">12</span><span>Indexes</span></a></li>
+    <li><a href="../lessons/13-explain-and-planner.html" data-page="13-explain-and-planner"><span class="n">13</span><span>EXPLAIN and the planner</span></a></li>
+    <li><a href="../lessons/14-query-tuning.html" data-page="14-query-tuning"><span class="n">14</span><span>A query-tuning workflow</span></a></li>
+  </ol>
+  <h4>Part 4 — Transactions and concurrency</h4>
+  <ol>
+    <li><a href="../lessons/15-transactions-and-mvcc.html" data-page="15-transactions-and-mvcc"><span class="n">15</span><span>Transactions and MVCC</span></a></li>
+    <li><a href="../lessons/16-locking.html" data-page="16-locking"><span class="n">16</span><span>Locking and concurrency</span></a></li>
+    <li><a href="../lessons/17-vacuum-and-bloat.html" data-page="17-vacuum-and-bloat"><span class="n">17</span><span>Vacuum, bloat and autovacuum</span></a></li>
+  </ol>
+  <h4>Part 5 — Programming the database</h4>
+  <ol>
+    <li><a href="../lessons/18-views-and-functions.html" data-page="18-views-and-functions"><span class="n">18</span><span>Views, functions and procedures</span></a></li>
+    <li><a href="../lessons/19-triggers-and-events.html" data-page="19-triggers-and-events"><span class="n">19</span><span>Triggers, LISTEN/NOTIFY and audit</span></a></li>
+    <li><a href="../lessons/20-partitioning.html" data-page="20-partitioning"><span class="n">20</span><span>Partitioning</span></a></li>
+  </ol>
+  <h4>Part 6 — Operating PostgreSQL</h4>
+  <ol>
+    <li><a href="../lessons/21-configuration.html" data-page="21-configuration"><span class="n">21</span><span>Configuration and tuning</span></a></li>
+    <li><a href="../lessons/22-wal-and-durability.html" data-page="22-wal-and-durability"><span class="n">22</span><span>WAL, checkpoints and durability</span></a></li>
+    <li><a href="../lessons/23-backup-and-recovery.html" data-page="23-backup-and-recovery"><span class="n">23</span><span>Backup, restore and PITR</span></a></li>
+    <li><a href="../lessons/24-replication.html" data-page="24-replication"><span class="n">24</span><span>Replication and high availability</span></a></li>
+    <li><a href="../lessons/25-monitoring.html" data-page="25-monitoring"><span class="n">25</span><span>Monitoring and diagnostics</span></a></li>
+    <li><a href="../lessons/26-connections-and-upgrades.html" data-page="26-connections-and-upgrades"><span class="n">26</span><span>Connections, pooling, extensions and upgrades</span></a></li>
+  </ol>
+  <h4>Part 7 — Putting it together</h4>
+  <ol>
+    <li><a href="../lessons/27-capstone.html" data-page="27-capstone"><span class="n">27</span><span>Capstone project</span></a></li>
+  </ol>
+  <h4>Annexes</h4>
+  <ol>
+    <li><a href="../appendices/a1-select-basics.html" data-page="a1-select-basics"><span class="n">A1</span><span>SELECT, filtering and sorting</span></a></li>
+    <li><a href="../appendices/a2-joins.html" data-page="a2-joins"><span class="n">A2</span><span>Joins and combining tables</span></a></li>
+    <li><a href="../appendices/a3-aggregation.html" data-page="a3-aggregation"><span class="n">A3</span><span>Aggregation and grouping</span></a></li>
+    <li><a href="../appendices/a4-subqueries-and-ctes.html" data-page="a4-subqueries-and-ctes"><span class="n">A4</span><span>Subqueries and CTEs</span></a></li>
+    <li><a href="../appendices/a5-ddl-and-dml.html" data-page="a5-ddl-and-dml"><span class="n">A5</span><span>Creating and changing things</span></a></li>
+    <li><a href="../appendices/b-psql.html" data-page="b-psql"><span class="n">B</span><span>psql cheat sheet</span></a></li>
+    <li><a href="../appendices/c-catalog-queries.html" data-page="c-catalog-queries"><span class="n">C</span><span>Catalog and diagnostic queries</span></a></li>
+    <li><a href="../appendices/d-glossary.html" data-page="d-glossary"><span class="n">D</span><span>Glossary</span></a></li>
+    <li><a href="../appendices/e-troubleshooting.html" data-page="e-troubleshooting"><span class="n">E</span><span>Troubleshooting</span></a></li>
+    <li><a href="../appendices/f-whats-next.html" data-page="f-whats-next"><span class="n">F</span><span>What to learn next</span></a></li>
+  </ol>
+</nav>
+<div class="main">
+<main class="content" id="content">
+<p class="eyebrow">Lesson 13 &middot; Part 3</p>
+<h1>EXPLAIN and the planner</h1>
+<div class="meta-row"><span class="tag">lesson 13</span><span class="tag">Docker exercises</span><span class="tag">live playground</span></div>
+<p class="lede">
+  PostgreSQL does not run your query the way you wrote it. It first builds a <em>plan</em>: a tree of small
+  steps, chosen by guessing which tree is cheapest. This lesson teaches you to read that plan with
+  <code>EXPLAIN</code>, to tell a good guess from a bad one, and to fix the statistics behind a bad guess.
+</p>
+
+<h2 id="goals">Learning goals</h2>
+<ul>
+  <li>Explain what the planner is, and why it works from estimates rather than from the real data.</li>
+  <li>Use <code>EXPLAIN</code>, <code>EXPLAIN ANALYZE</code> and <code>EXPLAIN (ANALYZE, BUFFERS)</code>, and say what each one costs you.</li>
+  <li>Read a plan from the inside out: node types, <code>cost</code>, <code>rows</code>, <code>actual rows</code> and <code>loops</code>.</li>
+  <li>Spot a row-estimate error and say whether it matters.</li>
+  <li>Look at <code>pg_stats</code>, run <code>ANALYZE</code>, and add extended statistics for an expression.</li>
+  <li>Tell the three join algorithms apart (nested loop, hash join, merge join) and say when each one wins.</li>
+</ul>
+
+<h2 id="lab">Set up for this lesson</h2>
+<p>
+  Use the <code>shop</code> database. The big table is <code>analytics.events</code> with one million rows and no
+  index except its primary key. Every plan below was produced on the Docker database. Start it with
+  <code>./pg up</code> if it is not running, then open <code>./pg psql</code>.
+</p>
+
+<div class="note info">
+  <span class="note-title">Plans in the browser are illustrative</span>
+  <p>
+    The in-page playgrounds run a real PostgreSQL, but the shop there has a dozen orders and 240 events. With so
+    few rows the planner picks different plans from the ones you see in the Docker database, and the timings mean
+    nothing. Use the playgrounds to learn the <em>syntax and the shape</em> of the output. Use Docker for numbers.
+  </p>
+</div>
+
+<p>
+  Plans also depend on settings and on the number of CPU workers available, so your numbers may differ a little
+  from the ones printed here. The <em>shape</em> of the plan and the size of the estimate errors should match.
+  When a plan below has no <code>Gather</code> node, it was produced after
+  <code>set max_parallel_workers_per_gather = 0</code>, which only keeps the example short.
+</p>
+
+<h2 id="planner">1. What the planner does</h2>
+
+<p>
+  A SQL statement says <em>what</em> you want, not <em>how</em> to get it. The planner (also called the
+  optimizer) turns the first into the second. For every statement it:
+</p>
+<ol>
+  <li>lists the ways to scan each table (read everything, or use an index) and the ways to join tables and in what order;</li>
+  <li>gives each candidate a <em>cost</em>, a number in arbitrary units;</li>
+  <li>keeps the cheapest candidate and hands it to the executor.</li>
+</ol>
+
+<p>
+  To price a candidate it needs to know how many rows each step will produce. It does not count them. It reads
+  <em>statistics</em> that <code>ANALYZE</code> saved earlier: the table's size, and for every column a
+  summary of its values. If those statistics are wrong or out of date, the plan can be wrong, even though
+  nothing is wrong with your SQL.
+</p>
+
+<figure class="dia">
+  <div class="dia-hold">
+    <svg class="d" viewBox="0 0 860 190" role="img" aria-labelledby="pl-t pl-d">
+      <title id="pl-t">From a SQL statement to rows: parse, plan, execute</title>
+      <desc id="pl-d">The statement is parsed, then the planner reads the statistics to choose a plan, then the executor runs the plan and returns rows.</desc>
+      <defs>
+        <marker id="pla" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z"/></marker>
+      </defs>
+      <rect class="box" x="20" y="50" width="150" height="60" rx="8"/>
+      <text class="hd ctr" x="95" y="86">parse</text>
+      <rect class="box accent" x="250" y="50" width="170" height="60" rx="8"/>
+      <text class="hd ctr" x="335" y="86">plan</text>
+      <rect class="box" x="500" y="50" width="150" height="60" rx="8"/>
+      <text class="hd ctr" x="575" y="86">execute</text>
+      <rect class="box teal" x="250" y="140" width="170" height="40" rx="8"/>
+      <text class="lbl ctr" x="335" y="165">statistics (pg_stats)</text>
+      <path class="line" d="M170 80 L250 80" marker-end="url(#pla)"/>
+      <path class="line" d="M420 80 L500 80" marker-end="url(#pla)"/>
+      <path class="line" d="M650 80 L720 80" marker-end="url(#pla)"/>
+      <text class="hd ctr" x="780" y="86">rows</text>
+      <path class="line" d="M335 140 L335 112" marker-end="url(#pla)"/>
+    </svg>
+  </div>
+  <figcaption><code>EXPLAIN</code> stops after the middle box and shows you the plan. <code>EXPLAIN ANALYZE</code> also runs the last box.</figcaption>
+</figure>
+
+<h2 id="explain">2. EXPLAIN, EXPLAIN ANALYZE and BUFFERS</h2>
+
+<p>There are three levels of detail, and the difference between them is important.</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Command</th><th>Runs the query?</th><th>Shows</th></tr></thead>
+  <tbody>
+    <tr><td><code>EXPLAIN</code></td><td class="wrap">No</td><td class="wrap">The chosen plan with <em>estimated</em> cost and rows</td></tr>
+    <tr><td><code>EXPLAIN ANALYZE</code></td><td class="wrap"><strong>Yes</strong>, fully</td><td class="wrap">The same plan, plus <em>actual</em> time, rows and loops for each node</td></tr>
+    <tr><td><code>EXPLAIN (ANALYZE, BUFFERS)</code></td><td class="wrap"><strong>Yes</strong>, fully</td><td class="wrap">All of the above, plus how many 8 kB pages each node read from memory (<em>hit</em>) or from disk (<em>read</em>)</td></tr>
+  </tbody>
+</table>
+</div>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">a plan without running the query</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>explain select * from analytics.events where kind = 'purchase';</code></pre>
+</figure>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">output (Docker, 1 000 000 events)</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code> Gather  (cost=1000.00..24056.33 rows=29000 width=90)
+   Workers Planned: 2
+   ->  Parallel Seq Scan on events  (cost=0.00..20156.33 rows=12083 width=90)
+         Filter: (kind = 'purchase'::text)</code></pre>
+</figure>
+
+<p>Now the same query with <code>ANALYZE</code> and <code>BUFFERS</code>:</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">run it and measure</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>explain (analyze, buffers)
+select * from analytics.events where kind = 'purchase';</code></pre>
+</figure>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">output (shortened; times will differ on your machine)</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code> Gather  (cost=1000.00..24056.33 rows=29000 width=90) (actual time=0.201..25.563 rows=29952.00 loops=1)
+   Workers Planned: 2
+   Workers Launched: 2
+   Buffers: shared read=14948 written=104
+   ->  Parallel Seq Scan on events  (cost=0.00..20156.33 rows=12083 width=90) (actual time=0.096..22.754 rows=9984.00 loops=3)
+         Filter: (kind = 'purchase'::text)
+         Rows Removed by Filter: 323349
+         Buffers: shared read=14948 written=104
+ Planning Time: 0.127 ms
+ Execution Time: 27.683 ms</code></pre>
+</figure>
+
+<div class="note danger">
+  <span class="note-title">EXPLAIN ANALYZE really runs the statement</span>
+  <p>
+    <code>EXPLAIN ANALYZE UPDATE ...</code> updates the rows. <code>EXPLAIN ANALYZE DELETE ...</code> deletes them.
+    If you want to see the plan of a data-changing statement without keeping the change, wrap it in a transaction
+    and roll back:
+  </p>
+<pre><code>begin;
+explain analyze update shop.products set price = price * 2 where id = 1;
+rollback;</code></pre>
+  <p>
+    The rollback undoes the data change, but not side effects outside the database (a trigger that calls a web
+    service, a sequence that already moved forward). On a production table, prefer plain <code>EXPLAIN</code>.
+  </p>
+</div>
+
+<p>
+  A few more options you will use: <code>EXPLAIN (FORMAT JSON)</code> prints the plan as JSON, which is what
+  tools read. <code>TIMING OFF</code> removes per-node clocks (they have their own overhead, and with them off
+  the row counts are still exact). <code>SETTINGS</code> lists any non-default planner settings that influenced the
+  plan.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">plans here are illustrative only: 240 events, not a million</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">explain (analyze)
+select * from analytics.events where kind = 'purchase';</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  Try the same statement with plain <code>explain</code>, and with <code>explain (analyze, buffers)</code>. The
+  playground draws the result as a tree. Amber marks a sequential scan, green marks an index.
+</p>
+
+<h2 id="reading">3. Reading a plan</h2>
+
+<p>
+  A plan is a tree. Each line starting with <code>-&gt;</code> is a <em>node</em>. Data flows from the
+  innermost (most indented) nodes up to the root, so read from the inside out. Every node carries the same
+  few numbers:
+</p>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">anatomy of one node</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code>Index Scan using events_pkey on events  (cost=0.42..8.44 rows=1 width=90) (actual time=0.063..0.064 rows=1.00 loops=1)
+   Index Cond: (id = 500000)
+   Index Searches: 1</code></pre>
+</figure>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Part</th><th>Meaning</th></tr></thead>
+  <tbody>
+    <tr><td><code>Index Scan using events_pkey</code></td><td class="wrap">The node type and, for scans, the table or index it reads</td></tr>
+    <tr><td><code>cost=0.42..8.44</code></td><td class="wrap">Estimated cost: the first number is the cost to produce the <em>first</em> row (start-up), the second the cost to produce <em>all</em> rows. Units are arbitrary; compare them only with each other</td></tr>
+    <tr><td><code>rows=1</code></td><td class="wrap"><em>Estimated</em> number of rows this node produces <em>per loop</em></td></tr>
+    <tr><td><code>width=90</code></td><td class="wrap">Estimated average row size in bytes</td></tr>
+    <tr><td><code>actual time=0.063..0.064</code></td><td class="wrap">Real milliseconds to the first row and to the last row, <em>per loop</em></td></tr>
+    <tr><td><code>rows=1.00</code> (actual)</td><td class="wrap">Real rows produced, <em>per loop</em> (an average, so it can be fractional)</td></tr>
+    <tr><td><code>loops=1</code></td><td class="wrap">How many times this node ran. Multiply per-loop numbers by this to get totals</td></tr>
+    <tr><td><code>Index Cond</code> / <code>Filter</code></td><td class="wrap">An <code>Index Cond</code> is used to find rows. A <code>Filter</code> is checked on every row the node reads, and <code>Rows Removed by Filter</code> counts the rejects</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>Where do the cost numbers come from?</h3>
+<p>
+  Cost is not magic. For a sequential scan, PostgreSQL adds the pages it must read and a small charge for each row:
+</p>
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">cost of a sequential scan of analytics.events</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code>pages      14 948  x seq_page_cost   1.0     = 14 948
+rows    1 000 000  x cpu_tuple_cost  0.01    = 10 000
+                                      total   = 24 948      explain: cost=0.00..24948.00</code></pre>
+</figure>
+<p>
+  With a <code>WHERE</code> clause, it also pays <code>cpu_operator_cost</code> (0.0025) per row to evaluate the test:
+  1 000 000 × 0.0025 = 2 500 more, giving 27 448, which is what <code>explain</code> prints when parallelism is
+  off. You can check the inputs with <code>show seq_page_cost;</code> and <code>select relpages, reltuples from pg_class
+  where oid = 'analytics.events'::regclass;</code>.
+</p>
+
+<h3>Loops: the number that fools people</h3>
+<p>
+  A node that sits under a nested loop may run many times. Its <code>actual rows</code> and
+  <code>actual time</code> are <em>per loop</em>. This plan joins ten orders to their lines:
+</p>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">explain (analyze, timing off) of a ten-order join</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code> Nested Loop  (cost=0.84..175.59 rows=30 width=47) (actual rows=34.00 loops=1)
+   ->  Index Scan using orders_pkey on orders o  (cost=0.42..37.74 rows=10 width=29) (actual rows=10.00 loops=1)
+         Index Cond: ((id &gt;= 1) AND (id &lt;= 10))
+   ->  Index Scan using order_items_pkey on order_items i  (cost=0.42..13.75 rows=4 width=18) (actual rows=3.40 loops=10)
+         Index Cond: (order_id = o.id)</code></pre>
+</figure>
+
+<p>
+  The inner scan says <code>rows=3.40 loops=10</code>. It ran ten times, once per order, and found 3.4 lines on
+  average, 34 in total. That matches the 34 rows the join produced. The estimate said <code>rows=4</code> per loop,
+  so about 40 in total, and the join node estimated 30. They are close enough.
+</p>
+
+<div class="note tip">
+  <span class="note-title">A fast rule for reading a slow plan</span>
+  <p>
+    Find the node whose <em>own</em> time (its <code>actual time</code> minus its children, times
+    <code>loops</code>) is largest. Then compare its estimated <code>rows</code> with its actual
+    <code>rows</code>. Most bad plans are bad because of the second comparison.
+  </p>
+</div>
+
+<h2 id="estimates">4. When the estimate is wrong</h2>
+
+<p>
+  Compare <code>rows=</code> in the cost part with <code>rows=</code> in the actual part. Here the planner is badly wrong:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">an estimate that is off by a factor of 66</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>explain (analyze, timing off, buffers off)
+select * from analytics.events where payload ->> 'device' = 'mobile';</code></pre>
+</figure>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">output</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code> Gather  (cost=1000.00..22698.00 rows=5000 width=90) (actual rows=332937.00 loops=1)
+   Workers Planned: 2
+   Workers Launched: 2
+   ->  Parallel Seq Scan on events  (cost=0.00..21198.00 rows=2083 width=90) (actual rows=110979.00 loops=3)
+         Filter: ((payload -&gt;&gt; 'device'::text) = 'mobile'::text)
+         Rows Removed by Filter: 222354</code></pre>
+</figure>
+
+<p>
+  The planner expected 5 000 rows and got 332 937. The reason: PostgreSQL keeps no statistics about what is
+  <em>inside</em> a JSONB value, so for an expression like <code>payload ->> 'device'</code> it falls back to a
+  fixed guess (0.5% of the table). For a single scan this does no harm. In a join, an estimate that is too low can
+  lead the planner to pick a nested loop that runs 332 937 times instead of a hash join. Section 8 fixes this one.
+</p>
+
+<p>Common causes of bad estimates:</p>
+<ul>
+  <li><strong>Stale statistics.</strong> The table changed a lot since the last <code>ANALYZE</code>.</li>
+  <li><strong>Expressions.</strong> Functions and JSON extraction on a column have no statistics of their own (unless you create an expression index or extended statistics).</li>
+  <li><strong>Correlated columns.</strong> The planner assumes columns are independent. <code>country = 'NL' AND currency = 'EUR'</code> is estimated as the product of two selectivities, which is too low when they go together.</li>
+  <li><strong>Skewed data</strong> beyond what the statistics sample can describe.</li>
+</ul>
+
+<div class="note warn">
+  <span class="note-title">Not every estimate error is a problem</span>
+  <p>
+    An error matters only if it changes the <em>decision</em>. If the planner guesses 5 000 and gets 332 937 rows and
+    still does the one sequential scan it would have done anyway, nobody cares. Look for errors on the nodes that decide
+    a join method, a join order, or index versus scan. An error of one or two orders of magnitude on those nodes is a
+    lead worth chasing.
+  </p>
+</div>
+
+<h2 id="stats">5. Statistics: ANALYZE and pg_stats</h2>
+
+<p>
+  <code>ANALYZE</code> reads a random sample of each table (about 30 000 rows at the default setting) and stores a
+  summary per column. Autovacuum runs it automatically after enough rows change; you can also run it by hand. Two
+  places hold the result:
+</p>
+<ul>
+  <li><code>pg_class.reltuples</code> and <code>relpages</code>: the table's row and page counts.</li>
+  <li><code>pg_stats</code>: per-column summaries (a readable view over <code>pg_statistic</code>).</li>
+</ul>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">what the planner knows about events.kind</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select attname, n_distinct, null_frac, correlation
+from pg_stats
+where schemaname = 'analytics' and tablename = 'events'
+order by attname;
+
+select most_common_vals::text, most_common_freqs::text
+from pg_stats
+where schemaname = 'analytics' and tablename = 'events' and attname = 'kind';</code></pre>
+</figure>
+
+<p>On the Docker database the first query prints (rounded):</p>
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">pg_stats for analytics.events</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code>   attname   | n_distinct | null_frac | correlation
+-------------+------------+-----------+-------------
+ customer_id |      17606 |     0.351 |      -0.001
+ id          |         -1 |         0 |       1.000
+ kind        |          5 |         0 |       0.379
+ occurred_at |         -1 |         0 |       0.005
+ payload     |      22608 |         0 |       0.004</code></pre>
+</figure>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Column</th><th>What it tells the planner</th></tr></thead>
+  <tbody>
+    <tr><td><code>n_distinct</code></td><td class="wrap">How many different values. A negative number means “this fraction of the row count”: <code>-1</code> means every value is unique</td></tr>
+    <tr><td><code>null_frac</code></td><td class="wrap">The fraction of rows that are NULL. 35% of events have no customer</td></tr>
+    <tr><td><code>most_common_vals</code> / <code>most_common_freqs</code></td><td class="wrap">The most frequent values and how often each occurs. This is how <code>kind = 'purchase'</code> gets its estimate</td></tr>
+    <tr><td><code>histogram_bounds</code></td><td class="wrap">Bucket edges for the values that are <em>not</em> in the common list. Drives range estimates such as <code>occurred_at &gt; ...</code></td></tr>
+    <tr><td><code>correlation</code></td><td class="wrap">How well the physical row order follows the column order, from -1 to 1. Near 1 makes an index range scan cheap</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>
+  The estimate for <code>kind = 'purchase'</code> is the table size times the frequency of that value.
+  Frequency in the list: 0.029. 1 000 000 × 0.029 = 29 000, exactly the <code>rows=29000</code> in the first plan. The
+  real count is 29 952. That is the planner working correctly: it is close, from a sample of 30 000 rows.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">read the statistics (the browser has 240 events, so the values differ)</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select attname, n_distinct,
+       most_common_vals::text  as common_values,
+       most_common_freqs::text as common_freqs
+from pg_stats
+where schemaname = 'analytics' and tablename = 'events' and attname = 'kind';</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<h3>Stale statistics, in miniature</h3>
+<p>
+  A table that has never been analysed gets a default guess. Run the two blocks below one after the other in the
+  same playground: first build a 5 000-row table and ask for ten rows of it, then run <code>ANALYZE</code> and ask again.
+  (If you run the first block twice it starts by dropping the table, so that is safe.)
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">step 1: a table with no statistics yet</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">drop table if exists public.demo;
+create table public.demo as select g as id from generate_series(1, 5000) g;
+explain select * from public.demo where id &lt; 10;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">step 2: after ANALYZE the guess is close to the truth (9 rows)</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">analyze public.demo;
+explain select * from public.demo where id &lt; 10;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  In step 1 the planner estimated <code>rows=2720</code>; after <code>ANALYZE</code> it estimated <code>rows=9</code>
+  (the playground printed exactly these on a test run). The query is the same and the data did not change. Only the
+  statistics did.
+</p>
+
+<div class="note warn">
+  <span class="note-title">After a big load, run ANALYZE yourself</span>
+  <p>
+    Autovacuum analyses a table after roughly 10% of it changed, and it takes a while to notice. After a bulk load,
+    a large delete or a migration, plans can be bad for minutes. Run <code>ANALYZE table_name;</code> right away. The
+    statement is cheap because it only reads a sample.
+  </p>
+</div>
+
+<h2 id="joins">6. The three join algorithms</h2>
+
+<p>
+  When a query joins two tables, the planner chooses one of three algorithms. Each wins in a different situation.
+</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Algorithm</th><th>How it works</th><th>Wins when</th><th>Needs</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Nested loop</strong></td><td class="wrap">For each row of the outer side, look up matching rows on the inner side</td><td class="wrap">The outer side is small and the inner side has an index on the join column</td><td class="wrap">Nothing, but without an index on the inner side it is quadratic</td></tr>
+    <tr><td><strong>Hash join</strong></td><td class="wrap">Build an in-memory hash table from the smaller side, then stream the other side through it</td><td class="wrap">Both sides are large and there is no useful order. The usual choice for big, unindexed joins</td><td class="wrap">An equality condition (<code>=</code>) and enough <code>work_mem</code>; otherwise it splits into batches on disk</td></tr>
+    <tr><td><strong>Merge join</strong></td><td class="wrap">Walk two inputs sorted on the join key side by side, like a zip</td><td class="wrap">Both inputs already come sorted (from an index, say), or the result must be sorted anyway</td><td class="wrap">An equality condition and sorted inputs (it will sort them if it has to)</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>You can see all three in the shop dataset. A join of ten orders with their lines is a nested loop (see section 3). A join of <em>all</em> orders with all lines becomes a hash join:</p>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">explain select * from shop.orders o join shop.order_items i on i.order_id = o.id;</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code> Hash Join  (cost=10476.00..30263.27 rows=599702 width=47)
+   Hash Cond: (i.order_id = o.id)
+   ->  Seq Scan on order_items i  (cost=0.00..9817.02 rows=599702 width=18)
+   ->  Hash  (cost=6608.00..6608.00 rows=200000 width=29)
+         ->  Seq Scan on orders o  (cost=0.00..6608.00 rows=200000 width=29)</code></pre>
+</figure>
+
+<p>
+  With <code>EXPLAIN ANALYZE</code> the <code>Hash</code> node adds a line like
+  <code>Buckets: 131072 Batches: 2 Memory Usage: 7472kB</code>. <code>Batches: 2</code> means the hash table did not fit in
+  <code>work_mem</code> (4 MB here) and the join spilled to temporary files in two passes. More <code>work_mem</code>
+  for that session would make it <code>Batches: 1</code>.
+</p>
+
+<p>
+  A merge join appears when the output must be sorted by the join key, because both primary-key indexes already deliver
+  that order:
+</p>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">the same join, with order by o.id (parallelism off)</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code> Merge Join  (cost=1.97..40314.86 rows=599702 width=8) (actual rows=599702.00 loops=1)
+   Merge Cond: (o.id = i.order_id)
+   ->  Index Only Scan using orders_pkey on orders o  (cost=0.42..7900.42 rows=200000 width=4) (actual rows=200000.00 loops=1)
+   ->  Index Scan using order_items_pkey on order_items i  (cost=0.42..24423.39 rows=599702 width=8) (actual rows=599702.00 loops=1)</code></pre>
+</figure>
+
+<h3>Making the planner show you an alternative</h3>
+<p>
+  To see what the planner rejected, switch the algorithm it prefers off for one transaction. This is a
+  <em>diagnostic</em> tool, not a fix.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">force a nested loop (the mini shop is tiny; only the shape matters)</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">begin;
+set local enable_hashjoin = off;
+set local enable_mergejoin = off;
+explain select * from shop.orders o join shop.order_items i on i.order_id = o.id;
+rollback;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  <code>set local</code> lasts until the end of the transaction, so the <code>rollback</code> puts the setting back.
+  On the Docker database, forcing a nested loop on the refunded orders (10 042 of them) shows the cost of the wrong
+  choice: the planner's own total cost goes from about 18 600 for the hash join to about 34 300 for the nested loop, because the inner
+  index lookup runs <code>loops=10042</code> times.
+</p>
+
+<div class="note warn">
+  <span class="note-title">Do not leave enable_* switched off</span>
+  <p>
+    The <code>enable_hashjoin</code>, <code>enable_seqscan</code> and similar settings do not forbid a method; they add a
+    huge penalty to its cost. They are for experiments. If you need one in production to get a good plan, the real fix
+    is almost always a statistics problem or a missing index.
+  </p>
+</div>
+
+<h2 id="fixing">7. Giving the planner better information</h2>
+
+<p>When an estimate is wrong, try these in order. Each is cheaper and safer than the next.</p>
+<ol>
+  <li><strong>Run <code>ANALYZE</code>.</strong> It fixes stale statistics.</li>
+  <li><strong>Raise the sample for one column:</strong> <code>ALTER TABLE ... ALTER COLUMN ... SET STATISTICS 500;</code> then <code>ANALYZE</code>. The default is 100; more means a bigger most-common list and a finer histogram. Use it on columns with many distinct values and skew.</li>
+  <li><strong>Create extended statistics</strong> for several columns that depend on one another, or for an expression (next section).</li>
+  <li><strong>Rewrite the query</strong> so that the planner sees a plain column rather than an expression, or add an expression index (<a href="12-indexes.html">lesson 12</a>), which gets its own statistics.</li>
+</ol>
+
+<h2 id="ext">8. Extended statistics</h2>
+
+<p>
+  <code>CREATE STATISTICS</code> tells PostgreSQL to collect something it normally does not. On an expression it
+  collects the usual per-column summary for the <em>result</em> of the expression. That repairs the bad
+  <code>payload ->> 'device'</code> estimate from section 4. This changes the database, so try it in your own copy
+  (the exercise below does exactly this in a scratch database); if you run it in <code>shop</code> the lesson numbers
+  above will no longer match.
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">statistics on an expression</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create statistics ev_device on (payload ->> 'device') from analytics.events;
+analyze analytics.events;
+
+explain select * from analytics.events where payload ->> 'device' = 'mobile';</code></pre>
+</figure>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">the estimate after (parallelism off)</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code> Seq Scan on events  (cost=0.00..29948.00 rows=337933 width=90)
+   Filter: ((payload -&gt;&gt; 'device'::text) = 'mobile'::text)</code></pre>
+</figure>
+
+<p>
+  The estimate moved from 5 000 to 337 933; the real count is 332 937. Extended statistics for <em>several</em> columns
+  use <code>CREATE STATISTICS name (dependencies) ON a, b FROM t;</code>, which teaches the planner that
+  <code>a</code> determines <code>b</code>, fixing the independence assumption. Look them up in
+  <code>pg_stats_ext</code>.
+</p>
+
+<div class="note tip">
+  <span class="note-title">The statistics need an ANALYZE</span>
+  <p>
+    <code>CREATE STATISTICS</code> only defines the object. It stays empty until the next <code>ANALYZE</code> (manual
+    or autovacuum), and the estimate does not change until then.
+  </p>
+</div>
+
+<h2 id="pitfalls">9. Pitfalls</h2>
+
+<div class="note warn">
+  <span class="note-title">A cost number is not a time</span>
+  <p>
+    A cost of 24 948 is not 24 948 milliseconds or anything else. Compare costs only inside one plan or between two plans
+    for the same query on the same server. Never compare the cost of two different queries.
+  </p>
+</div>
+
+<div class="note warn">
+  <span class="note-title">A fast EXPLAIN ANALYZE on a cold cache is a different query from a warm one</span>
+  <p>
+    The first run reads pages from disk (<code>Buffers: shared read=...</code>); the second finds them in memory
+    (<code>shared hit=...</code>). Run it twice and look at <code>BUFFERS</code>. If you only compare times, you may
+    be comparing the cache, not the plans.
+  </p>
+</div>
+
+<div class="note info">
+  <span class="note-title">Sequential scans are not evil</span>
+  <p>
+    Reading one million rows with a sequential scan took about 25 ms with two workers on the Docker database. If a
+    query needs a big share of a table, a scan <em>is</em> the right plan. Indexes win when the query needs a small
+    share, which is the topic of <a href="12-indexes.html">lesson 12</a>.
+  </p>
+</div>
+
+<div class="note warn">
+  <span class="note-title">Generic plans can differ from what you tested</span>
+  <p>
+    Prepared statements (used by most drivers) may be planned without looking at your parameter values after a few
+    executions. The plan you see with literal values in <code>psql</code> can differ from the one the application
+    uses. <code>EXPLAIN (GENERIC_PLAN) select ... where id = $1;</code> shows the generic form.
+  </p>
+</div>
+
+<h2 id="when">When to use, when not to</h2>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Situation</th><th class="wrap">✅ Do this</th><th class="wrap">❌ Not this</th></tr></thead>
+  <tbody>
+    <tr><td class="wrap">Checking what a query would do</td><td class="wrap"><code>EXPLAIN</code> (it does not run the query)</td><td class="wrap"><code>EXPLAIN ANALYZE</code> on a destructive statement</td></tr>
+    <tr><td class="wrap">Finding out where the time really goes</td><td class="wrap"><code>EXPLAIN (ANALYZE, BUFFERS)</code>, run twice</td><td class="wrap">Judging by cost numbers alone</td></tr>
+    <tr><td class="wrap">Testing a data-changing statement</td><td class="wrap">Inside <code>BEGIN ... ROLLBACK</code> on a copy</td><td class="wrap"><code>EXPLAIN ANALYZE UPDATE</code> on production data</td></tr>
+    <tr><td class="wrap">Estimate off by a large factor</td><td class="wrap"><code>ANALYZE</code>, then more statistics, then <code>CREATE STATISTICS</code></td><td class="wrap">Turning <code>enable_*</code> settings off for good</td></tr>
+    <tr><td class="wrap">A plan looks slow in the browser playground</td><td class="wrap">Read its shape, then check on the Docker data</td><td class="wrap">Drawing conclusions from a 240-row table</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="inspect">Inspect it</h2>
+
+<p>
+  Which tables have statistics, and how far have they drifted since the last <code>ANALYZE</code>?
+  <code>n_mod_since_analyze</code> counts the rows changed since then.
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">how fresh are the statistics?</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select relname, n_live_tup, n_mod_since_analyze, last_analyze is not null as analyzed
+from pg_stat_user_tables
+where schemaname in ('shop', 'analytics')
+order by relname;</code></pre>
+</figure>
+
+<p>In a fresh course database every table shows <code>n_mod_since_analyze = 0</code> and <code>analyzed = t</code>. Also look at the cost settings the planner uses:</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">planner settings</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select name, setting
+from pg_settings
+where name in ('seq_page_cost', 'random_page_cost', 'cpu_tuple_cost',
+               'cpu_operator_cost', 'work_mem', 'default_statistics_target')
+order by name;</code></pre>
+</figure>
+
+<h2 id="exercises">Your turn</h2>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 1</span><span class="grow"></span><span class="lvl">basic</span></div>
+  <div class="ex-body">
+    <p>
+      Reproduce the planner's own arithmetic. For each value in the “most common values” list that
+      <code>pg_stats</code> holds for <code>analytics.events.kind</code>, return the columns
+      <code>kind</code>, <code>estimated_rows</code> and <code>actual_rows</code>, ordered by <code>kind</code>.
+      <code>estimated_rows</code> is <code>pg_class.reltuples</code> times that value's frequency, rounded to an integer;
+      <code>actual_rows</code> is the real <code>count(*)</code>.
+    </p>
+    <p>Open <code>exercises/13/1.sql</code>, write your answer, then run <code>./pg check 13 1</code>.</p>
+  </div>
+  <figure class="code" data-lang="sql">
+  <figcaption><span class="path">exercises/13/1.sql</span><span class="grow"></span><span class="lang">your starting file</span></figcaption>
+<pre><code>-- For every value the planner stores as "most common" for analytics.events.kind,
+-- return three columns: kind, estimated_rows and actual_rows.
+--   estimated_rows = the table's row estimate (pg_class.reltuples) multiplied by that
+--                    value's frequency from pg_stats, rounded to an integer
+--   actual_rows    = the real count(*) for that kind
+-- Order the result by kind.</code></pre>
+</figure>
+  <details><summary>Hint</summary><p><code>pg_stats.most_common_vals</code> has the type <code>anyarray</code>; cast it with <code>most_common_vals::text::text[]</code> and use <code>unnest(array1, array2)</code> in the <code>FROM</code> clause to walk the values and their frequencies together.</p></details>
+  <details class="solution"><summary>Show a model solution for exercise 1 (try first!)</summary>
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">solutions/13/1.sql</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>-- ordered
+select s.kind,
+       round(c.reltuples::numeric * s.freq::numeric)::int as estimated_rows,
+       (select count(*) from analytics.events e where e.kind = s.kind) as actual_rows
+from pg_stats p
+cross join lateral unnest(p.most_common_vals::text::text[], p.most_common_freqs) as s(kind, freq)
+join pg_class c on c.oid = 'analytics.events'::regclass
+where p.schemaname = 'analytics' and p.tablename = 'events' and p.attname = 'kind'
+order by s.kind;</code></pre>
+</figure>
+</details>
+</section>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 2</span><span class="grow"></span><span class="lvl">intermediate</span></div>
+  <div class="ex-body">
+    <p>
+      The planner expects 5 000 rows for <code>select * from analytics.events where payload ->> 'device' = 'mobile'</code>
+      and the truth is about 332 937. Create extended statistics named <code>lab_ev_device</code> on the expression
+      <code>(payload ->> 'device')</code> of <code>analytics.events</code> and gather them, so the estimate becomes close to the real count.
+    </p>
+    <p>Open <code>exercises/13/2.sql</code>, write your answer, then run <code>./pg check 13 2</code>.</p>
+  </div>
+  <figure class="code" data-lang="sql">
+  <figcaption><span class="path">exercises/13/2.sql</span><span class="grow"></span><span class="lang">your starting file</span></figcaption>
+<pre><code>-- The planner guesses 5000 rows for
+--   select * from analytics.events where payload -&gt;&gt; 'device' = 'mobile'
+-- but about a third of the table matches. Create extended statistics named
+-- lab_ev_device on the expression (payload -&gt;&gt; 'device') of analytics.events and
+-- gather them, so the estimate becomes close to the real count.
+-- Then run ./pg check 13 2.</code></pre>
+</figure>
+  <details><summary>Hint</summary><p>Two statements: <code>CREATE STATISTICS name ON (expression) FROM table</code> (no statistics kind for a single expression), then <code>ANALYZE</code> on the table.</p></details>
+  <details class="solution"><summary>Show a model solution for exercise 2 (try first!)</summary>
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">solutions/13/2.sql</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create statistics lab_ev_device on (payload -&gt;&gt; 'device') from analytics.events;
+analyze analytics.events;</code></pre>
+</figure>
+</details>
+</section>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 3</span><span class="grow"></span><span class="lvl">challenge</span></div>
+  <div class="ex-body">
+    <p>
+      Plans are data too. Write a function <code>public.lab_plan_nodes(q text) returns setof text</code> that returns
+      the distinct node types (<code>Seq Scan</code>, <code>Index Scan</code>, <code>Nested Loop</code>, and so on) that
+      PostgreSQL would use for the query text <code>q</code>, one per row, sorted alphabetically. It must only plan the
+      query, not run it. For <code>'select * from shop.orders where id = 5'</code> it returns the single row <code>Index Scan</code>.
+    </p>
+    <p>Open <code>exercises/13/3.sql</code>, write your answer, then run <code>./pg check 13 3</code>.</p>
+  </div>
+  <figure class="code" data-lang="sql">
+  <figcaption><span class="path">exercises/13/3.sql</span><span class="grow"></span><span class="lang">your starting file</span></figcaption>
+<pre><code>-- Write a function public.lab_plan_nodes(q text) that returns setof text:
+-- the distinct "Node Type" values of the plan PostgreSQL chooses for the query q,
+-- one per row, sorted alphabetically. It must only plan the query (no EXPLAIN ANALYZE).
+-- Example: lab_plan_nodes('select * from shop.orders where id = 5') returns one row,
+-- 'Index Scan'. Then run ./pg check 13 3.</code></pre>
+</figure>
+  <details><summary>Hint</summary><p>
+    <code>EXECUTE 'explain (format json) ' || q INTO j</code> inside PL/pgSQL gives you the plan as <code>jsonb</code>.
+    Every node has a <code>"Node Type"</code> key at any depth; <code>jsonb_path_query(j, 'strict $.**."Node Type"')</code> finds them all.
+    Use <code>#&gt;&gt; '{}'</code> to turn each result into text.
+  </p></details>
+  <details class="solution"><summary>Show a model solution for exercise 3 (try first!)</summary>
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">solutions/13/3.sql</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create function public.lab_plan_nodes(q text) returns setof text
+language plpgsql as $$
+declare
+  j jsonb;
+begin
+  execute 'explain (format json) ' || q into j;
+  return query
+    select distinct jsonb_path_query(j, 'strict $.**."Node Type"') #&gt;&gt; '{}'
+    order by 1;
+end
+$$;</code></pre>
+</figure>
+</details>
+</section>
+
+<h2 id="summary">Summary</h2>
+<ul>
+  <li>The planner picks the cheapest plan using <em>estimates</em> from statistics. Bad statistics cause bad plans.</li>
+  <li><code>EXPLAIN</code> shows the plan; <code>EXPLAIN ANALYZE</code> runs the statement and adds real rows, times and loops; <code>BUFFERS</code> adds page reads. Never <code>ANALYZE</code> a destructive statement without a transaction you will roll back.</li>
+  <li>Read a plan from the inside out. Per-loop numbers must be multiplied by <code>loops</code>. A cost is only comparable to other costs on the same server.</li>
+  <li>Compare estimated and actual <code>rows</code>. An error matters when it flips a decision, such as the join method.</li>
+  <li><code>pg_stats</code> holds <code>n_distinct</code>, <code>null_frac</code>, common values, histograms and correlation. <code>ANALYZE</code> refreshes them; run it after bulk changes.</li>
+  <li>Nested loop suits a few outer rows with an indexed inner side; hash join suits big unsorted inputs; merge join suits sorted inputs.</li>
+  <li><code>CREATE STATISTICS</code> repairs estimates for expressions and for columns that depend on one another.</li>
+</ul>
+
+<h2 id="next">Looking ahead</h2>
+<p>
+  You can now read a plan and judge its estimates. <a href="14-query-tuning.html">Lesson 14</a> turns that into a
+  repeatable workflow: find the slow query with <code>pg_stat_statements</code>, read its plan, fix it, and avoid the
+  classic mistakes such as <code>OFFSET</code> pagination and the N+1 pattern.
+</p>
+<div class="lesson-done" data-lesson="13-explain-and-planner"></div>
+<nav class="pager"><a class="prev" href="../lessons/12-indexes.html"><span class="dir">Previous</span><span class="lbl">12 · Indexes</span></a><a class="next" href="../lessons/14-query-tuning.html"><span class="dir">Next</span><span class="lbl">14 · A query-tuning workflow</span></a></nav>
+</main>
+<aside class="toc" aria-label="On this page"></aside>
+</div>
+</div>
+<script src="../assets/js/search-index.js"></script>
+<script src="../assets/js/mini-seed.js"></script>
+<script src="../assets/js/course.js"></script>
+</body>
+</html>

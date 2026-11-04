@@ -1,0 +1,4 @@
+-- Describe every ordinary table in the shop schema. Return table_name,
+-- columns (how many live columns it has: skip system columns and dropped ones)
+-- and indexes (how many indexes it has). Use only pg_class, pg_attribute and
+-- pg_index. Order by table_name. Run ./pg check 01 3 when you are done.

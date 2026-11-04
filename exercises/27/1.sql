@@ -1,0 +1,23 @@
+-- CAPSTONE, part 1 of 3: roles and schema of a small "tickets" service.
+-- Build it from nothing:
+--   Roles
+--     lab_27_owner   cannot log in; owns the database and every object in it
+--     lab_27_app     can log in (password 'lab-only'); the application
+--     lab_27_reader  can log in (password 'lab-only'); reporting, read-only
+--   Database lab_27_service, owned by lab_27_owner, created from template0 so
+--     it starts blank. Nobody except the two login roles may connect to it
+--     (take CONNECT away from PUBLIC). Then switch to it with \c lab_27_service.
+--   Schema tickets, owned by lab_27_owner, holding two tables created by the owner:
+--     tickets.agents   id (identity, primary key), email (text, unique, not null),
+--                      full_name (text, not null)
+--     tickets.tickets  id (identity, primary key),
+--                      agent_id (integer, not null, foreign key to agents),
+--                      title (text, not null),
+--                      status (text, not null, default 'open', only 'open' or 'closed'),
+--                      priority (smallint, not null, default 2, between 1 and 3),
+--                      created_at (timestamptz, not null, default now())
+--   Privileges
+--     lab_27_app    uses the schema; SELECT, INSERT, UPDATE, DELETE on both tables
+--     lab_27_reader uses the schema; SELECT on both tables, nothing else
+-- Then run ./pg check 27 1.
+

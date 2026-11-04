@@ -1,0 +1,303 @@
+<p class="lede">
+  A subquery is a <code>SELECT</code> written inside another statement. A CTE (common table expression) is a
+  named subquery you write at the top with <code>WITH</code>, so the main query reads top to bottom. This annex
+  shows the three shapes a subquery can have, the three tests that use one (<code>IN</code>, <code>EXISTS</code>,
+  <code>NOT EXISTS</code>), correlated subqueries, and CTEs.
+</p>
+
+<h2 id="lab">Set up</h2>
+<p>
+  The playgrounds run PostgreSQL 18 in your browser on a small copy of the shop (8 customers, 8 products, 12
+  orders). Customer 6 has never ordered and product 8 has never been sold; both help the examples. The same queries
+  run on the Docker database with <code>./pg psql</code>.
+</p>
+
+<h2 id="scalar">1. Scalar subquery: one value</h2>
+<p>
+  A <em>scalar</em> subquery returns exactly one row with one column, and can be used anywhere a single value can.
+  If it returns more than one row, PostgreSQL raises an error; if it returns none, the value is NULL. Wrap it in
+  parentheses.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">compare each product with the average price</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select name,
+       price,
+       (select round(avg(price), 2) from shop.products) as average_price,
+       price - (select avg(price) from shop.products)   as difference
+from shop.products
+where price &gt; (select avg(price) from shop.products)
+order by price desc;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<h2 id="row">2. Row subquery: several columns, one row</h2>
+<p>
+  A <em>row</em> subquery returns one row with several columns, and you compare it with a row constructor
+  <code>(a, b)</code>. It is a compact way to ask “the row that is the most recent / cheapest / largest”.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">the orders that share the biggest order's status and country</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select id, status, shipping_country, total
+from shop.orders
+where (status, shipping_country) = (
+        select status, shipping_country
+        from shop.orders
+        order by total desc, id
+        limit 1)
+order by id;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<h2 id="table">3. Table subquery: many rows</h2>
+<p>
+  A <em>table</em> subquery returns any number of rows and columns. Use it in two places: after
+  <code>IN</code>/<code>EXISTS</code> in a <code>WHERE</code> (next sections), or in <code>FROM</code> as a
+  <em>derived table</em>. A derived table must have an alias.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">a derived table: aggregate first, then filter and join</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select c.full_name, s.orders, s.spent
+from (select customer_id, count(*) as orders, sum(total) as spent
+      from shop.orders
+      group by customer_id) s
+join shop.customers c on c.id = s.customer_id
+where s.spent &gt; 100
+order by s.spent desc;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<h2 id="in">4. IN with a subquery</h2>
+<p>
+  <code>x IN (subquery)</code> is true if <code>x</code> equals any value the subquery returns. It reads naturally
+  for “rows whose id appears in this other set”.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">customers who ordered something that was refunded or cancelled</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select id, full_name
+from shop.customers
+where id in (select customer_id
+             from shop.orders
+             where status in ('cancelled', 'refunded'))
+order by id;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<div class="note danger">
+  <span class="note-title">NOT IN breaks when the list contains NULL</span>
+  <p>
+    If the subquery can return a NULL, <code>x NOT IN (subquery)</code> returns no rows at all
+    (<a href="a1-select-basics.html#null">annex A1</a>). Use <code>NOT EXISTS</code> instead. It has no such trap.
+  </p>
+</div>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">see the trap: one NULL empties the result</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">-- referred_by holds NULL for customers nobody referred.
+-- "customers who are not a referrer" should return people. It returns nothing:
+select id, full_name
+from shop.customers
+where id not in (select referred_by from shop.customers);</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<h2 id="exists">5. EXISTS and NOT EXISTS</h2>
+<p>
+  <code>EXISTS (subquery)</code> is true if the subquery returns at least one row. What the subquery selects does
+  not matter, so people write <code>select 1</code>. <code>NOT EXISTS</code> is true if it returns none. The
+  subquery usually refers to the outer row, which makes it <em>correlated</em> (next section).
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">customers with no orders, and customers with a delivered order</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select c.id, c.full_name,
+       not exists (select 1 from shop.orders o where o.customer_id = c.id)
+         as never_ordered,
+       exists (select 1 from shop.orders o
+               where o.customer_id = c.id and o.status = 'delivered')
+         as has_delivered_order
+from shop.customers c
+order by c.id;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>Used in <code>WHERE</code>, the same tests filter rows:</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">the safe anti-join with NOT EXISTS</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select p.id, p.name
+from shop.products p
+where not exists (select 1
+                  from shop.order_items i
+                  where i.product_id = p.id);</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>You want</th><th class="wrap">✅ Reach for</th><th class="wrap">Why</th></tr></thead>
+  <tbody>
+    <tr><td class="wrap">Rows that have a match somewhere else</td><td class="wrap"><code>EXISTS</code> (or <code>IN</code>)</td><td class="wrap">Stops at the first match; no duplicates from the other side, unlike a join</td></tr>
+    <tr><td class="wrap">Rows that have no match</td><td class="wrap"><code>NOT EXISTS</code> (or <code>LEFT JOIN … IS NULL</code>)</td><td class="wrap">Safe with NULLs</td></tr>
+    <tr><td class="wrap">Columns from the other table too</td><td class="wrap"><code>JOIN</code></td><td class="wrap">A subquery in <code>WHERE</code> cannot return columns to the select list</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="correlated">6. Correlated subqueries</h2>
+<p>
+  A subquery is <em>correlated</em> when it uses a column from the outer query. Conceptually it runs once for each
+  outer row, with that row's values. (The planner often rewrites it into a join, so it is not necessarily slow.)
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">each customer's latest order and order count</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select c.full_name,
+       (select count(*) from shop.orders o where o.customer_id = c.id) as orders,
+       (select max(o.ordered_at)::date::text
+        from shop.orders o where o.customer_id = c.id)                 as latest
+from shop.customers c
+where c.id &lt;= 8          -- the subqueries run once per customer row: keep the list short
+order by c.id;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  Another classic: the rows that beat the average <em>of their own group</em>. Here, products priced above the
+  average of their own category:
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">above the average of its own category</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select p.name, p.category_id, p.price
+from shop.products p
+where p.price &gt; (select avg(p2.price)
+                 from shop.products p2
+                 where p2.category_id = p.category_id)
+order by p.category_id, p.price desc;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<div class="note info">
+  <span class="note-title">Window functions are often shorter</span>
+  <p>
+    Questions like “the latest order per customer” or “above the group average” can also be written with window
+    functions or <code>DISTINCT ON</code>. They are covered in
+    <a href="../lessons/08-advanced-queries.html">lesson 8</a>.
+  </p>
+</div>
+
+<h2 id="cte">7. WITH: common table expressions</h2>
+<p>
+  A CTE gives a subquery a name, defined before the main query:
+  <code>WITH name AS (SELECT …) SELECT … FROM name</code>. You can chain several, separated by commas, and later
+  ones can use earlier ones. The query then reads as a sequence of steps instead of nested parentheses.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">three small steps instead of one nested query</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">with paid_orders as (
+  select * from shop.orders
+  where status in ('paid', 'shipped', 'delivered')
+),
+per_customer as (
+  select customer_id, count(*) as orders, sum(total) as spent
+  from paid_orders
+  group by customer_id
+)
+select c.full_name, p.orders, p.spent,
+       round(100 * p.spent / sum(p.spent) over (), 1) as pct_of_revenue
+from per_customer p
+join shop.customers c on c.id = p.customer_id
+order by p.spent desc;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<h3 id="cte-reuse">Use one CTE twice</h3>
+<p>
+  A CTE you refer to more than once is a good reason to write it: you name the logic once.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">customers who spent more than the average customer</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">with spent as (
+  select customer_id, sum(total) as total_spent
+  from shop.orders
+  group by customer_id
+)
+select c.full_name, s.total_spent
+from spent s
+join shop.customers c on c.id = s.customer_id
+where s.total_spent &gt; (select avg(total_spent) from spent)
+order by s.total_spent desc;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<div class="note info">
+  <span class="note-title">CTEs are not an optimisation fence any more</span>
+  <p>
+    Since PostgreSQL 12, a CTE that is referenced once and has no side effects is folded into the main query like a
+    subquery, so splitting a query into CTEs does not by itself make it slower or faster. A CTE referenced more than
+    once is computed once and its result reused. You can force either behaviour with
+    <code>AS MATERIALIZED (…)</code> or <code>AS NOT MATERIALIZED (…)</code>.
+  </p>
+</div>
+
+<h3 id="cte-write">CTEs that change data</h3>
+<p>
+  A CTE can hold an <code>INSERT</code>, <code>UPDATE</code> or <code>DELETE … RETURNING</code> too, so that the
+  rows it changed feed the next step. For example, archive-and-delete in one statement. That, and recursive CTEs
+  (<code>WITH RECURSIVE</code>, for trees and graphs), belong to
+  <a href="../lessons/08-advanced-queries.html">lesson 8</a> and <a href="../lessons/09-changing-data.html">lesson 9</a>.
+</p>
+
+<h2 id="forward">8. How the planner sees all this</h2>
+<p>
+  <code>IN</code>, <code>EXISTS</code>, <code>NOT EXISTS</code> and many correlated subqueries become semi-joins or
+  anti-joins in the plan, and are executed with the same hash, merge or nested-loop algorithms as a normal join. So
+  the choice between a subquery and a join is mostly about which one you can read, as long as you avoid the
+  <code>NOT IN</code> trap. To see what the planner really did, read the plan: <code>EXPLAIN</code> is the subject
+  of <a href="../lessons/13-explain-and-planner.html">lesson 13</a>. Advanced uses of CTEs, <code>LATERAL</code>
+  (a subquery that can refer to the tables before it in <code>FROM</code>), recursive queries and window functions
+  are in <a href="../lessons/08-advanced-queries.html">lesson 8</a>.
+</p>
+
+<h2 id="summary">Summary</h2>
+<ul>
+  <li>A scalar subquery returns one value; a row subquery one row; a table subquery many rows (alias it in <code>FROM</code>).</li>
+  <li><code>IN</code> and <code>EXISTS</code> test for a match; <code>NOT EXISTS</code> is the safe test for “no match”.</li>
+  <li><code>NOT IN</code> returns nothing if the subquery yields a NULL. Prefer <code>NOT EXISTS</code>.</li>
+  <li>A correlated subquery uses a column of the outer row.</li>
+  <li><code>WITH name AS (…)</code> names a step; chain several; reuse one as often as you like.</li>
+</ul>
+
+<h2 id="next">Where to next</h2>
+<p>
+  Make changes to data in <a href="a5-ddl-and-dml.html">annex A5</a>, or move on to
+  <a href="../lessons/01-architecture.html">lesson 1</a> if you are ready for the course proper.
+</p>

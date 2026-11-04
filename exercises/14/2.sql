@@ -1,0 +1,6 @@
+-- Keyset pagination. The last row of page 1 (newest orders first) was
+-- order id 73472, ordered_at '2025-12-31 22:52:20.210931+00'.
+-- Return the next page: the next 5 orders, newest first, as the columns
+-- id, ordered_at, status. Do NOT use OFFSET; use the position of that last
+-- row. Break ties on id so the order is stable.
+-- Then run ./pg check 14 2.

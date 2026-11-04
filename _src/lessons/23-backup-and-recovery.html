@@ -1,0 +1,640 @@
+<p class="lede">
+  A backup is only worth something on the day you restore it. This lesson shows the two kinds of PostgreSQL backup: a
+  <em>logical</em> dump made with <code>pg_dump</code>, and a <em>physical</em> base backup plus archived WAL. It covers
+  restoring each, recovering to a moment just before a mistake, and checking that a restore really worked.
+</p>
+
+<h2 id="goals">Learning goals</h2>
+<ul>
+  <li>Choose between a logical dump and a physical backup, and say what each one can and cannot restore.</li>
+  <li>Make dumps in the plain, custom, directory and tar formats, and say when each format fits.</li>
+  <li>Back up roles and other cluster-wide objects with <code>pg_dumpall --globals-only</code>, because <code>pg_dump</code> leaves them out.</li>
+  <li>Restore with <code>pg_restore</code> using <code>--clean</code>, <code>--if-exists</code>, <code>--no-owner</code>, <code>--role</code> and a list file.</li>
+  <li>Explain how <code>pg_basebackup</code>, WAL archiving and <code>recovery_target_time</code> give point-in-time recovery.</li>
+  <li>Verify a restore with row counts and fingerprints, and explain why an untested backup is not a backup.</li>
+</ul>
+
+<h2 id="lab">Set up for this lesson</h2>
+<p>
+  Use the Docker database. The commands in this lesson run <em>inside the container</em> through <code>./pg exec</code>,
+  because that is where <code>pg_dump</code>, <code>pg_restore</code> and <code>pg_basebackup</code> are installed and
+  where the server's files live. Never practise a restore on <code>shop</code>: make a copy first and work on the
+  copy. The copy is cloned from the course template, so it starts identical to a fresh <code>shop</code>.
+</p>
+
+<figure class="code" data-lang="bash">
+  <figcaption><span class="path">terminal</span><span class="grow"></span><span class="lang">bash</span></figcaption>
+<pre><code>./pg up
+./pg sql "create database lab_s23_scratch template shop_template" postgres
+./pg exec pg_dump --version</code></pre>
+</figure>
+
+<p>
+  The last line prints <code>pg_dump (PostgreSQL) 18.6 …</code>. The in-browser playground cannot run any of these
+  programs: it is a single PostgreSQL process with no file system you can reach, no <code>pg_dump</code> and no WAL archive.
+  It appears only once, for the verification query in section 7.
+</p>
+
+<h2 id="kinds">1. Two kinds of backup</h2>
+
+<p>
+  A <em>logical backup</em> is a description of the data: SQL commands (or an archive of them) that recreate the tables
+  and their rows. A <em>physical backup</em> is a copy of the server's data files, byte for byte. They answer different
+  questions.
+</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Question</th><th class="wrap">Logical: <code>pg_dump</code></th><th class="wrap">Physical: <code>pg_basebackup</code> + WAL</th></tr></thead>
+  <tbody>
+    <tr><td class="wrap">What does it copy?</td><td class="wrap">One database, or chosen schemas and tables</td><td class="wrap">The whole cluster: every database, every role</td></tr>
+    <tr><td class="wrap">Restore into another major version?</td><td class="wrap">Yes, that is one way to upgrade</td><td class="wrap">No, same major version only</td></tr>
+    <tr><td class="wrap">Restore one table?</td><td class="wrap">Yes</td><td class="wrap">No, all or nothing</td></tr>
+    <tr><td class="wrap">Restore to 14:31 yesterday?</td><td class="wrap">No, only to the moment the dump started</td><td class="wrap">Yes, with archived WAL (section 6)</td></tr>
+    <tr><td class="wrap">Speed on a large database</td><td class="wrap">Slow: rows are re-inserted and indexes rebuilt</td><td class="wrap">Fast: files are copied, then WAL is replayed</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>
+  Production systems usually have both: physical backups with WAL archiving for disasters and point-in-time recovery,
+  and logical dumps for moving data, restoring a single table, and upgrades. A <em>snapshot</em> is the view of the data
+  a transaction sees (<a href="15-transactions-and-mvcc.html">lesson 15</a>). <code>pg_dump</code> reads the whole
+  database inside one snapshot, so the dump is consistent even while the application keeps writing, and it does not
+  block normal reads or writes.
+</p>
+
+<h2 id="pg-dump">2. pg_dump and its four formats</h2>
+
+<p>
+  <code>pg_dump</code> connects like any client and writes out one database. The <code>-F</code> option picks the
+  format:
+</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Format</th><th>Option</th><th class="wrap">What you get</th><th class="wrap">Restore with</th></tr></thead>
+  <tbody>
+    <tr><td>plain</td><td><code>-Fp</code> (default)</td><td class="wrap">One SQL script you can read and edit</td><td class="wrap"><code>psql -f</code></td></tr>
+    <tr><td>custom</td><td><code>-Fc</code></td><td class="wrap">One compressed archive file</td><td class="wrap"><code>pg_restore</code>, with selective and parallel restore</td></tr>
+    <tr><td>directory</td><td><code>-Fd</code></td><td class="wrap">A directory: one compressed file per table plus a <code>toc.dat</code></td><td class="wrap"><code>pg_restore</code>; the only format that can also be <em>dumped</em> in parallel (<code>-j</code>)</td></tr>
+    <tr><td>tar</td><td><code>-Ft</code></td><td class="wrap">A tar file of the directory layout, not compressed</td><td class="wrap"><code>pg_restore</code></td></tr>
+  </tbody>
+</table>
+</div>
+
+<figure class="code" data-lang="bash">
+  <figcaption><span class="path">terminal: one dump in each format</span><span class="grow"></span><span class="lang">bash</span></figcaption>
+<pre><code>./pg exec pg_dump -U postgres -Fp -d lab_s23_scratch -f /tmp/lab_s23.sql
+./pg exec pg_dump -U postgres -Fc -d lab_s23_scratch -f /tmp/lab_s23.dump
+./pg exec pg_dump -U postgres -Fd -j 2 -d lab_s23_scratch -f /tmp/lab_s23_dir
+./pg exec pg_dump -U postgres -Ft -d lab_s23_scratch -f /tmp/lab_s23.tar</code></pre>
+</figure>
+
+<p>
+  On the course database (about 240 MB on disk), the plain script was 129 MB and the custom archive 29 MB, because the
+  custom format compresses by default. Use <code>-Fc</code> unless you have a reason not to: it is one file, it is
+  compressed, and <code>pg_restore</code> can pick objects out of it. You can read an archive's table of contents
+  without restoring it:
+</p>
+
+<figure class="code" data-lang="bash">
+  <figcaption><span class="path">terminal</span><span class="grow"></span><span class="lang">bash</span></figcaption>
+<pre><code>./pg exec pg_restore -l /tmp/lab_s23.dump</code></pre>
+</figure>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">output (first lines)</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code>;
+; Archive created at 2026-11-04 16:56:56 UTC
+;     dbname: lab_s23_scratch
+;     TOC Entries: 50
+;     Compression: gzip
+;     Dump Version: 1.16-0
+;     Format: CUSTOM
+;     Integer: 4 bytes
+;     Offset: 8 bytes
+;     Dumped from database version: 18.6 (Debian 18.6-1.pgdg13+2)
+;     Dumped by pg_dump version: 18.6 (Debian 18.6-1.pgdg13+2)
+;
+;
+; Selected TOC Entries:
+;
+9; 2615 16387 SCHEMA - analytics postgres
+7; 2615 16385 SCHEMA - course postgres
+8; 2615 16386 SCHEMA - shop postgres
+2; 3079 16388 EXTENSION - pg_stat_statements</code></pre>
+</figure>
+
+<p>
+  Each line after the header is one <em>archive entry</em>: a schema, a table definition, a table's data
+  (<code>TABLE DATA</code>), a constraint, an index. Section 4 uses these lines to restore a single table.
+</p>
+
+<h3>Choosing what to dump</h3>
+
+<figure class="code" data-lang="bash">
+  <figcaption><span class="path">terminal: narrower dumps</span><span class="grow"></span><span class="lang">bash</span></figcaption>
+<pre><code>./pg exec pg_dump -U postgres -Fc -n shop -d lab_s23_scratch -f /tmp/shop_only.dump          # one schema
+./pg exec pg_dump -U postgres -Fc -t shop.products -d lab_s23_scratch -f /tmp/products.dump  # one table
+./pg exec pg_dump -U postgres -Fc --exclude-table-data=analytics.events -d lab_s23_scratch -f /tmp/no_events.dump
+./pg exec pg_dump -U postgres -s -d lab_s23_scratch -f /tmp/schema.sql                       # definitions, no rows</code></pre>
+</figure>
+
+<p>
+  <code>--exclude-table-data</code> keeps the table's definition but skips its rows. It is useful when one huge,
+  rebuildable table (a log, an event stream) dominates the dump.
+</p>
+
+<div class="note warn">
+  <span class="note-title">A data-only dump of a self-referencing table</span>
+  <p>
+    <code>shop.categories</code> has a foreign key to itself (<code>parent_id</code>). Dumping it with
+    <code>--data-only</code> prints the warning <em>there are circular foreign-key constraints on this table</em>,
+    because the rows may not load in an order that satisfies the key. Prefer full dumps; a data-only dump is for loading
+    into tables that already exist, and then you need <code>--disable-triggers</code> or a careful order.
+  </p>
+</div>
+
+<h2 id="globals">3. Roles are not in the dump: pg_dumpall</h2>
+
+<p>
+  Roles, their passwords and memberships, and tablespaces are <em>cluster-wide</em>: they belong to the server, not
+  to any one database (<a href="03-roles-and-users.html">lesson 3</a>). <code>pg_dump</code> dumps one database, so it
+  <strong>does not include roles</strong>. Its archive says <em>who owns</em> each table and <em>who was granted</em>
+  what, but not how to create those roles. Restore it on a new server without them and every <code>ALTER … OWNER TO</code>
+  and <code>GRANT</code> fails.
+</p>
+
+<p>
+  <code>pg_dumpall</code> dumps the whole cluster as one plain SQL script. Its <code>--globals-only</code> option writes
+  just the cluster-wide part:
+</p>
+
+<figure class="code" data-lang="bash">
+  <figcaption><span class="path">terminal: the roles and tablespaces of the cluster</span><span class="grow"></span><span class="lang">bash</span></figcaption>
+<pre><code>./pg exec pg_dumpall -U postgres --globals-only -f /tmp/globals.sql
+./pg exec grep -c "CREATE ROLE" /tmp/globals.sql</code></pre>
+</figure>
+
+<p>
+  The file contains <code>CREATE ROLE</code> and <code>ALTER ROLE … PASSWORD 'SCRAM-SHA-256$…'</code> lines, so it holds
+  the password verifiers of every role. Store it as carefully as the data. <code>--no-role-passwords</code> leaves the
+  passwords out, and <code>--roles-only</code> skips tablespaces too.
+</p>
+
+<p>
+  Settings attached to a database with <code>ALTER DATABASE … SET</code>, and grants on the database itself such as
+  <code>CONNECT</code>, are written only when you dump with <code>-C</code> (<code>--create</code>). With
+  <code>-C</code> the dump starts with <code>CREATE DATABASE</code> and recreates those too.
+</p>
+
+<div class="note danger">
+  <span class="note-title">A restore that fails on owners is a restore that fails at 3 a.m.</span>
+  <p>
+    The standard pair is <code>pg_dumpall --globals-only</code> plus one <code>pg_dump -Fc</code> per database. Back up
+    both on the same schedule, and restore the globals first. If you cannot (a managed service often hides the real
+    superuser), restore with <code>--no-owner</code> and reapply grants, as section 4 shows.
+  </p>
+</div>
+
+<h2 id="restore">4. pg_restore</h2>
+
+<p>
+  A restore needs a target database. To get an exact copy, start from an empty database made from
+  <code>template0</code>: <code>template1</code> may contain objects someone added, which would then clash with the dump.
+</p>
+
+<figure class="code" data-lang="bash">
+  <figcaption><span class="path">terminal: dump, restore, compare</span><span class="grow"></span><span class="lang">bash</span></figcaption>
+<pre><code>./pg exec pg_dump -U postgres -Fc -d lab_s23_scratch -f /tmp/lab_s23.dump
+./pg sql "create database lab_s23_copy template template0" postgres
+./pg exec pg_restore -U postgres -d lab_s23_copy /tmp/lab_s23.dump
+./pg sql "select (select count(*) from shop.orders) as orders,
+                 (select count(*) from shop.order_items) as items,
+                 (select count(*) from analytics.events) as events" lab_s23_copy</code></pre>
+</figure>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">output (the same three numbers as in lab_s23_scratch)</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code> orders | items  | events
+--------+--------+---------
+ 200000 | 599702 | 1000000</code></pre>
+</figure>
+
+<p>
+  Restore the same archive into the same database a second time and it fails: the objects already exist.
+  <code>pg_restore</code> reports each failure and carries on, finishing with
+  <code>pg_restore: error: could not execute query: ERROR:  schema "analytics" already exists</code> … and
+  <code>pg_restore: warning: errors ignored on restore: 38</code>. The options that matter:
+</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Option</th><th class="wrap">What it does</th><th class="wrap">Use it when</th></tr></thead>
+  <tbody>
+    <tr><td><code>--clean</code> (<code>-c</code>)</td><td class="wrap">Drops each object before recreating it</td><td class="wrap">You restore over an existing copy</td></tr>
+    <tr><td><code>--if-exists</code></td><td class="wrap">Makes those drops <code>DROP … IF EXISTS</code></td><td class="wrap">Always together with <code>--clean</code>, so missing objects are not errors</td></tr>
+    <tr><td><code>--no-owner</code> (<code>-O</code>)</td><td class="wrap">Skips the <code>ALTER … OWNER TO</code> commands; the restoring role owns everything</td><td class="wrap">The original owner roles do not exist on the target</td></tr>
+    <tr><td><code>--role=NAME</code></td><td class="wrap">Runs <code>SET ROLE NAME</code> before restoring, so objects are created as that role</td><td class="wrap">Combined with <code>--no-owner</code>: give everything to the application owner role</td></tr>
+    <tr><td><code>--no-acl</code> (<code>-x</code>)</td><td class="wrap">Skips <code>GRANT</code>/<code>REVOKE</code></td><td class="wrap">You will apply the target's own privilege scheme</td></tr>
+    <tr><td><code>--exit-on-error</code> (<code>-e</code>)</td><td class="wrap">Stops at the first error instead of continuing</td><td class="wrap">Scripts and tests: a half restore should not look like success</td></tr>
+    <tr><td><code>--single-transaction</code> (<code>-1</code>)</td><td class="wrap">Everything or nothing</td><td class="wrap">Small restores where a partial result is worse than none</td></tr>
+    <tr><td><code>-j N</code></td><td class="wrap">Restores with N parallel jobs (custom and directory formats)</td><td class="wrap">Large restores on a machine with spare cores</td></tr>
+    <tr><td><code>-C</code> with <code>-d postgres</code></td><td class="wrap">Creates the database named in the archive, then restores into it</td><td class="wrap">Recreating a database with its own settings</td></tr>
+  </tbody>
+</table>
+</div>
+
+<figure class="code" data-lang="bash">
+  <figcaption><span class="path">terminal: restore over the copy, then hand it to another owner</span><span class="grow"></span><span class="lang">bash</span></figcaption>
+<pre><code>./pg exec pg_restore -U postgres -d lab_s23_copy --clean --if-exists /tmp/lab_s23.dump
+
+# every restored object owned by an application role instead of postgres
+./pg exec pg_restore -U postgres -d some_db --no-owner --role=app_owner --exit-on-error /tmp/lab_s23.dump</code></pre>
+</figure>
+
+<p>
+  The second command needs <code>app_owner</code> to exist and to be allowed to create schemas in <code>some_db</code>
+  (the simplest way is to make it the database's owner). Exercise 3 does exactly this.
+</p>
+
+<h3>Restoring one table</h3>
+
+<p>
+  <code>pg_restore -t order_items</code> restores a table's definition and its rows, but <strong>not</strong> its
+  primary key, foreign keys or indexes: those are separate archive entries. In a test, the table came back with all
+  599,702 rows and zero constraints. To restore everything that belongs to the table, write the matching lines of the
+  table of contents to a <em>list file</em> and pass it with <code>-L</code>:
+</p>
+
+<figure class="code" data-lang="bash">
+  <figcaption><span class="path">terminal: every archive entry of shop.order_items</span><span class="grow"></span><span class="lang">bash</span></figcaption>
+<pre><code>./pg exec bash -c "pg_restore -l /tmp/lab_s23.dump | grep ' shop order_items ' > /tmp/items.list"
+./pg exec cat /tmp/items.list</code></pre>
+</figure>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">output</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code>233; 1259 16538 TABLE shop order_items postgres
+3528; 0 16538 TABLE DATA shop order_items postgres
+3360; 2606 16548 CONSTRAINT shop order_items order_items_pkey postgres
+3369; 2606 16549 FK CONSTRAINT shop order_items order_items_order_id_fkey postgres
+3370; 2606 16554 FK CONSTRAINT shop order_items order_items_product_id_fkey postgres</code></pre>
+</figure>
+
+<p>
+  Then <code>pg_restore -L /tmp/items.list -d lab_s23_copy /tmp/lab_s23.dump</code> restores just those five entries, in
+  the right order. You can also edit a list file by hand: delete lines, or comment them out with <code>;</code>.
+  <code>-L</code> restores only what the list names, so this does not restore objects the table depends on (here the
+  enum type and the referenced tables must already exist), nor objects that depend on it, such as a view over it.
+</p>
+
+<div class="note tip">
+  <span class="note-title">Planner statistics after a restore</span>
+  <p>
+    By default the course container's 18.6 <code>pg_dump</code> does not write planner statistics, so a restored
+    database has none until <code>ANALYZE</code> runs, and the first queries can get poor plans. Run
+    <code>vacuumdb --analyze-in-stages</code> (or <code>ANALYZE</code>) right after a large restore. PostgreSQL 18's
+    <code>pg_dump</code> can carry statistics if you ask with <code>--statistics</code>.
+  </p>
+</div>
+
+<h2 id="physical">5. Physical backups: pg_basebackup</h2>
+
+<p>
+  <code>pg_basebackup</code> copies the whole data directory of a running server over a replication connection. The
+  copy is taken while the server keeps writing, so on its own it is inconsistent. It becomes consistent when the WAL
+  written during the copy is replayed over it. WAL (<a href="22-wal-and-durability.html">lesson 22</a>) is the server's
+  log of every change. <code>-X stream</code> makes <code>pg_basebackup</code> fetch that WAL alongside the files, so the
+  backup is self-contained.
+</p>
+
+<figure class="code" data-lang="bash">
+  <figcaption><span class="path">terminal: a base backup of the course server, then verify it</span><span class="grow"></span><span class="lang">bash</span></figcaption>
+<pre><code>./pg exec pg_basebackup -U postgres -D /tmp/base1 -Ft -X stream
+./pg exec ls -l /tmp/base1
+./pg exec pg_verifybackup -n /tmp/base1
+./pg exec rm -rf /tmp/base1</code></pre>
+</figure>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">output of ls -l</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code>-rw------- 1 root root     581698 Nov  4 15:30 backup_manifest
+-rw------- 1 root root 2268303360 Nov  4 15:30 base.tar
+-rw------- 1 root root  251674112 Nov  4 15:30 pg_wal.tar</code></pre>
+</figure>
+
+<p>
+  <code>-Ft</code> writes tar files; <code>-Fp</code> writes a ready-to-start data directory. The
+  <code>backup_manifest</code> lists every file with a checksum, and <code>pg_verifybackup</code> checks the backup
+  against it and prints <code>backup successfully verified</code>. For tar backups it needs <code>-n</code> (skip
+  parsing the WAL), otherwise it stops with <em>pg_waldump cannot read tar files</em>. This backup is 2.2 GB, ten times the logical dump, because it copies the
+  whole cluster as files: every database, every index and the WAL. Delete it when you are done; the container's disk is
+  not a backup location.
+</p>
+
+<div class="note warn">
+  <span class="note-title">Backups taken on the database server are not backups</span>
+  <p>
+    The commands above write to <code>/tmp</code> inside the container to show how the tools work. A real backup must
+    live somewhere that does not fail together with the server: another machine, another region, object storage. Tools
+    such as pgBackRest and Barman manage base backups, WAL archives, retention and off-site copies for you, and they are
+    what most teams run in production.
+  </p>
+</div>
+
+<h2 id="pitr">6. WAL archiving and point-in-time recovery</h2>
+
+<p>
+  A base backup restores the cluster to the moment the backup finished. To get to any later moment, you also keep every
+  WAL segment the server writes after that. This is <em>WAL archiving</em>: when a 16 MB segment file is full, the server
+  runs <code>archive_command</code> to copy it somewhere safe. Restoring a base backup and replaying archived WAL up to a
+  chosen time is <em>point-in-time recovery</em> (PITR).
+</p>
+
+<figure class="dia">
+  <div class="dia-hold">
+    <svg class="d" viewBox="0 0 860 220" role="img" aria-labelledby="pitr-t pitr-d">
+      <title id="pitr-t">Point-in-time recovery: a base backup plus archived WAL replayed up to a target time</title>
+      <desc id="pitr-d">A timeline from left to right. At the left, a base backup. After it, a row of archived WAL segments. A red mark shows the accidental DELETE. Recovery starts from the base backup and replays WAL up to the target time, just before the DELETE.</desc>
+      <defs>
+        <marker id="pa" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z"/></marker>
+      </defs>
+      <path class="line rail" d="M30 110 L830 110"/>
+      <rect class="box accent" x="40" y="80" width="150" height="60" rx="8"/>
+      <text class="hd ctr" x="115" y="106">base backup</text>
+      <text class="lbl ctr" x="115" y="126">pg_basebackup</text>
+      <rect class="box teal" x="210" y="88" width="90" height="44" rx="6"/>
+      <text class="lbl ctr" x="255" y="115">WAL …01</text>
+      <rect class="box teal" x="310" y="88" width="90" height="44" rx="6"/>
+      <text class="lbl ctr" x="355" y="115">WAL …02</text>
+      <rect class="box teal" x="410" y="88" width="90" height="44" rx="6"/>
+      <text class="lbl ctr" x="455" y="115">WAL …03</text>
+      <rect class="box teal" x="510" y="88" width="90" height="44" rx="6"/>
+      <text class="lbl ctr" x="555" y="115">WAL …04</text>
+      <rect class="box dash" x="610" y="88" width="90" height="44" rx="6"/>
+      <text class="lbl ctr" x="655" y="115">WAL …05</text>
+      <path class="line red" d="M590 60 L590 160"/>
+      <text class="hd ctr" x="590" y="50">DELETE (the accident)</text>
+      <path class="line accent" d="M115 175 L570 175" marker-end="url(#pa)"/>
+      <text class="mut tiny" x="342" y="200" text-anchor="middle">restore the base backup, replay archived WAL, stop at recovery_target_time</text>
+      <path class="line accent dash" d="M572 150 L572 172"/>
+      <text class="mut tiny" x="760" y="60" text-anchor="middle">archived as the</text>
+      <text class="mut tiny" x="760" y="76" text-anchor="middle">server writes</text>
+    </svg>
+  </div>
+  <figcaption>Recovery replays the archive up to the <b>target</b>, a moment just before the accident, and stops there.</figcaption>
+</figure>
+
+<p>
+  WAL archiving is configured on the server with three settings. All three appear in <code>pg_settings</code> on the
+  course server, where archiving is off:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">archiving settings (read-only look)</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select name, setting, context
+from pg_settings
+where name in ('wal_level', 'archive_mode', 'archive_command')
+order by name;</code></pre>
+</figure>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">output in the course container</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code>      name       |  setting   |  context
+-----------------+------------+------------
+ archive_command | (disabled) | sighup
+ archive_mode    | off        | postmaster
+ wal_level       | replica    | postmaster</code></pre>
+</figure>
+
+<p>
+  <code>archive_mode</code> has context <code>postmaster</code>, so turning it on needs a restart
+  (<a href="21-configuration.html">lesson 21</a>). Do not change these on the shared course container. The recipe below
+  was run on a separate, throwaway server, and the log lines are what that server printed.
+</p>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">postgresql.conf on the server you protect</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code>wal_level = replica            # the default; enough for archiving and physical replicas
+archive_mode = on
+archive_command = 'test ! -f /backup/wal/%f &amp;&amp; cp %p /backup/wal/%f'</code></pre>
+</figure>
+
+<p>
+  <code>%p</code> is the path of the finished segment and <code>%f</code> its file name. The <code>test ! -f</code> refuses
+  to overwrite a file that is already archived. The command must return success only once the file is safely stored:
+  the server keeps a segment until archiving reports success, and retries otherwise. <code>pg_stat_archiver</code> shows
+  how it is going, through the columns <code>archived_count</code>, <code>last_archived_wal</code> and
+  <code>failed_count</code>.
+</p>
+
+<h3>Recovering to a moment</h3>
+
+<p>
+  Suppose someone ran <code>delete from t</code> by mistake. You note a time just before it, then:
+</p>
+
+<ol>
+  <li>Stop the damaged server (or build the recovery on another machine, which is safer).</li>
+  <li>Put a copy of the base backup in place as the new data directory.</li>
+  <li>Tell it where the archive is and where to stop, then create an empty file called <code>recovery.signal</code> in the data directory.</li>
+  <li>Start the server. It replays archived WAL up to the target, then opens for writes.</li>
+</ol>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">postgresql.conf of the recovering copy</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code>restore_command = 'cp /backup/wal/%f %p'
+recovery_target_time = '2026-11-04 15:55:57.101118+00'
+recovery_target_action = 'promote'</code></pre>
+</figure>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">server log of the recovering copy (throwaway test server)</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code>LOG:  starting point-in-time recovery to 2026-11-04 15:55:57.101118+00
+LOG:  restored log file "000000010000000000000003" from archive
+LOG:  consistent recovery state reached at 0/2000120
+LOG:  restored log file "000000010000000000000004" from archive
+LOG:  recovery stopping before commit of transaction 755, time 2026-11-04 15:55:59.133624+00
+LOG:  archive recovery complete</code></pre>
+</figure>
+
+<p>
+  Transaction 755 was the <code>DELETE</code>. Recovery stopped before its commit, so the table came back with all of
+  its rows. <code>recovery_target_action</code> defaults to <code>pause</code>, which leaves the server read-only at the
+  target so you can look around before you commit to that point. <code>promote</code> ends recovery and opens the server
+  for writes. Instead of a time you can stop at a transaction (<code>recovery_target_xid</code>), a WAL position
+  (<code>recovery_target_lsn</code>) or a named restore point created earlier with <code>pg_create_restore_point()</code>.
+</p>
+
+<div class="note warn">
+  <span class="note-title">The archive must be complete</span>
+  <p>
+    Recovery can only replay WAL it has. One missing segment and recovery stops there, no matter what the target is. A
+    base backup older than your oldest archived segment is useless for PITR. Monitor <code>pg_stat_archiver.failed_count</code>,
+    and keep base backups and WAL under the same retention policy.
+  </p>
+</div>
+
+<h2 id="test">7. An untested backup is not a backup</h2>
+
+<p>
+  Backups fail quietly. Common causes: the job stopped running months ago, the archive is missing a segment, the
+  roles were never dumped, the file is truncated, or nobody knows the restore steps. You find out only when you
+  restore. So restore on a schedule, into a scratch server, and check the result:
+</p>
+
+<ol>
+  <li>The restore finished without errors (use <code>--exit-on-error</code> so a failure is loud).</li>
+  <li>Row counts of the important tables match the source at the time of the backup.</li>
+  <li>A <em>fingerprint</em> of key tables matches. A fingerprint here is a hash over the rows in a fixed order, so any changed value changes it.</li>
+  <li>The application can connect as its own role and run a few real queries.</li>
+  <li>You wrote down how long the restore took. That number is your real recovery time.</li>
+</ol>
+
+<p>
+  Run this on the original and on the restored copy. If the two outputs are identical, so is the data in those
+  columns. It runs in the playground too, against its small shop:
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">a row count and a fingerprint per table</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">-- Run this on the original and on the restored copy. Equal lines = same data.
+select 'shop.orders' as table_name, count(*) as row_count,
+       md5(string_agg(id || ':' || status || ':' || total, ',' order by id)) as fingerprint
+from shop.orders
+union all
+select 'shop.products', count(*),
+       md5(string_agg(id || ':' || sku || ':' || price || ':' || stock, ',' order by id))
+from shop.products;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  In the playground you get 12 orders and 8 products. In the Docker database the same query returns 200000 orders with
+  fingerprint <code>7ea613783b108e6e025522a34219968c</code> and 500 products with
+  <code>cc940a88a94301e4fae165f4897a6687</code>. Run it on a restored copy and you should see exactly those values.
+</p>
+
+<div class="note info">
+  <span class="note-title">Two numbers to agree on before you need them</span>
+  <p>
+    The <em>recovery point objective</em> (RPO) is how much recent data you can afford to lose. The <em>recovery time
+    objective</em> (RTO) is how long you can be down. A nightly dump means an RPO of up to a day. WAL archiving brings it
+    down to minutes or less. Only a timed test restore tells you your RTO.
+  </p>
+</div>
+
+<h2 id="when">When to use, when not to</h2>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Situation</th><th class="wrap">✅ Do this</th><th class="wrap">❌ Not this</th></tr></thead>
+  <tbody>
+    <tr><td class="wrap">Protect a production cluster against disk loss and mistakes</td><td class="wrap">Base backups plus continuous WAL archiving, stored off the server (pgBackRest, Barman or the provider's service)</td><td class="wrap">A nightly <code>pg_dump</code> as the only backup</td></tr>
+    <tr><td class="wrap">Copy one database to another server or a newer major version</td><td class="wrap"><code>pg_dump -Fc</code>, then <code>pg_restore</code>, plus <code>pg_dumpall --globals-only</code></td><td class="wrap">Copying the data directory between major versions</td></tr>
+    <tr><td class="wrap">Get back one table someone dropped</td><td class="wrap">Restore it from a recent dump with a list file (<code>-L</code>)</td><td class="wrap">PITR of the whole cluster, unless you have no dump</td></tr>
+    <tr><td class="wrap">Undo a bad <code>DELETE</code> from 20 minutes ago</td><td class="wrap">PITR into a separate server, then copy the rows back</td><td class="wrap">Recover the production server itself in place; you lose everything written after the target</td></tr>
+    <tr><td class="wrap">Restore where the original owner roles do not exist</td><td class="wrap"><code>--no-owner --role=app_owner</code></td><td class="wrap">Ignoring the hundreds of <code>OWNER TO</code> errors</td></tr>
+    <tr><td class="wrap">Know that the backups work</td><td class="wrap">A scheduled, timed test restore with counts and fingerprints</td><td class="wrap">Checking that the backup file exists</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="inspect">Inspect it</h2>
+
+<p>Before the exercises, see what the course server would need for PITR and how large a dump will be:</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">archiving status and database sizes</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select archived_count, failed_count, last_archived_wal from pg_stat_archiver;
+
+select datname, pg_size_pretty(pg_database_size(datname)) as size
+from pg_database
+where datallowconn
+order by pg_database_size(datname) desc;</code></pre>
+</figure>
+
+<p>
+  <code>archived_count</code> is 0 in the course container, because archiving is off. Clean up the scratch databases
+  and files from this lesson:
+</p>
+
+<figure class="code" data-lang="bash">
+  <figcaption><span class="path">terminal</span><span class="grow"></span><span class="lang">bash</span></figcaption>
+<pre><code>./pg sql "drop database if exists lab_s23_copy with (force)" postgres
+./pg sql "drop database if exists lab_s23_scratch with (force)" postgres
+./pg exec bash -c "rm -rf /tmp/lab_s23* /tmp/items.list /tmp/globals.sql /tmp/shop_only.dump /tmp/products.dump /tmp/no_events.dump /tmp/schema.sql"</code></pre>
+</figure>
+
+<h2 id="exercises">Your turn</h2>
+
+<p>
+  These exercises call <code>pg_dump</code> and <code>pg_restore</code> from inside the SQL file, with psql's
+  <code>\!</code> command, which runs a shell command next to the server. <code>\setenv PGDATABASE :DBNAME</code> sets
+  the environment variable <code>PGDATABASE</code> to the name of the database the file runs in, so the tools pick that
+  database. The checker runs your file in a fresh copy of the database each time.
+</p>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 1</span><span class="grow"></span><span class="lvl">basic</span></div>
+  <div class="ex-body">
+    <p>
+      Make a custom-format dump of the database the file runs in and save it as <code>/tmp/lab_23_1.dump</code> inside the
+      container. The check reads the archive's header and table of contents.
+    </p>
+    <p>Open <code>exercises/23/1.sql</code>, write your answer, then run <code>./pg check 23 1</code>.</p>
+  </div>
+  {{stub 23 1}}
+  <details><summary>Hint</summary><p>After the two <code>\setenv</code> lines, one <code>\!</code> line is enough. <code>pg_dump</code> reads <code>PGDATABASE</code> and <code>PGUSER</code>, so you need only <code>-Fc</code> and <code>-f</code>.</p></details>
+  {{solution 23 1}}
+</section>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 2</span><span class="grow"></span><span class="lvl">intermediate</span></div>
+  <div class="ex-body">
+    <p>
+      Dump the database, drop <code>shop.order_items</code>, then restore only that table from the dump: its rows, its
+      primary key and both of its foreign keys.
+    </p>
+    <p>Open <code>exercises/23/2.sql</code>, write your answer, then run <code>./pg check 23 2</code>.</p>
+  </div>
+  {{stub 23 2}}
+  <details><summary>Hint</summary><p><code>pg_restore -t</code> leaves the constraints out. Section 4 shows how to select every archive entry for one table with <code>pg_restore -l</code>, <code>grep</code> and <code>-L</code>.</p></details>
+  {{solution 23 2}}
+</section>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 3</span><span class="grow"></span><span class="lvl">challenge</span></div>
+  <div class="ex-body">
+    <p>
+      Create a role <code>lab_23_owner</code> and a database <code>lab_23_restored</code> owned by it. Then restore the
+      <code>shop</code> schema of the current database into it so that every restored object belongs to
+      <code>lab_23_owner</code>, and make the restore stop at the first error.
+    </p>
+    <p>Open <code>exercises/23/3.sql</code>, write your answer, then run <code>./pg check 23 3</code>.</p>
+  </div>
+  {{stub 23 3}}
+  <details><summary>Hint</summary><p>Two <code>pg_restore</code> options together: one skips the archive's owner commands, the other makes the restore run as a given role. <code>CREATE DATABASE</code> cannot run inside a transaction, but a psql file runs each statement on its own, so that is fine here.</p></details>
+  {{solution 23 3}}
+</section>
+
+<h2 id="summary">Summary</h2>
+<ul>
+  <li>A logical dump (<code>pg_dump</code>) copies one database as SQL or an archive; a physical backup (<code>pg_basebackup</code>) copies the whole cluster's files.</li>
+  <li>Use <code>-Fc</code> by default; <code>-Fd</code> when you want parallel dumps; plain SQL when a person must read it.</li>
+  <li><code>pg_dump</code> leaves out roles and tablespaces. Back them up with <code>pg_dumpall --globals-only</code>.</li>
+  <li><code>pg_restore</code> can clean first, skip owners, run as a role, stop on error, and restore exactly the entries in a list file.</li>
+  <li>Base backups plus archived WAL give point-in-time recovery: replay to <code>recovery_target_time</code>, then promote.</li>
+  <li>A backup is proven only by a timed test restore whose counts and fingerprints match.</li>
+</ul>
+
+<h2 id="next">Looking ahead</h2>
+<p>
+  The base backup and the WAL stream you saw here are the same parts a replica is built from. In
+  <a href="24-replication.html">lesson 24</a>, a standby server replays the WAL continuously instead of from an
+  archive, and you will see what failover and replication lag mean in practice.
+</p>

@@ -1,0 +1,12 @@
+-- Partition analytics.events by month, then apply retention.
+-- 1. Create analytics.events_p with the same columns as analytics.events
+--    (id bigint, occurred_at timestamptz, customer_id integer, kind text,
+--    payload jsonb default '{}'), partitioned by RANGE (occurred_at). Give it
+--    a primary key that PostgreSQL accepts.
+-- 2. Create one partition per month of 2025 named analytics.events_2025_01 ...
+--    analytics.events_2025_12, plus analytics.events_default.
+-- 3. Copy all rows of analytics.events into it (keep the ids).
+-- 4. Retention: remove January 2025 the cheap way (detach, then drop that
+--    partition). No row from January may remain, and the other 11 months must.
+-- Run ./pg check 20 3 when you are done (the copy takes a few seconds).
+

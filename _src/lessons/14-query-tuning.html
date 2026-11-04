@@ -1,0 +1,642 @@
+<p class="lede">
+  Tuning a query is not guessing which index might help. It is a loop: find out which statements cost the most,
+  look at one plan, change one thing, and measure again. This lesson gives you that loop, shows you how to
+  find the expensive statements with <code>pg_stat_statements</code>, and covers two patterns that cause a
+  large share of real-world slowness: <code>OFFSET</code> pagination and the “N+1” query.
+</p>
+
+<h2 id="goals">Learning goals</h2>
+<ul>
+  <li>Follow a repeatable tuning method: measure, pick one target, read its plan, change one thing, measure again.</li>
+  <li>Find the most expensive statements with <code>pg_stat_statements</code> and explain what <code>calls</code>, <code>total_exec_time</code> and <code>mean_exec_time</code> tell you.</li>
+  <li>Read the <code>Buffers</code> lines of <code>EXPLAIN (ANALYZE, BUFFERS)</code> and use them to compare two versions of a query.</li>
+  <li>Rewrite a predicate so that an index can serve it.</li>
+  <li>Replace <code>OFFSET</code> pagination with keyset pagination, including the tie-break that keeps it correct.</li>
+  <li>Recognise an N+1 pattern from the statistics and replace it with one query.</li>
+</ul>
+
+<h2 id="lab">Set up for this lesson</h2>
+<p>
+  Use the <code>shop</code> database in the Docker container. Run <code>./pg up</code> first if it is not running.
+  Everything in the first part of the lesson only <em>reads</em> from <code>shop</code>. When a step creates an index, the
+  lesson tells you to do it in a throwaway copy of the database, so the plans in <code>shop</code> stay the same for
+  every lesson:
+</p>
+
+<figure class="code" data-lang="bash">
+  <figcaption><span class="path">terminal</span><span class="grow"></span><span class="lang">bash</span></figcaption>
+<pre><code>./pg sql "create database lab_14_try template shop_template" postgres
+./pg psql lab_14_try          # experiment here
+# when you are done:
+./pg sql "drop database lab_14_try with (force)" postgres</code></pre>
+</figure>
+
+<p>
+  The exercises are checked in their own fresh copies, so the checker never touches your experiments.
+</p>
+
+<div class="note info">
+  <span class="note-title">Docker versus the browser playground</span>
+  <p>
+    The plans, buffer counts and statistics in this lesson come from the Docker database, where
+    <code>analytics.events</code> has 1 000 000 rows. The playgrounds in the page run PostgreSQL in your browser on a tiny
+    copy of the shop (a dozen orders, eight customers). They are good for checking that a rewrite returns the same
+    rows, but their plans and timings are illustrative only. The browser engine also has no
+    <code>pg_stat_statements</code>: that extension is preloaded only in the Docker container.
+  </p>
+</div>
+
+<h2 id="method">1. A repeatable method</h2>
+
+<p>
+  Without a method, tuning turns into trying things. Use these five steps and do not skip ahead:
+</p>
+
+<ol>
+  <li><strong>Find the target.</strong> Pick the statement that costs the most in total, not the one that merely looks ugly.</li>
+  <li><strong>Reproduce it.</strong> Run it by hand with real parameter values. Write down the plan and the numbers.</li>
+  <li><strong>Read the plan.</strong> Where are the rows and the buffers spent? Is the estimate close to what really happened?</li>
+  <li><strong>Change one thing.</strong> One index, or one rewrite. Never two at once, or you will not know which helped.</li>
+  <li><strong>Measure again.</strong> Same query, same values, same kind of cache. Keep the change only if the numbers moved.</li>
+</ol>
+
+<p>
+  Two facts make step 1 matter. A query that takes 2 ms and runs a million times a day costs far more than one that
+  takes 3 s and runs once. And the first run of any query is often slower than the second, because the pages it needs
+  are not yet in memory. That is why this lesson compares <em>buffers</em> (how many 8 kB pages a plan touched), which
+  do not depend on the cache, and quotes timings sparingly.
+</p>
+
+<h2 id="pgss">2. Finding the expensive statements: pg_stat_statements</h2>
+
+<p>
+  <code>pg_stat_statements</code> is an extension that keeps one row of counters per <em>kind</em> of statement. The
+  server removes the literal values from the text first (this is called <em>normalising</em>) so that
+  <code>where country = 'NL'</code> and <code>where country = 'DE'</code> are counted together as
+  <code>where country = $1</code>. In the course container it is already installed and loaded. Confirm it:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">is it there?</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select name, setting
+from pg_settings
+where name in ('compute_query_id', 'pg_stat_statements.track', 'track_io_timing');
+
+select count(*) &gt; 0 as has_rows from pg_stat_statements;</code></pre>
+</figure>
+
+<p>
+  In the container, <code>track_io_timing</code> is <code>on</code> too, so plans and statistics also show how long
+  reads from disk took. Now ask which statements in the current database cost the most in total:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">top statements by total time</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select calls,
+       round(total_exec_time::numeric, 0)                       as total_ms,
+       round(mean_exec_time::numeric, 2)                        as mean_ms,
+       rows,
+       round(100 * total_exec_time / sum(total_exec_time) over ())::int as pct,
+       left(regexp_replace(query, '\s+', ' ', 'g'), 60)         as query
+from pg_stat_statements
+where dbid = (select oid from pg_database where datname = current_database())
+order by total_exec_time desc
+limit 5;</code></pre>
+</figure>
+
+<p>The columns you will use most:</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Column</th><th>What it tells you</th></tr></thead>
+  <tbody>
+    <tr><td><code>calls</code></td><td class="wrap">How many times the statement ran. A huge number with a small mean points at N+1 (section 6).</td></tr>
+    <tr><td><code>total_exec_time</code></td><td class="wrap">Milliseconds spent running it, summed over all calls. Sort by this to find the biggest cost.</td></tr>
+    <tr><td><code>mean_exec_time</code></td><td class="wrap">Average per call. Sort by this to find the individually slow statements.</td></tr>
+    <tr><td><code>rows</code></td><td class="wrap">Rows returned or affected, summed. <code>rows / calls</code> is the average result size.</td></tr>
+    <tr><td><code>shared_blks_hit</code>, <code>shared_blks_read</code></td><td class="wrap">Pages found in shared buffers versus pages that had to be requested from the operating system.</td></tr>
+    <tr><td><code>temp_blks_written</code></td><td class="wrap">Pages written to temporary files: a sort or hash that did not fit in <code>work_mem</code>.</td></tr>
+    <tr><td><code>queryid</code></td><td class="wrap">A stable number for the normalised statement. Use it to find the same statement again.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>
+  The counters are cumulative since the last reset. To measure one experiment cleanly, reset, run the experiment, then
+  read:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">measure one experiment</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select pg_stat_statements_reset();
+
+select count(*) from shop.customers where country = 'NL';
+select count(*) from shop.customers where country = 'DE';
+
+select calls, rows, query
+from pg_stat_statements
+where query like 'select count(*) from shop.customers%';</code></pre>
+</figure>
+
+<p>
+  This returns one row with <code>calls = 2</code> and the text
+  <code>select count(*) from shop.customers where country = $1</code>: two runs, one normalised statement.
+</p>
+
+<div class="note warn">
+  <span class="note-title">Statistics are cluster-wide and not deterministic</span>
+  <p>
+    <code>pg_stat_statements</code> collects statements from <em>every</em> database in the cluster, which is why the queries
+    above filter on <code>dbid</code>. The numbers also include your own diagnostic queries and everything
+    other sessions ran, and they change on every run. Use them to rank statements, never to assert an exact
+    time. <code>pg_stat_statements_reset()</code> wipes the counters for everyone, so do not call it on a server that
+    other people are watching.
+  </p>
+</div>
+
+<div class="note info">
+  <span class="note-title">Where the extension is installed</span>
+  <p>
+    Loading it needs <code>shared_preload_libraries = 'pg_stat_statements'</code> in the server configuration and a restart. Each
+    database that wants to query it also needs <code>create extension pg_stat_statements</code>. The course seed
+    does both. The setting is covered in <a href="21-configuration.html">lesson 21</a> and the other statistics views in
+    <a href="25-monitoring.html">lesson 25</a>.
+  </p>
+</div>
+
+<h2 id="plan">3. Reading one plan with buffers</h2>
+
+<p>
+  Suppose <code>pg_stat_statements</code> pointed at this statement: show how many events one customer produced.
+  Run it with <code>BUFFERS</code> so the plan reports page counts as well as timing
+  (<a href="13-explain-and-planner.html">lesson 13</a> explains every plan node):
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">in shop, read-only</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>explain (analyze, buffers)
+select count(*) from analytics.events where customer_id = 4242;</code></pre>
+</figure>
+
+<p>The relevant lines of the plan on the course database:</p>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">excerpt</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code>-&gt;  Parallel Seq Scan on events  (... rows=15 ...) (actual ... rows=12.00 loops=3)
+      Filter: (customer_id = 4242)
+      Rows Removed by Filter: 333321
+      Buffers: shared read=14948</code></pre>
+</figure>
+
+<p>
+  Three workers each looked at about 333 000 rows and threw nearly all of them away; together they touched about 15 000
+  pages (roughly 120 MB) to find 36 rows. The signals to look for are the same every time: a
+  <code>Seq Scan</code> with a large <code>Rows Removed by Filter</code> and a big <code>Buffers</code> count, for a
+  query that returns a handful of rows. The first run reads from disk (<code>read</code>); on a repeat run many of
+  those pages show up as <code>hit</code> instead, so compare the sum of both.
+</p>
+
+<p>
+  Change one thing: an index on <code>customer_id</code>. Do this in your throwaway copy, never in <code>shop</code>:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">in lab_14_try</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create index events_customer_idx on analytics.events (customer_id);
+analyze analytics.events;
+
+explain (analyze, buffers)
+select count(*) from analytics.events where customer_id = 4242;</code></pre>
+</figure>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">excerpt</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code>-&gt;  Bitmap Heap Scan on events (actual rows=36.00 loops=1)
+      Heap Blocks: exact=36
+      -&gt;  Bitmap Index Scan on events_customer_idx (actual rows=36.00 loops=1)
+            Index Cond: (customer_id = 4242)
+Buffers: shared hit=1 read=38</code></pre>
+</figure>
+
+<p>
+  The same 36 rows now cost 39 pages instead of about 15 000. That is the measurement that justifies keeping the
+  index. Notice that you proved it with buffers, which do not change when the cache is warm. The price of the index
+  (extra work on every write, extra disk) is the subject of <a href="12-indexes.html">lesson 12</a>.
+</p>
+
+<h2 id="rewrites">4. Rewrites that let an index work</h2>
+
+<p>
+  An index on a column helps only when the query compares <em>the column itself</em>. Wrap the column in an expression
+  and the index on the bare column is no longer usable. This is the most common reason that “we added the index and
+  nothing changed”.
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">same answer, different cost</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>-- With an index on analytics.events (occurred_at) in lab_14_try:
+
+-- 1. The column is inside a cast: the index cannot be used.
+select count(*) from analytics.events
+where occurred_at::date = date '2025-03-01';
+
+-- 2. A half-open range on the bare column: the index can be used.
+select count(*) from analytics.events
+where occurred_at &gt;= timestamptz '2025-03-01 00:00+00'
+  and occurred_at &lt;  timestamptz '2025-03-02 00:00+00';</code></pre>
+</figure>
+
+<p>
+  Both return 2664 rows when the session time zone is UTC (the container's default). With
+  <code>BUFFERS</code>, the first plan is a <code>Parallel Seq Scan</code> that touches about 15 000 pages
+  (<code>hit=667 read=14281</code>); the second is a <code>Bitmap Index Scan</code> that touches about 2 450.
+  Casting to <code>date</code> uses the session time zone to decide where a day starts, so the range version states
+  that boundary explicitly. That is better: it is clearer and it is faster.
+</p>
+
+<p>Other rewrites worth knowing:</p>
+
+<ul>
+  <li><strong>Ask for fewer columns.</strong> <code>select *</code> drags every column through the plan, and prevents index-only scans (<a href="12-indexes.html">lesson 12</a>).</li>
+  <li><strong>Existence, not count.</strong> If you only need to know whether a row exists, <code>where exists (select 1 from ... )</code> can stop at the first match; <code>count(*) &gt; 0</code> counts them all.</li>
+  <li><strong>Filter early.</strong> Put the restrictive condition in <code>WHERE</code> so the join sees fewer rows, rather than filtering after a large join.</li>
+  <li><strong>Add <code>LIMIT</code> with a matching <code>ORDER BY</code>.</strong> “The latest 10 of one customer” is cheap with an index on <code>(customer_id, occurred_at)</code> and expensive without it. Exercise 3 builds that index.</li>
+</ul>
+
+<div class="note warn">
+  <span class="note-title">Do not index every slow query</span>
+  <p>
+    A new index slows every <code>INSERT</code>, <code>UPDATE</code> and <code>DELETE</code> on the table. If the plan shows a
+    badly wrong row estimate, the fix may be <code>ANALYZE</code> or better statistics
+    (<a href="13-explain-and-planner.html">lesson 13</a>), and an index would only hide the problem. Look at the whole plan first.
+  </p>
+</div>
+
+<h2 id="pagination">5. Pagination: OFFSET versus keyset</h2>
+
+<p>
+  Pagination means returning a long result in pages. The familiar way is <code>LIMIT n OFFSET m</code>. The cost is
+  hidden: to return page 10 000, PostgreSQL must <em>produce</em> the first 9 999 pages and throw them away.
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">in shop, read-only</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>-- Deep page with OFFSET: 20 rows, after skipping 900 000.
+explain (analyze, buffers, costs off, timing off, summary off)
+select id, occurred_at from analytics.events
+order by id offset 900000 limit 20;
+
+-- The same page, keyset style: "the 20 rows after the last id I showed".
+explain (analyze, buffers, costs off, timing off, summary off)
+select id, occurred_at from analytics.events
+where id &gt; 900000
+order by id limit 20;</code></pre>
+</figure>
+
+<p>
+  The primary-key index serves both, so the contrast is clean. The <code>OFFSET</code> plan has an
+  <code>Index Scan</code> that returns <code>rows=900020</code> to the <code>Limit</code> node above it and touches
+  15 915 pages. The keyset plan has <code>Index Cond: (id &gt; 900000)</code>, returns <code>rows=20</code> and touches 7
+  pages. The first grows with the page number; the second does not.
+</p>
+
+<h3>The keyset rule</h3>
+
+<p>
+  Keyset (also called <em>seek</em>) pagination remembers the sort key of the last row on the page and asks for rows
+  <em>after</em> it. The rule that makes it correct: the sort key must be <strong>unique</strong>. If you sort by a
+  column that can repeat, add a tie-break column (usually the primary key) to both the <code>ORDER BY</code> and the
+  condition, and compare the two columns as a <em>row value</em>:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">newest orders first, 5 per page</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>-- page 1
+select id, ordered_at, status
+from shop.orders
+order by ordered_at desc, id desc
+limit 5;
+
+-- page 2: start after the last row of page 1
+select id, ordered_at, status
+from shop.orders
+where (ordered_at, id) &lt; (timestamptz '2025-12-31 22:52:20.210931+00', 73472)
+order by ordered_at desc, id desc
+limit 5;</code></pre>
+</figure>
+
+<p>
+  <code>(a, b) &lt; (x, y)</code> compares the pair the way sorting does: first on <code>a</code>, then on <code>b</code> when the
+  <code>a</code> values are equal. The sort direction in <code>ORDER BY</code> must match the comparison operator
+  (<code>desc</code> goes with <code>&lt;</code>). On the 200 000 orders in the course database, the page-2 query without
+  an index is a <code>Parallel Seq Scan</code> plus a top-N sort over every row. After
+  <code>create index on shop.orders (ordered_at desc, id desc)</code> (try it in your throwaway copy), it becomes an
+  <code>Index Scan</code> with <code>Index Cond: (ROW(ordered_at, id) &lt; ROW(...))</code> and touches 8 pages.
+  Keyset pagination is only fast when an index matches the sort order.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">page 1, page 2 by keyset, and page 2 by OFFSET · tiny dataset</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">-- Page 1: the 4 newest orders. The tie-break on id keeps the order stable.
+select id, ordered_at, status
+from shop.orders
+order by ordered_at desc, id desc
+limit 4;
+
+-- Page 2, keyset style: start after the last row of page 1 (order 9 here).
+select id, ordered_at, status
+from shop.orders
+where (ordered_at, id) &lt; (timestamptz '2025-04-01 07:00+00', 9)
+order by ordered_at desc, id desc
+limit 4;
+
+-- The OFFSET version of page 2 returns the same rows, today.
+-- Insert a new order between the two requests and it would not.
+select id, ordered_at, status
+from shop.orders
+order by ordered_at desc, id desc
+limit 4 offset 4;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  Both page-2 queries return orders 8, 7, 6 and 2. They agree only because nothing changed between the two requests.
+  Say a new order arrives after you fetched page 1: the <code>OFFSET</code> count now points one row too far, so page 2 repeats
+  the last row of page 1, while the keyset position (“after order 9”) does not move. Try it: run
+  <code>insert into shop.orders (customer_id, status, ordered_at, shipping_country) values (1, 'paid', '2025-08-01', 'NL');</code>
+  in the first playground, then compare the two page-2 queries again (use <em>Reset data</em> afterwards).
+</p>
+
+<h3>The tie trap</h3>
+
+<p>
+  Leaving out the tie-break is the classic bug. The next playground pages through customers sorted by country. Several
+  customers share a country, so “country greater than the last one” skips them.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">why the tie-break matters · tiny dataset</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">-- Page 1: three customers ordered by country, then id.
+select id, country from shop.customers order by country, id limit 3;
+
+-- WRONG page 2: only countries after 'DE'. Customers that share the last
+-- country on page 1 (and did not fit on the page) are skipped forever.
+select id, country from shop.customers
+where country &gt; 'DE'
+order by country, id limit 3;
+
+-- RIGHT page 2: compare the pair (country, id).
+select id, country from shop.customers
+where (country, id) &gt; ('DE', 5)
+order by country, id limit 3;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  With only eight customers the two page-2 results happen to match, because each country on page 1 has exactly one
+  customer. The skipped rows appear as soon as a country has more rows than fit on a page; in the course database
+  <code>NL</code> alone has thousands. The row-value comparison is correct either way, which is why you should always
+  use it.
+</p>
+
+<div class="note warn">
+  <span class="note-title">What keyset pagination cannot do</span>
+  <p>
+    You cannot jump to “page 4 000”: you only know how to continue from a row you have seen. It suits “next” and
+    “previous” buttons, feeds and exports. A page-number navigator with deep jumps is the one case that still needs
+    <code>OFFSET</code>, and there the honest fix is to limit how deep a user may go. Also make sure the sort columns are
+    <code>NOT NULL</code> or handle <code>NULL</code> explicitly: a row-value comparison with a <code>NULL</code>
+    yields no row.
+  </p>
+</div>
+
+<h2 id="n-plus-one">6. The N+1 query</h2>
+
+<p>
+  An <em>N+1</em> query is a pattern, not a single statement. The application runs one query to get a list of N items,
+  then runs one more query <em>per item</em> to get a related value. That is N+1 queries where one would do. Object
+  mappers produce it easily: loading customers, then touching <code>customer.orders</code> inside a loop.
+</p>
+
+<p>
+  Each statement is fast, so no single one looks slow. The cost is the N network round trips and N times the planning and
+  executor start-up. <code>pg_stat_statements</code> exposes it clearly. Simulate the loop with 200 customers in your
+  throwaway copy:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">an N+1 loop, as the server sees it</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select pg_stat_statements_reset();
+
+do $$
+declare c int; n int;
+begin
+  for c in 1..200 loop
+    execute 'select count(*) from shop.orders where customer_id = $1' using c into n;
+  end loop;
+end $$;
+
+select calls, rows, query
+from pg_stat_statements
+where query like 'select count(*) from shop.orders where customer_id%';</code></pre>
+</figure>
+
+<p>
+  The result is one normalised statement with <code>calls = 200</code> and <code>rows = 200</code>. A statement with a
+  huge <code>calls</code>, a tiny mean time and one row per call is the fingerprint of N+1. The fix is to ask for everything
+  at once, with a join or with <code>= any(array[...])</code>:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">one query instead of 200</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>-- counts per customer, as a join
+select c.id, count(o.id) as orders
+from shop.customers c
+left join shop.orders o on o.customer_id = c.id
+where c.id &lt;= 200
+group by c.id
+order by c.id;
+
+-- the order rows themselves, for a list of ids the application already has
+select customer_id, id as order_id, status
+from shop.orders
+where customer_id = any (array[1, 2, 3])
+order by customer_id, id;</code></pre>
+</figure>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">the loop and its replacements · tiny dataset</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">-- The N+1 shape: one query for the list, then one per row.
+select id, full_name from shop.customers order by id limit 3;
+select count(*) as orders from shop.orders where customer_id = 1;
+select count(*) as orders from shop.orders where customer_id = 2;
+select count(*) as orders from shop.orders where customer_id = 3;
+
+-- One round trip with a join gives the same three answers.
+select c.id, c.full_name, count(o.id) as orders
+from shop.customers c
+left join shop.orders o on o.customer_id = c.id
+where c.id in (1, 2, 3)
+group by c.id, c.full_name
+order by c.id;
+
+-- When you need the rows themselves: one query with ANY.
+select customer_id, id as order_id, status
+from shop.orders
+where customer_id = any (array[1, 2, 3])
+order by customer_id, id;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  Notice the <code>left join</code> in the aggregate: a customer with no orders must still appear, with a count of 0. A
+  plain <code>join</code> would silently drop them.
+</p>
+
+<div class="note tip">
+  <span class="note-title">N+1 is not always wrong</span>
+  <p>
+    Ten queries for ten rows on a page you view once an hour are not a problem. Fix it when the statistics show a large
+    <code>calls</code> multiplied by a real cost, or when each call crosses a slow network. And a big join is not
+    free either: a join that multiplies rows (customers by orders by items) can be slower than two simple queries.
+    Measure, as in section 1.
+  </p>
+</div>
+
+<h2 id="pitfalls">7. More pitfalls</h2>
+
+<div class="note danger">
+  <span class="note-title">EXPLAIN ANALYZE really runs the statement</span>
+  <p>
+    <code>EXPLAIN ANALYZE</code> executes the query. For <code>INSERT</code>, <code>UPDATE</code> or <code>DELETE</code> the
+    changes happen. Wrap it in a transaction you roll back:
+    <code>begin; explain analyze update ...; rollback;</code>
+    (<a href="15-transactions-and-mvcc.html">lesson 15</a>).
+  </p>
+</div>
+
+<div class="note warn">
+  <span class="note-title">Tune with realistic data</span>
+  <p>
+    A plan on a 100-row table says nothing about a 100-million-row table: the planner chooses by size and by statistics.
+    Test on a copy with production-like volume and run <code>ANALYZE</code> after loading it. The browser playgrounds in this
+    lesson show that a rewrite returns the right rows, never that it is fast.
+  </p>
+</div>
+
+<div class="note warn">
+  <span class="note-title">One measurement is not a result</span>
+  <p>
+    Run the query two or three times and compare buffers, not just milliseconds. A cold first run, a busy laptop or a
+    parallel worker that did not start can each change a timing by a factor of two.
+  </p>
+</div>
+
+<h2 id="when">When to use, when not to</h2>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Situation</th><th class="wrap">✅ Do this</th><th class="wrap">❌ Not this</th></tr></thead>
+  <tbody>
+    <tr><td class="wrap">“The app feels slow”</td><td class="wrap">Rank statements by <code>total_exec_time</code> in <code>pg_stat_statements</code>, then tune the top one</td><td class="wrap">Tune the query someone complained about first without measuring its share</td></tr>
+    <tr><td class="wrap">A scan reads a million rows for 30 results</td><td class="wrap">Add the index that matches the filter and the sort, then compare buffers</td><td class="wrap">Raise <code>work_mem</code> or add hardware</td></tr>
+    <tr><td class="wrap">Infinite scroll or “next page” over a big table</td><td class="wrap">Keyset pagination with a unique tie-break and a matching index</td><td class="wrap"><code>OFFSET</code> that grows with every page</td></tr>
+    <tr><td class="wrap">A list screen runs hundreds of identical small queries</td><td class="wrap">One join, or <code>= any(array)</code> with the ids</td><td class="wrap">A cache in front of the loop that hides the pattern</td></tr>
+    <tr><td class="wrap">A user needs to jump to page 4 000</td><td class="wrap">Limit the depth, or offer search and filters instead</td><td class="wrap">Pretend <code>OFFSET</code> is free at any depth</td></tr>
+    <tr><td class="wrap">A plan's estimated rows are far from the actual rows</td><td class="wrap"><code>ANALYZE</code>, then look at statistics (<a href="13-explain-and-planner.html">lesson 13</a>)</td><td class="wrap">Force the plan you want with settings in production</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="inspect">Inspect it</h2>
+
+<p>Run this in <code>shop</code> before the exercises. It lists the statements that read the most pages from outside shared buffers, and how often they were found in cache:</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">where the I/O goes</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select left(regexp_replace(query, '\s+', ' ', 'g'), 50) as query,
+       calls,
+       shared_blks_hit  as hit,
+       shared_blks_read as read,
+       round(100.0 * shared_blks_hit / nullif(shared_blks_hit + shared_blks_read, 0), 1) as hit_pct
+from pg_stat_statements
+where dbid = (select oid from pg_database where datname = current_database())
+order by shared_blks_read desc
+limit 5;
+
+select stats_reset from pg_stat_statements_info;</code></pre>
+</figure>
+
+<p>
+  The second query tells you when the counters were last reset, so you know what period the numbers cover.
+</p>
+
+<h2 id="exercises">Your turn</h2>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 1</span><span class="grow"></span><span class="lvl">basic</span></div>
+  <div class="ex-body">
+    <p>
+      Run <code>select count(*) from shop.customers where country = …</code> for <code>'NL'</code>, <code>'DE'</code> and
+      <code>'FR'</code>, then ask <code>pg_stat_statements</code> how often it saw that normalised statement in the
+      current database. Return the columns <code>calls</code> and <code>query</code>.
+    </p>
+    <p>Open <code>exercises/14/1.sql</code>, write your answer, then run <code>./pg check 14 1</code>.</p>
+  </div>
+  {{stub 14 1}}
+  <details><summary>Hint</summary><p>The statistics view stores the text with <code>$1</code> in place of the value. Filter on <code>dbid</code> with the OID of <code>current_database()</code> so other databases do not count.</p></details>
+  {{solution 14 1}}
+</section>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 2</span><span class="grow"></span><span class="lvl">intermediate</span></div>
+  <div class="ex-body">
+    <p>
+      Page 1 of the orders list (newest first) ended with order <code>73472</code>, placed at
+      <code>2025-12-31 22:52:20.210931+00</code>. Return the next 5 orders as the columns <code>id</code>,
+      <code>ordered_at</code> and <code>status</code>, with keyset pagination and no <code>OFFSET</code>.
+    </p>
+    <p>Open <code>exercises/14/2.sql</code>, write your answer, then run <code>./pg check 14 2</code>.</p>
+  </div>
+  {{stub 14 2}}
+  <details><summary>Hint</summary><p>Compare the pair <code>(ordered_at, id)</code> with a row value, and keep the same <code>ORDER BY ordered_at desc, id desc</code>.</p></details>
+  {{solution 14 2}}
+</section>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 3</span><span class="grow"></span><span class="lvl">challenge</span></div>
+  <div class="ex-body">
+    <p>
+      The query “latest 10 events of customer 4242” is slow. Create <strong>one</strong> index on
+      <code>analytics.events</code> so that PostgreSQL reads the rows already in the right order, with an index scan and no
+      <code>Sort</code> step. The checker asks the planner for the plan, so the result does not depend on timing.
+    </p>
+    <p>Open <code>exercises/14/3.sql</code>, write your answer, then run <code>./pg check 14 3</code>. Do not run it against <code>shop</code>; the checker uses its own copy.</p>
+  </div>
+  {{stub 14 3}}
+  <details><summary>Hint</summary><p>An equality column goes first, then the column you sort by. Think about which order the index must store to avoid sorting, and remember that an index can also be scanned backwards.</p></details>
+  {{solution 14 3}}
+</section>
+
+<h2 id="summary">Summary</h2>
+<ul>
+  <li>Tune in a loop: find the costly statement, read its plan, change one thing, measure again.</li>
+  <li><code>pg_stat_statements</code> ranks normalised statements by <code>total_exec_time</code>, <code>calls</code> and buffers. It is cluster-wide and not deterministic, so use it to rank, not to assert.</li>
+  <li>Compare plans by <code>Buffers</code>: pages touched do not depend on cache warmth the way timings do.</li>
+  <li>An index helps only when the query compares the bare column; ranges beat casts and functions on the column.</li>
+  <li><code>OFFSET</code> produces and discards every skipped row. Keyset pagination with a unique, indexed sort key does constant work per page.</li>
+  <li>N+1 shows up as a huge <code>calls</code> with one row per call. Replace the loop with a join or <code>= any(array)</code>.</li>
+</ul>
+
+<h2 id="next">Looking ahead</h2>
+<p>
+  So far every query ran alone. <a href="15-transactions-and-mvcc.html">Lesson 15</a> starts Part 4 and shows what
+  happens when many sessions read and write at once: transactions, snapshots, and what each isolation level
+  really prevents.
+</p>

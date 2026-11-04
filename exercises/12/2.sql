@@ -1,0 +1,11 @@
+-- The "latest 10 page views of customer 42" query is:
+--
+--   select * from analytics.events
+--   where customer_id = 42 and kind = 'page_view'
+--   order by occurred_at desc
+--   limit 10;
+--
+-- Create ONE index on analytics.events so that PostgreSQL can answer it by
+-- walking the index, with no Sort step in the plan. Name it events_user_feed_idx.
+-- Then run ./pg check 12 2.
+

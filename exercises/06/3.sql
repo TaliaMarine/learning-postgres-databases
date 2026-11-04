@@ -1,0 +1,9 @@
+-- Three promotions run on these half-open date ranges (the end date is NOT included):
+--   spring      2025-03-01 up to 2025-03-15
+--   mid_spring  2025-03-10 up to 2025-04-01
+--   april       2025-04-01 up to 2025-05-01
+-- For each promotion, count the orders placed during it and add up their total.
+-- Use a daterange and the @> operator; take the order date in UTC. An order that
+-- falls in two promotions counts in both. Promotions with no orders still appear.
+-- Return the columns promo, orders and revenue, ordered by promo.
+-- Run ./pg check 06 3 when you are done.

@@ -1,0 +1,757 @@
+<p class="lede">
+  A PostgreSQL server holds a stack of containers: one <em>cluster</em> holds databases, a database holds
+  schemas, a schema holds tables. Almost every confusing error message (“relation does not exist”, “permission
+  denied for schema”, “cannot copy a database that is in use”) comes from not knowing which container you are
+  standing in. This lesson draws the map, shows how a name like <code>orders</code> is turned into
+  <code>shop.orders</code>, and teaches you to find out for yourself what exists and who owns it.
+</p>
+
+<h2 id="goals">Learning goals</h2>
+<ul>
+  <li>Place cluster, database, schema and table in one hierarchy, and say what you can and cannot do across each boundary.</li>
+  <li>Create a database from a template with <code>CREATE DATABASE … TEMPLATE</code>, and explain <code>template0</code> versus <code>template1</code>.</li>
+  <li>Create and drop schemas, and use qualified names such as <code>shop.orders</code>.</li>
+  <li>Predict how <code>search_path</code> resolves an unqualified name, and set it for a session, a role or a database.</li>
+  <li>Explain what the <code>public</code> schema allows by default in PostgreSQL 18, and why that default changed.</li>
+  <li>Answer “what exists here, and who owns it?” with <code>\l</code>, <code>\dn+</code>, <code>pg_database</code>, <code>pg_namespace</code> and <code>pg_class</code>.</li>
+</ul>
+
+<h2 id="lab">Set up for this lesson</h2>
+<p>
+  Use the <code>shop</code> database and start the container with <code>./pg up</code> if it is not running (see
+  <a href="../start/setup.html">Set up your lab</a>). The three exercises create a schema, a role and a database,
+  The role and database they create have names starting with <code>lab_</code>, and the checker removes them for you.
+</p>
+
+<figure class="code" data-lang="bash">
+  <figcaption><span class="path">terminal</span><span class="grow"></span><span class="lang">bash</span></figcaption>
+<pre><code>./pg psql
+\l
+\dn+</code></pre>
+</figure>
+
+<p>
+  <code>\l</code> lists the databases of the cluster; <code>\dn+</code> lists the schemas of the database you are
+  connected to. You will read both outputs line by line later in this lesson.
+</p>
+
+<div class="note info">
+  <span class="note-title">Docker and browser</span>
+  <p>
+    The playgrounds on this page run one PostgreSQL in your browser. It has a single database, called
+    <code>postgres</code>, with the same schemas as the course data (<code>shop</code>, <code>analytics</code>,
+    <code>course</code>, <code>public</code>). So everything about schemas and <code>search_path</code> can be tried there.
+    Creating databases and templates cannot, so those parts use the Docker database and are shown with its output.
+  </p>
+</div>
+
+<h2 id="hierarchy">1. The hierarchy: cluster, database, schema, table</h2>
+
+<p>
+  Read the picture from the outside in. A <strong>cluster</strong> is one running PostgreSQL server with its
+  data directory (lesson 1). Inside it live several <strong>databases</strong>. Inside each database live
+  <strong>schemas</strong>, which are namespaces: folders for names. Tables, views, indexes, sequences, functions
+  and types all live in a schema.
+</p>
+
+<figure class="dia">
+  <div class="dia-hold">
+    <svg class="d" viewBox="0 0 860 400" role="img" aria-labelledby="hier-t hier-d">
+      <title id="hier-t">A cluster contains databases, a database contains schemas, a schema contains tables</title>
+      <desc id="hier-d">The cluster holds cluster-wide roles and several databases: postgres, shop and template1. Inside the shop database are the schemas shop, analytics, course and public. The shop schema contains the tables customers, orders and products.</desc>
+      <rect class="box sunken" x="10" y="10" width="840" height="380" rx="10"/>
+      <text class="hd" x="26" y="36">cluster</text>
+      <text class="lbl" x="100" y="36">one server · one data directory · one port</text>
+
+      <rect class="box amber" x="26" y="52" width="808" height="40" rx="8"/>
+      <text class="hd" x="42" y="77">roles</text>
+      <text class="lbl" x="100" y="77">postgres, lab_reader, … are shared by every database in the cluster</text>
+
+      <rect class="box accent" x="26" y="108" width="540" height="270" rx="8"/>
+      <text class="hd" x="42" y="132">database shop</text>
+      <text class="lbl" x="170" y="132">you are connected to exactly one database</text>
+
+      <rect class="box teal" x="42" y="146" width="320" height="216" rx="8"/>
+      <text class="hd" x="58" y="170">schema shop</text>
+      <rect class="box" x="58" y="184" width="130" height="34" rx="6"/>
+      <text class="mono ctr" x="123" y="206">customers</text>
+      <rect class="box" x="204" y="184" width="130" height="34" rx="6"/>
+      <text class="mono ctr" x="269" y="206">orders</text>
+      <rect class="box" x="58" y="228" width="130" height="34" rx="6"/>
+      <text class="mono ctr" x="123" y="250">products</text>
+      <rect class="box" x="204" y="228" width="130" height="34" rx="6"/>
+      <text class="mono ctr" x="269" y="250">order_items</text>
+      <text class="mut tiny" x="58" y="292">also: indexes, sequences, views,</text>
+      <text class="mut tiny" x="58" y="310">functions, types, …</text>
+      <text class="mut tiny" x="58" y="340">shop.orders is the full name</text>
+
+      <rect class="box teal" x="378" y="146" width="172" height="62" rx="8"/>
+      <text class="hd" x="394" y="170">schema analytics</text>
+      <text class="mono" x="394" y="192">events</text>
+      <rect class="box teal" x="378" y="218" width="172" height="40" rx="8"/>
+      <text class="hd" x="394" y="243">schema course</text>
+      <rect class="box teal" x="378" y="268" width="172" height="40" rx="8"/>
+      <text class="hd" x="394" y="293">schema public</text>
+      <text class="mut tiny" x="378" y="334">pg_catalog, information_schema</text>
+      <text class="mut tiny" x="378" y="352">are always there too</text>
+
+      <rect class="box" x="584" y="108" width="250" height="120" rx="8"/>
+      <text class="hd" x="600" y="132">database postgres</text>
+      <text class="lbl" x="600" y="154">its own schemas, its own tables</text>
+      <text class="mut tiny" x="600" y="186">A query in shop cannot read</text>
+      <text class="mut tiny" x="600" y="204">a table in this database.</text>
+
+      <rect class="box dash" x="584" y="240" width="250" height="138" rx="8"/>
+      <text class="hd" x="600" y="264">databases template0,</text>
+      <text class="hd" x="600" y="284">template1, shop_template</text>
+      <text class="lbl" x="600" y="312">blueprints for new databases</text>
+    </svg>
+  </div>
+  <figcaption>The cluster contains databases; roles sit at the cluster level, outside every database. A connection reaches exactly one database.</figcaption>
+</figure>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Level</th><th>What it is</th><th>Can one query cross it?</th><th>Catalog</th></tr></thead>
+  <tbody>
+    <tr><td>Cluster</td><td class="wrap">One server and its data directory. Owns the roles.</td><td class="wrap">n/a: roles are visible from every database</td><td><code>pg_roles</code></td></tr>
+    <tr><td>Database</td><td class="wrap">An isolated set of schemas. A connection is bound to one.</td><td class="wrap">No. Joins, foreign keys and views never reach into another database.</td><td><code>pg_database</code></td></tr>
+    <tr><td>Schema</td><td class="wrap">A namespace inside a database. Also the unit you grant access to.</td><td class="wrap">Yes: <code>shop.orders</code> and <code>analytics.events</code> can be joined</td><td><code>pg_namespace</code></td></tr>
+    <tr><td>Table, view, index, …</td><td class="wrap">The things that hold data and logic</td><td class="wrap">n/a</td><td><code>pg_class</code></td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>
+  Try it. The playground lists where the shop tables live. Note the first column: in the browser the database
+  is called <code>postgres</code>; in the Docker course database it is <code>shop</code>.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">which database, which schemas, which tables</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select current_database() as database,
+       table_schema as schema,
+       table_name
+from information_schema.tables
+where table_schema in ('shop', 'analytics')
+order by table_schema, table_name;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<h2 id="databases">2. Databases</h2>
+
+<p>
+  A database is the hard boundary. When a client connects it names one database (<code>psql -d shop</code>, or
+  <code>\c shop</code> inside psql), and from then on everything it sees is inside that database. Backups, restores
+  and most permissions work per database too. List them from SQL:
+</p>
+
+<figure class="code" data-lang="bash">
+  <figcaption><span class="path">terminal</span><span class="grow"></span><span class="lang">bash</span></figcaption>
+<pre><code>./pg sql "select datname, datistemplate as is_template, datallowconn as allow_conn
+          from pg_database
+          where datname in ('postgres', 'shop', 'template0', 'template1')
+          order by datname"</code></pre>
+</figure>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">output</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code>  datname  | is_template | allow_conn
+-----------+-------------+------------
+ postgres  | f           | t
+ shop      | f           | t
+ template0 | t           | f
+ template1 | t           | t</code></pre>
+</figure>
+
+<p>
+  Two columns need explaining. <code>datistemplate</code> marks a database that may be used as the blueprint for
+  new ones (next section). <code>datallowconn</code> says whether anyone may connect to it at all; it is false for
+  <code>template0</code>, so nobody can modify the pristine blueprint by accident.
+</p>
+
+<h3>No queries across databases</h3>
+
+<p>
+  You may write a three-part name <code>database.schema.table</code>, but only when the database part is the one you are
+  connected to. Anything else is rejected, even though the other database is on the same server:
+</p>
+
+<figure class="code" data-lang="bash">
+  <figcaption><span class="path">terminal</span><span class="grow"></span><span class="lang">bash</span></figcaption>
+<pre><code>./pg sql "select * from postgres.shop.orders limit 1"</code></pre>
+</figure>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">output</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code>ERROR:  cross-database references are not implemented: "postgres.shop.orders"
+LINE 1: select * from postgres.shop.orders limit 1</code></pre>
+</figure>
+
+<p>
+  This is the main reason to prefer <strong>several schemas in one database</strong> over several databases when the
+  parts of an application must be joined or kept consistent in one transaction. Separate databases are for things
+  that must be isolated: different applications, different customers who must never share a backup, a test copy.
+</p>
+
+<h3>Creating and dropping</h3>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">database commands</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create database reports owner maria connection limit 10;
+alter database reports set search_path = reports, public;
+drop database reports;
+drop database reports with (force);   -- also disconnects everyone who is still connected</code></pre>
+</figure>
+
+<p>
+  <code>CREATE DATABASE</code> cannot run inside a transaction block, and a plain <code>DROP DATABASE</code> refuses
+  while anyone is connected. The <em>owner</em> of a database is a role (<code>datdba</code> in
+  <code>pg_database</code>); lesson 3 introduced owners and lesson 4 shows what ownership allows.
+</p>
+
+<h2 id="templates">3. Template databases</h2>
+
+<p>
+  A new database is not built from nothing. <code>CREATE DATABASE</code> makes a <em>file-level copy</em> of another
+  database, called the <strong>template</strong>. Everything in the template appears in the copy: schemas, tables,
+  rows, functions, extensions and default grants. Roles are not copied, because they belong to the cluster.
+</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Template</th><th>What it is</th><th>Use it when</th></tr></thead>
+  <tbody>
+    <tr><td><code>template1</code></td><td class="wrap">The default source of every <code>CREATE DATABASE</code>. Ordinary, editable.</td><td class="wrap">You want something (an extension, a helper function) in <em>every</em> new database</td></tr>
+    <tr><td><code>template0</code></td><td class="wrap">A pristine copy that nobody can connect to or change.</td><td class="wrap">You need a different encoding or locale than <code>template1</code> has, or a clean start</td></tr>
+    <tr><td><code>shop_template</code></td><td class="wrap">The course's own snapshot of the seeded shop data.</td><td class="wrap">The checker clones it for every exercise. You can too.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<figure class="code" data-lang="bash">
+  <figcaption><span class="path">a full copy of the shop data in one statement</span><span class="grow"></span><span class="lang">bash</span></figcaption>
+<pre><code>./pg sql "create database lab_s02_try template shop_template"
+./pg sql "select count(*) from shop.orders" lab_s02_try      # 200000
+./pg sql "drop database lab_s02_try" postgres</code></pre>
+</figure>
+
+<p>
+  Copying 240 MB takes a moment, and then <code>lab_s02_try</code> is an independent database: change or delete
+  anything in it and <code>shop</code> stays untouched. This is the fastest way to get a safe sandbox.
+</p>
+
+<h3>Three errors you will meet</h3>
+
+<p>
+  The template must have <strong>no other sessions connected</strong> while it is being copied, because the copy
+  reads its files directly. Copying <code>shop</code> while another session is open in it fails like this:
+</p>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">error</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code>ERROR:  source database "shop" is being accessed by other users
+DETAIL:  There is 1 other session using the database.</code></pre>
+</figure>
+
+<p>
+  That is why the course copies <code>shop_template</code>, which nobody connects to, and not <code>shop</code>.
+  The second error is about encodings. A copy keeps the template's encoding, so asking for a different one needs
+  <code>template0</code> as the source:
+</p>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">error</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code>ERROR:  new encoding (SQL_ASCII) is incompatible with the encoding of the template database (UTF8)
+HINT:  Use the same encoding as in the template database, or use template0 as template.</code></pre>
+</figure>
+
+<p>
+  The third is about templates themselves. Any database can become a template with
+  <code>alter database NAME is_template true</code>, and from then on <code>drop database</code> refuses it
+  (<code>cannot drop a template database</code>) until you set the flag back to false.
+</p>
+
+<div class="note info">
+  <span class="note-title">Template changes are not retroactive</span>
+  <p>
+    A copy is a snapshot. If you add a function to <code>template1</code> today, databases created last week do not
+    get it. Roles are never copied (they belong to the cluster), so objects in the copy keep the same owners as in
+    the template, and the database itself belongs to whoever you name in <code>OWNER</code>.
+  </p>
+</div>
+
+<h2 id="schemas">4. Schemas</h2>
+
+<p>
+  A schema is a namespace. Two schemas can each hold a table called <code>orders</code> without clashing,
+  exactly like two directories can each hold a file called <code>notes.txt</code>. The full name is
+  <code>schema.object</code>, and it is how you say precisely which one you mean.
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">schema commands</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create schema archive;
+create schema maria authorization maria;   -- owned by the role maria
+alter schema archive rename to old_data;
+drop schema old_data;                      -- fails if it still contains objects
+drop schema old_data cascade;              -- drops the schema and everything inside it</code></pre>
+</figure>
+
+<p>
+  A schema is also the <strong>unit of permission</strong> for access to a group of tables: a role needs
+  <code>USAGE</code> on the schema before it can touch anything inside, whatever the table's own privileges say
+  (lesson 4). Giving each application or concern its own schema is the usual way to organise a database.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">two tables called orders, in two schemas</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">create schema if not exists archive;
+create table if not exists archive.orders as
+  select * from shop.orders where id &lt;= 3;
+
+select schemaname, tablename
+from pg_tables
+where tablename = 'orders'
+order by schemaname;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  Both tables exist. <code>shop.orders</code> has 12 rows in the browser copy; <code>archive.orders</code> has
+  the three you copied. Which one does a bare <code>orders</code> mean? That is decided by <code>search_path</code>.
+</p>
+
+<div class="note warn">
+  <span class="note-title">A schema is not a database</span>
+  <p>
+    <code>drop schema … cascade</code> deletes every table, view and function inside it with no further
+    question. Read the name twice. A schema is only a namespace: it is not a separate place on disk, and the
+    database is still the unit of connection, of backup and restore, and of isolation.
+  </p>
+</div>
+
+<h2 id="search-path">5. search_path: how a bare name finds its table</h2>
+
+<p>
+  When you write <code>select * from orders</code>, PostgreSQL looks for <code>orders</code> in each schema listed in
+  the setting <code>search_path</code>, in order, and uses the first match. If none matches you get
+  <em>relation “orders” does not exist</em>, even though <code>shop.orders</code> is right there.
+</p>
+
+<figure class="code" data-lang="bash">
+  <figcaption><span class="path">in the Docker course database</span><span class="grow"></span><span class="lang">bash</span></figcaption>
+<pre><code>./pg sql "show search_path"
+./pg sql "select current_schemas(true), current_schemas(false)"
+./pg sql "select count(*) from orders"</code></pre>
+</figure>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">output</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code>   search_path
+-----------------
+ "$user", public
+
+   current_schemas   | current_schemas
+---------------------+-----------------
+ {pg_catalog,public} | {public}
+
+ERROR:  relation "orders" does not exist</code></pre>
+</figure>
+
+<p>The three lines show the rules:</p>
+<ul>
+  <li>The default is <code>"$user", public</code>. <code>$user</code> means “a schema named like the current role”. It is skipped when no such schema exists, which is why <code>current_schemas(false)</code> shows only <code>{public}</code>.</li>
+  <li><code>pg_catalog</code> is always searched first, even when you do not list it. That is how <code>count(*)</code>, <code>now()</code> and <code>text</code> are found.</li>
+  <li>Nothing in the list contains <code>orders</code> (the table is in <code>shop</code>), so the query fails.</li>
+  <li>The <strong>first</strong> existing schema in the path is also where an unqualified <code>CREATE TABLE</code> puts the new table.</li>
+</ul>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">change the order, change the answer</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">create schema if not exists archive;
+create table if not exists archive.orders as
+  select * from shop.orders where id &lt;= 3;
+
+begin;
+set local search_path = archive, shop;     -- try: shop, archive
+select current_schemas(false) as path,
+       (select count(*) from orders) as orders_seen;
+commit;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  With <code>archive, shop</code> the bare name <code>orders</code> finds <code>archive.orders</code> first and
+  you see 3. Swap the order to <code>shop, archive</code> and you see 12. <code>SET LOCAL</code> lasts until the end of
+  the transaction, so the playground session is left as it was; plain <code>SET</code> would last for the whole
+  session.
+</p>
+
+<h3>Where a search_path can be set</h3>
+
+<p>
+  The most specific setting wins. A new session starts from the server's default, then the settings stored in the
+  catalog are applied at login, and a <code>SET</code> inside the session overrides all of them. The list runs from
+  the shortest-lived and most specific to the broadest:
+</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Scope</th><th>Command</th><th>Applies</th></tr></thead>
+  <tbody>
+    <tr><td>One transaction</td><td><code>SET LOCAL search_path = …</code></td><td class="wrap">Until <code>COMMIT</code> or <code>ROLLBACK</code></td></tr>
+    <tr><td>One session</td><td><code>SET search_path = …</code></td><td class="wrap">Until you disconnect or <code>RESET</code></td></tr>
+    <tr><td>One role in one database</td><td><code>ALTER ROLE r IN DATABASE d SET search_path = …</code></td><td class="wrap">Every new session of that role in that database</td></tr>
+    <tr><td>One role</td><td><code>ALTER ROLE r SET search_path = …</code></td><td class="wrap">Every new session of that role</td></tr>
+    <tr><td>One database</td><td><code>ALTER DATABASE d SET search_path = …</code></td><td class="wrap">Every new session in that database</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>
+  To see the order, set all three catalog levels on a scratch database and then remove them one at a time. A new
+  session reports <code>shop, analytics</code> (role in database), then <code>shop</code> (role only), then
+  <code>analytics</code> (database only). The stored settings are visible with <code>\drds</code>:
+</p>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">\drds</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code>                      List of settings
+    Role    |     Database     |          Settings
+------------+------------------+-----------------------------
+ lab_02_dev | lab_s02_scratch2 | search_path=shop, analytics
+ lab_02_dev |                  | search_path=shop
+            | lab_s02_scratch2 | search_path=analytics</code></pre>
+</figure>
+
+<div class="note warn">
+  <span class="note-title">ALTER ROLE … SET waits for the next login</span>
+  <p>
+    <code>ALTER ROLE r SET search_path</code> and <code>ALTER DATABASE d SET search_path</code> change what is stored in
+    the catalog. A session that is already open keeps its old value. If a change “does nothing”, reconnect before you
+    suspect anything else.
+  </p>
+</div>
+
+<h3>The schema named after the role</h3>
+
+<p>
+  Because of <code>"$user"</code>, a role that owns a schema with its own name gets a private workspace without
+  configuration: unqualified <code>CREATE TABLE</code> lands in that schema. This playground builds one inside a
+  transaction and throws it away, so you can run it as often as you like. The browser database starts with the plain
+  path <code>public</code>, so the script puts <code>$user</code> back first.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">a table lands in the schema named after the role</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">begin;
+create role maria;
+create schema maria authorization maria;
+set local search_path = "$user", public;
+set local role maria;
+
+create table notes (body text);     -- no schema written
+
+select schemaname, tablename, tableowner
+from pg_tables
+where tablename = 'notes';
+rollback;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<div class="note danger">
+  <span class="note-title">Never put a schema others can write to at the front</span>
+  <p>
+    The first match wins, so whoever can create objects in an early schema can create a table or function with a
+    familiar name and have your queries find it first. Keep <code>public</code> last, never add schemas you do not
+    control, and in security-sensitive code write qualified names. <a href="05-security-and-rls.html">Lesson 5</a> shows
+    how this is exploited through <code>SECURITY DEFINER</code> functions.
+  </p>
+</div>
+
+<div class="note tip">
+  <span class="note-title">Qualify names in scripts</span>
+  <p>
+    In migrations, deployment scripts and anything that must behave the same for every role, write
+    <code>shop.orders</code>, not <code>orders</code>. It costs six characters and removes a whole class of
+    “works on my laptop” differences caused by different search paths.
+  </p>
+</div>
+
+<h2 id="public">6. The public schema and its defaults</h2>
+
+<p>
+  Every new database starts with a schema called <code>public</code>. For many years any role could create objects
+  in it, which made it the place where tables ended up by accident and a standing security risk. In PostgreSQL 18
+  (and since version 15) the defaults are stricter. Read them straight from the catalog:
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">who may use and create in public, and in shop</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select nspname as schema,
+       pg_get_userbyid(nspowner) as owner,
+       nspacl::text as acl,
+       has_schema_privilege('public', oid, 'usage')  as public_can_use,
+       has_schema_privilege('public', oid, 'create') as public_can_create
+from pg_namespace
+where nspname in ('public', 'shop')
+order by nspname;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>Decode the <code>acl</code> column of <code>public</code>:</p>
+<ul>
+  <li><code>pg_database_owner=UC/pg_database_owner</code> — the owner may <strong>U</strong>se and <strong>C</strong>reate. The text after the slash says who granted it.</li>
+  <li><code>=U/pg_database_owner</code> — an <em>empty</em> name before the equals sign means <strong>PUBLIC</strong>, every role. PUBLIC may use the schema (look up objects in it) but may not create anything.</li>
+</ul>
+
+<p>
+  The owner is <code>pg_database_owner</code>, a built-in role that is automatically “whoever owns the current
+  database”. So the database's owner can create in <code>public</code>, and nobody else can unless the owner grants it.
+  The <code>shop</code> schema has no ACL at all (<code>null</code>): only its owner may use it, and the superuser
+  bypasses checks. Compare the last two columns: PUBLIC can use <code>public</code> but not <code>shop</code>.
+</p>
+
+<p>
+  See the effect with a role that has no privileges. This playground is meant to fail, and it ends with the error:
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">this one is supposed to fail</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">create role intern;
+set role intern;
+create table public.junk (a int);</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  The message is <em>permission denied for schema public</em>. The playground stops at the first error, as
+  <code>psql</code> does, but everything before it has already happened: the role <code>intern</code> now exists.
+  Running the box again would fail with <em>role "intern" already exists</em>; press <em>Reset data</em> to start clean.
+</p>
+
+<div class="note warn">
+  <span class="note-title">Old databases can still be open</span>
+  <p>
+    The strict default applies to databases created with it. A database that was created on an older server and carried
+    forward may still have <code>=UC/…</code> on <code>public</code>, which lets every role create tables there.
+    Check with the query above. To close it:
+    <code>revoke create on schema public from public;</code>. Lesson 4 explains this command.
+  </p>
+</div>
+
+<div class="note tip">
+  <span class="note-title">Do not build on public</span>
+  <p>
+    Even with the strict default, put your own tables in a schema that has a meaningful name and an explicit owner
+    (<code>shop</code>, <code>billing</code>, <code>app</code>). Leave <code>public</code> for extensions and
+    leftovers. Lesson 5 turns this into a full layout.
+  </p>
+</div>
+
+<h2 id="catalogs">7. Finding things: catalogs and psql</h2>
+
+<p>
+  PostgreSQL stores its own metadata in ordinary tables called the <em>system catalogs</em>, all in the schema
+  <code>pg_catalog</code>. You never have to guess what exists: ask.
+</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Question</th><th>psql</th><th>SQL</th></tr></thead>
+  <tbody>
+    <tr><td class="wrap">Which databases exist, who owns them?</td><td><code>\l</code></td><td><code>pg_database</code></td></tr>
+    <tr><td class="wrap">Which schemas, who owns them, who may use them?</td><td><code>\dn+</code></td><td><code>pg_namespace</code></td></tr>
+    <tr><td class="wrap">Which tables and views are there?</td><td><code>\dt shop.*</code>, <code>\dv</code></td><td><code>pg_class</code>, <code>pg_tables</code></td></tr>
+    <tr><td class="wrap">What does one table look like?</td><td><code>\d shop.orders</code></td><td><code>pg_attribute</code></td></tr>
+    <tr><td class="wrap">Which role or database settings are stored?</td><td><code>\drds</code></td><td><code>pg_db_role_setting</code></td></tr>
+    <tr><td class="wrap">Everything in every schema</td><td><code>\dt *.*</code></td><td><code>pg_class</code></td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>
+  Read <code>\dn+</code> in the course database. This is what a fresh clone prints:
+</p>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">\dn+</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code>                                         List of schemas
+   Name    |       Owner       |           Access privileges            |      Description
+-----------+-------------------+----------------------------------------+------------------------
+ analytics | postgres          |                                        |
+ course    | postgres          |                                        |
+ public    | pg_database_owner | pg_database_owner=UC/pg_database_owner+| standard public schema
+           |                   | =U/pg_database_owner                   |
+ shop      | postgres          |                                        | </code></pre>
+</figure>
+
+<p>
+  The <em>Access privileges</em> column is the ACL (access control list) in text form. Empty means nobody has been
+  granted anything beyond the owner's implicit rights. The same format appears in <code>\l</code> for databases (for
+  example <code>=c/postgres</code> on <code>template1</code>: PUBLIC may <strong>c</strong>onnect). Lesson 4 teaches you to
+  read every letter.
+</p>
+
+<h3>pg_catalog and information_schema</h3>
+
+<p>
+  There are two places to look, and they answer slightly different questions.
+  <code>pg_catalog</code> is PostgreSQL's own, complete view of everything. <code>information_schema</code> is the SQL
+  standard's portable view of the same facts, but it only shows objects <em>you have some privilege on</em>. To check
+  that, give a role <code>SELECT</code> on one table and query both as that role:
+</p>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">as a role that can read only shop.products</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code>-- from information_schema.tables where table_schema in ('shop','analytics')
+ table_schema | table_name
+--------------+------------
+ shop         | products
+
+-- from pg_tables where schemaname in ('shop','analytics')
+ schemaname |  tablename
+------------+-------------
+ analytics  | events
+ shop       | categories
+ shop       | customers
+ shop       | order_items
+ shop       | orders
+ shop       | products</code></pre>
+</figure>
+
+<p>
+  Use <code>information_schema</code> when you want portable SQL or want to see what the current role can reach.
+  Use <code>pg_catalog</code> when you are administering and need the truth, including owners and ACLs.
+</p>
+
+<h3>Names to OIDs and back</h3>
+
+<p>
+  Catalog tables link to each other through numbers called OIDs (object identifiers). You rarely type them:
+  casts do the lookup. <code>'shop.orders'::regclass</code> turns a name into the table's OID and fails if it does not
+  exist; <code>relnamespace::regnamespace</code> turns a schema OID back into a name; and
+  <code>pg_get_userbyid(oid)</code> turns an owner OID into a role name. A bare <code>'orders'::regclass</code> obeys
+  <code>search_path</code> exactly like a query does, which makes it a handy way to test it.
+</p>
+
+<h2 id="when">When to use, when not to</h2>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Situation</th><th class="wrap">✅ Do this</th><th class="wrap">❌ Not this</th></tr></thead>
+  <tbody>
+    <tr><td class="wrap">Two parts of one application must join their data</td><td class="wrap">Two schemas in one database</td><td class="wrap">Two databases (no cross-database queries)</td></tr>
+    <tr><td class="wrap">Two unrelated applications share a server</td><td class="wrap">Separate databases, separate owner roles</td><td class="wrap">One database with tables mixed in <code>public</code></td></tr>
+    <tr><td class="wrap">Each customer must be isolated and backed up on its own</td><td class="wrap">A database per customer (if there are few)</td><td class="wrap">A schema per customer for thousands of tenants (catalog bloat, slow dumps)</td></tr>
+    <tr><td class="wrap">You need a throwaway copy to test a migration</td><td class="wrap"><code>CREATE DATABASE … TEMPLATE</code></td><td class="wrap">Running the test in the live database</td></tr>
+    <tr><td class="wrap">A different encoding or locale than the cluster default</td><td class="wrap"><code>TEMPLATE template0</code> with the options set</td><td class="wrap">Copying <code>template1</code> and hoping</td></tr>
+    <tr><td class="wrap">A script must behave the same for every role</td><td class="wrap">Qualified names (<code>shop.orders</code>)</td><td class="wrap">Relying on whatever <code>search_path</code> the role has</td></tr>
+    <tr><td class="wrap">Your tables need a home</td><td class="wrap">A named schema with an explicit owner</td><td class="wrap">The <code>public</code> schema</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="inspect">Inspect it</h2>
+
+<p>
+  One query that shows, for each schema of the current database, who owns it, how many ordinary tables it holds,
+  and whether PUBLIC can use it. Run it in the Docker database (<code>./pg psql</code>):
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">the schemas of this database</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select n.nspname as schema,
+       pg_get_userbyid(n.nspowner) as owner,
+       count(c.oid) filter (where c.relkind = 'r') as tables,
+       has_schema_privilege('public', n.oid, 'usage') as public_can_use
+from pg_namespace n
+left join pg_class c on c.relnamespace = n.oid
+where n.nspname not like 'pg\_%'
+  and n.nspname not in ('information_schema', 'course')
+group by n.oid, n.nspname, n.nspowner
+order by n.nspname;</code></pre>
+</figure>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">output in a fresh course database</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code>  schema   |       owner       | tables | public_can_use
+-----------+-------------------+--------+----------------
+ analytics | postgres          |      1 | f
+ public    | pg_database_owner |      0 | t
+ shop      | postgres          |      5 | f</code></pre>
+</figure>
+
+<h2 id="exercises">Your turn</h2>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 1</span><span class="grow"></span><span class="lvl">basic</span></div>
+  <div class="ex-body">
+    <p>
+      Create a schema <code>archive</code>, and inside it a table <code>archive.cancelled_orders</code> that holds a
+      copy of every row of <code>shop.orders</code> whose status is <code>'cancelled'</code>. Leave
+      <code>shop.orders</code> unchanged. Check it with <code>./pg check 02 1</code>.
+    </p>
+  </div>
+  {{stub 02 1}}
+  <details><summary>Hint</summary><p><code>CREATE TABLE … AS SELECT</code> creates a table from a query result. Write the schema in the table name.</p></details>
+  {{solution 02 1}}
+</section>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 2</span><span class="grow"></span><span class="lvl">intermediate</span></div>
+  <div class="ex-body">
+    <p>
+      Create a login role <code>lab_02_dev</code> and a schema <code>dev</code> that it owns. Arrange that every
+      time <code>lab_02_dev</code> connects, unqualified names are looked up in <code>dev</code> first, then in
+      <code>shop</code>, and nowhere else. Check it with <code>./pg check 02 2</code>.
+    </p>
+  </div>
+  {{stub 02 2}}
+  <details><summary>Hint</summary><p>Two statements create the objects; a third stores the setting against the role, not the session. <code>CREATE SCHEMA</code> has an <code>AUTHORIZATION</code> clause.</p></details>
+  {{solution 02 2}}
+</section>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 3</span><span class="grow"></span><span class="lvl">challenge</span></div>
+  <div class="ex-body">
+    <p>
+      Create a login role <code>lab_02_owner</code>. Then create a database <code>lab_02_copy</code> that is a full
+      copy of <code>shop_template</code> (it must contain the shop data), is owned by <code>lab_02_owner</code>, and
+      allows at most 3 simultaneous connections. Check it with <code>./pg check 02 3</code>.
+    </p>
+  </div>
+  {{stub 02 3}}
+  <details><summary>Hint</summary><p>The role must exist before the database that names it as owner. <code>CREATE DATABASE</code> accepts <code>TEMPLATE</code>, <code>OWNER</code> and <code>CONNECTION LIMIT</code> in one statement. Copy <code>shop_template</code>, not <code>shop</code>.</p></details>
+  {{solution 02 3}}
+</section>
+
+<h2 id="summary">Summary</h2>
+<ul>
+  <li>A cluster holds databases and roles; a database holds schemas; a schema holds tables and other objects. A connection reaches one database, and queries cannot cross databases.</li>
+  <li>Prefer several schemas in one database when the parts must be joined; use separate databases for real isolation.</li>
+  <li><code>CREATE DATABASE … TEMPLATE x</code> is a file-level copy. The source must have no other sessions. Use <code>template0</code> to change encoding or locale.</li>
+  <li><code>search_path</code> is searched left to right; <code>pg_catalog</code> is implicit; the first schema is where unqualified creates land. Set it per session, role, database, or role-in-database; role and database settings apply from the next login.</li>
+  <li>Since PostgreSQL 15 an ordinary role can use <code>public</code> but not create in it. The owner is <code>pg_database_owner</code>. Put your tables in a named schema instead.</li>
+  <li>Ask the catalogs: <code>\l</code>, <code>\dn+</code>, <code>pg_database</code>, <code>pg_namespace</code>, <code>pg_class</code>. <code>information_schema</code> shows only what you may see; <code>pg_catalog</code> shows all.</li>
+</ul>
+
+<h2 id="next">Looking ahead</h2>
+<p>
+  You now know where objects live and who owns them. <a href="03-roles-and-users.html">Lesson 3</a> covers the cluster-wide
+  roles that own and use them, and <a href="04-privileges-and-grants.html">lesson 4</a> covers how <code>GRANT</code>
+  and <code>REVOKE</code> decide what each role may do with a database, a schema and a table.
+</p>

@@ -1,0 +1,6 @@
+-- Create a login role lab_05_agent. Create the table
+--   shop.tickets (id integer, owner_name text, subject text).
+-- Let lab_05_agent use schema shop and SELECT from the table.
+-- Turn on row-level security for the table and add a policy so that an
+-- agent only sees the rows whose owner_name equals their own role name.
+-- Then run ./pg check 05 2.

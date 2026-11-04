@@ -1,0 +1,6 @@
+-- The "latest 10 events of one customer" query is slow:
+--   select id, occurred_at from analytics.events
+--   where customer_id = 4242 order by occurred_at desc limit 10;
+-- Create one index on analytics.events so that PostgreSQL reads the rows
+-- already in the right order: an index scan and no Sort step.
+-- Then run ./pg check 14 3.

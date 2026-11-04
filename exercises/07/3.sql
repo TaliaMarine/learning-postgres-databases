@@ -1,0 +1,4 @@
+-- Create lab_07_booking (id identity primary key, room integer not null,
+-- during tstzrange not null) so that the same room can never be booked for overlapping
+-- times, while different rooms may overlap and back-to-back bookings are fine.
+-- Run ./pg check 07 3 when you are done.

@@ -1,0 +1,720 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Replication and high availability &mdash; Learning PostgreSQL</title>
+<meta name="description" content="Streaming and logical replication, replicas, failover, lag, and what HA tools do for you.">
+<link rel="stylesheet" href="../assets/css/course.css">
+</head>
+<body data-root="../" data-page="24-replication">
+<a class="skip-link" href="#content">Skip to content</a>
+<header class="topbar">
+  <button class="icon-btn menu-btn" type="button" aria-label="Toggle navigation" aria-expanded="false" aria-controls="sidebar">&#9776;</button>
+  <a class="brand" href="../index.html"><span class="mark pgm">PG</span> Learning PostgreSQL <span class="sub">PostgreSQL 18</span></a>
+  <span class="spacer"></span>
+  <div class="search" role="search">
+    <span class="glyph" aria-hidden="true">&#9906;</span>
+    <input type="search" placeholder="Search the course&#8230;" aria-label="Search the course" autocomplete="off" spellcheck="false">
+    <kbd>/</kbd>
+    <div class="search-results" role="listbox"></div>
+  </div>
+  <nav class="topbar-links">
+    <a class="hide-sm" href="../appendices/d-glossary.html">Glossary</a>
+    <a class="hide-sm" href="../appendices/b-psql.html">psql</a>
+  </nav>
+  <button class="icon-btn theme-btn" type="button" aria-label="Toggle theme">&#9790;</button>
+</header>
+<div class="scrim"></div>
+<div class="shell">
+<nav class="sidebar" id="sidebar" aria-label="Course contents">
+  <h4>Start here</h4>
+  <ol>
+    <li><a href="../start/setup.html" data-page="setup"><span class="n">00</span><span>Set up your lab</span></a></li>
+  </ol>
+  <h4>Part 1 — Foundations: the server, databases, schemas and roles</h4>
+  <ol>
+    <li><a href="../lessons/01-architecture.html" data-page="01-architecture"><span class="n">01</span><span>How PostgreSQL is built</span></a></li>
+    <li><a href="../lessons/02-databases-and-schemas.html" data-page="02-databases-and-schemas"><span class="n">02</span><span>Databases and schemas</span></a></li>
+    <li><a href="../lessons/03-roles-and-users.html" data-page="03-roles-and-users"><span class="n">03</span><span>Roles and users</span></a></li>
+    <li><a href="../lessons/04-privileges-and-grants.html" data-page="04-privileges-and-grants"><span class="n">04</span><span>Privileges and grants</span></a></li>
+    <li><a href="../lessons/05-security-and-rls.html" data-page="05-security-and-rls"><span class="n">05</span><span>Hardening and row-level security</span></a></li>
+  </ol>
+  <h4>Part 2 — Modelling and SQL in depth</h4>
+  <ol>
+    <li><a href="../lessons/06-data-types.html" data-page="06-data-types"><span class="n">06</span><span>Data types</span></a></li>
+    <li><a href="../lessons/07-constraints-and-design.html" data-page="07-constraints-and-design"><span class="n">07</span><span>Constraints and schema design</span></a></li>
+    <li><a href="../lessons/08-advanced-queries.html" data-page="08-advanced-queries"><span class="n">08</span><span>Advanced queries</span></a></li>
+    <li><a href="../lessons/09-changing-data.html" data-page="09-changing-data"><span class="n">09</span><span>Changing data safely</span></a></li>
+    <li><a href="../lessons/10-json-and-arrays.html" data-page="10-json-and-arrays"><span class="n">10</span><span>JSONB and arrays</span></a></li>
+    <li><a href="../lessons/11-text-search.html" data-page="11-text-search"><span class="n">11</span><span>Text search and pattern matching</span></a></li>
+  </ol>
+  <h4>Part 3 — Performance</h4>
+  <ol>
+    <li><a href="../lessons/12-indexes.html" data-page="12-indexes"><span class="n">12</span><span>Indexes</span></a></li>
+    <li><a href="../lessons/13-explain-and-planner.html" data-page="13-explain-and-planner"><span class="n">13</span><span>EXPLAIN and the planner</span></a></li>
+    <li><a href="../lessons/14-query-tuning.html" data-page="14-query-tuning"><span class="n">14</span><span>A query-tuning workflow</span></a></li>
+  </ol>
+  <h4>Part 4 — Transactions and concurrency</h4>
+  <ol>
+    <li><a href="../lessons/15-transactions-and-mvcc.html" data-page="15-transactions-and-mvcc"><span class="n">15</span><span>Transactions and MVCC</span></a></li>
+    <li><a href="../lessons/16-locking.html" data-page="16-locking"><span class="n">16</span><span>Locking and concurrency</span></a></li>
+    <li><a href="../lessons/17-vacuum-and-bloat.html" data-page="17-vacuum-and-bloat"><span class="n">17</span><span>Vacuum, bloat and autovacuum</span></a></li>
+  </ol>
+  <h4>Part 5 — Programming the database</h4>
+  <ol>
+    <li><a href="../lessons/18-views-and-functions.html" data-page="18-views-and-functions"><span class="n">18</span><span>Views, functions and procedures</span></a></li>
+    <li><a href="../lessons/19-triggers-and-events.html" data-page="19-triggers-and-events"><span class="n">19</span><span>Triggers, LISTEN/NOTIFY and audit</span></a></li>
+    <li><a href="../lessons/20-partitioning.html" data-page="20-partitioning"><span class="n">20</span><span>Partitioning</span></a></li>
+  </ol>
+  <h4>Part 6 — Operating PostgreSQL</h4>
+  <ol>
+    <li><a href="../lessons/21-configuration.html" data-page="21-configuration"><span class="n">21</span><span>Configuration and tuning</span></a></li>
+    <li><a href="../lessons/22-wal-and-durability.html" data-page="22-wal-and-durability"><span class="n">22</span><span>WAL, checkpoints and durability</span></a></li>
+    <li><a href="../lessons/23-backup-and-recovery.html" data-page="23-backup-and-recovery"><span class="n">23</span><span>Backup, restore and PITR</span></a></li>
+    <li><a href="../lessons/24-replication.html" data-page="24-replication"><span class="n">24</span><span>Replication and high availability</span></a></li>
+    <li><a href="../lessons/25-monitoring.html" data-page="25-monitoring"><span class="n">25</span><span>Monitoring and diagnostics</span></a></li>
+    <li><a href="../lessons/26-connections-and-upgrades.html" data-page="26-connections-and-upgrades"><span class="n">26</span><span>Connections, pooling, extensions and upgrades</span></a></li>
+  </ol>
+  <h4>Part 7 — Putting it together</h4>
+  <ol>
+    <li><a href="../lessons/27-capstone.html" data-page="27-capstone"><span class="n">27</span><span>Capstone project</span></a></li>
+  </ol>
+  <h4>Annexes</h4>
+  <ol>
+    <li><a href="../appendices/a1-select-basics.html" data-page="a1-select-basics"><span class="n">A1</span><span>SELECT, filtering and sorting</span></a></li>
+    <li><a href="../appendices/a2-joins.html" data-page="a2-joins"><span class="n">A2</span><span>Joins and combining tables</span></a></li>
+    <li><a href="../appendices/a3-aggregation.html" data-page="a3-aggregation"><span class="n">A3</span><span>Aggregation and grouping</span></a></li>
+    <li><a href="../appendices/a4-subqueries-and-ctes.html" data-page="a4-subqueries-and-ctes"><span class="n">A4</span><span>Subqueries and CTEs</span></a></li>
+    <li><a href="../appendices/a5-ddl-and-dml.html" data-page="a5-ddl-and-dml"><span class="n">A5</span><span>Creating and changing things</span></a></li>
+    <li><a href="../appendices/b-psql.html" data-page="b-psql"><span class="n">B</span><span>psql cheat sheet</span></a></li>
+    <li><a href="../appendices/c-catalog-queries.html" data-page="c-catalog-queries"><span class="n">C</span><span>Catalog and diagnostic queries</span></a></li>
+    <li><a href="../appendices/d-glossary.html" data-page="d-glossary"><span class="n">D</span><span>Glossary</span></a></li>
+    <li><a href="../appendices/e-troubleshooting.html" data-page="e-troubleshooting"><span class="n">E</span><span>Troubleshooting</span></a></li>
+    <li><a href="../appendices/f-whats-next.html" data-page="f-whats-next"><span class="n">F</span><span>What to learn next</span></a></li>
+  </ol>
+</nav>
+<div class="main">
+<main class="content" id="content">
+<p class="eyebrow">Lesson 24 &middot; Part 6</p>
+<h1>Replication and high availability</h1>
+<div class="meta-row"><span class="tag">lesson 24</span><span class="tag">Docker exercises</span><span class="tag">live playground</span></div>
+<p class="lede">
+  A replica is a second server that keeps a copy of the first one's data, a few milliseconds behind. This lesson shows
+  the two kinds of PostgreSQL replication: <em>streaming</em> (a byte-for-byte copy of the whole cluster) and
+  <em>logical</em> (chosen tables, as row changes). It covers how to measure how far behind a replica is, what failover
+  is, and what tools such as Patroni or a managed service do that PostgreSQL on its own does not.
+</p>
+
+<h2 id="goals">Learning goals</h2>
+<ul>
+  <li>Explain how a streaming standby stays up to date by replaying the primary's WAL.</li>
+  <li>Name the settings and views of streaming replication: <code>primary_conninfo</code>, replication slots, <code>pg_stat_replication</code>, <code>synchronous_standby_names</code>.</li>
+  <li>Measure replication lag in bytes with <code>pg_current_wal_lsn()</code> and <code>pg_wal_lsn_diff()</code>, and in time.</li>
+  <li>Set up logical replication with <code>CREATE PUBLICATION</code> and <code>CREATE SUBSCRIPTION</code>, and explain <code>wal_level = logical</code> and <code>REPLICA IDENTITY</code>.</li>
+  <li>Describe failover and split-brain, and what an HA tool adds.</li>
+  <li>Choose streaming or logical replication for a given job.</li>
+</ul>
+
+<h2 id="lab">Set up for this lesson</h2>
+<p>
+  A replica needs a second PostgreSQL server, and the course container runs only one. So this lesson teaches the
+  mechanism, and you run only the parts that work on a single server: the replication views (they exist, and are
+  empty), the WAL position functions, and publications, which you can create and drop in a scratch database. The
+  standby examples were run on a separate, throwaway pair of servers, and the output is what they printed. Do not try
+  to change <code>wal_level</code> or other server settings in the course container.
+</p>
+
+<figure class="code" data-lang="bash">
+  <figcaption><span class="path">terminal</span><span class="grow"></span><span class="lang">bash</span></figcaption>
+<pre><code>./pg sql "create database lab_s24_scratch template shop_template" postgres
+./pg psql lab_s24_scratch</code></pre>
+</figure>
+
+<p>
+  The playgrounds run a real PostgreSQL in your browser. It is a single process with no network, so it can never
+  have a replica either. The views and functions are the same, though, so the queries behave as they do on a lone
+  primary.
+</p>
+
+<h2 id="streaming">1. Streaming replication: replaying the WAL elsewhere</h2>
+
+<p>
+  Every change a primary makes is first written to the WAL (<a href="22-wal-and-durability.html">lesson 22</a>). A
+  <em>standby</em> is a server that starts from a base backup of the primary
+  (<a href="23-backup-and-recovery.html">lesson 23</a>) and then never stops recovering. It connects to the primary,
+  receives WAL records as they are written, and replays them. This is <em>physical streaming replication</em>. The
+  primary process that sends WAL is a <em>WAL sender</em>; the standby process that receives it is a <em>WAL
+  receiver</em>.
+</p>
+
+<figure class="dia">
+  <div class="dia-hold">
+    <svg class="d" viewBox="0 0 860 240" role="img" aria-labelledby="sr-t sr-d">
+      <title id="sr-t">Streaming replication from a primary to a standby</title>
+      <desc id="sr-d">The application writes to the primary. The primary's WAL sender streams WAL records to the standby's WAL receiver, which replays them into the standby's data files. Read-only queries may go to the standby.</desc>
+      <defs>
+        <marker id="sa" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z"/></marker>
+      </defs>
+      <rect class="box accent" x="40" y="60" width="290" height="130" rx="10"/>
+      <text class="hd ctr" x="185" y="90">primary</text>
+      <text class="lbl ctr" x="185" y="112">reads and writes</text>
+      <rect class="box sunken" x="80" y="128" width="210" height="40" rx="6"/>
+      <text class="lbl ctr" x="185" y="153">WAL sender</text>
+      <rect class="box teal" x="530" y="60" width="290" height="130" rx="10"/>
+      <text class="hd ctr" x="675" y="90">standby</text>
+      <text class="lbl ctr" x="675" y="112">read-only (hot standby)</text>
+      <rect class="box sunken" x="570" y="128" width="210" height="40" rx="6"/>
+      <text class="lbl ctr" x="675" y="153">WAL receiver → replay</text>
+      <path class="line accent" d="M290 148 L570 148" marker-end="url(#sa)"/>
+      <text class="mut tiny" x="430" y="138" text-anchor="middle">WAL records, continuously</text>
+      <text class="mut tiny" x="430" y="172" text-anchor="middle">confirms write / flush / replay positions</text>
+      <path class="line thin" d="M570 160 L290 160" marker-end="url(#sa)"/>
+      <text class="mut tiny" x="185" y="40" text-anchor="middle">application writes here</text>
+      <text class="mut tiny" x="675" y="40" text-anchor="middle">reports may read here</text>
+    </svg>
+  </div>
+  <figcaption>The standby is a full copy of the <b>whole cluster</b>: every database, every role, every index.</figcaption>
+</figure>
+
+<p>
+  Because the standby replays the same WAL, it is an exact physical copy. It must run the same major version on the
+  same platform. With <code>hot_standby = on</code> (the default) it accepts read-only queries while it replays. Writes
+  fail with <code>ERROR:  cannot execute INSERT in a read-only transaction</code>.
+</p>
+
+<h3>Setting one up</h3>
+
+<p>
+  On the primary, <code>wal_level</code> must be <code>replica</code> or higher (the default), and
+  <code>max_wal_senders</code> must leave room (default 10). A role with the <code>REPLICATION</code> attribute, plus a
+  <code>replication</code> line in <code>pg_hba.conf</code>, lets the standby connect. Then one command on the standby
+  machine creates the copy and the configuration:
+</p>
+
+<figure class="code" data-lang="bash">
+  <figcaption><span class="path">on the standby machine (throwaway test servers)</span><span class="grow"></span><span class="lang">bash</span></figcaption>
+<pre><code># on the primary, once: a slot that keeps WAL until this standby has it
+psql -c "select pg_create_physical_replication_slot('standby1')"
+
+# on the standby: copy the primary, write the standby settings (-R), use the slot (-S)
+pg_basebackup -h primary.example -U replicator -D /var/lib/postgresql/18/main -X stream -R -S standby1
+pg_ctl -D /var/lib/postgresql/18/main start</code></pre>
+</figure>
+
+<p>
+  <code>-R</code> writes two things into the new data directory: an empty <code>standby.signal</code> file, which tells
+  the server to start as a standby, and these lines in <code>postgresql.auto.conf</code> (shortened):
+</p>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">postgresql.auto.conf written by pg_basebackup -R</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code>primary_conninfo = 'user=replicator host=primary.example port=5432 …'
+primary_slot_name = 'standby1'</code></pre>
+</figure>
+
+<p>
+  <code>primary_conninfo</code> is the connection string the standby uses to reach the primary.
+  <code>primary_slot_name</code> names a <em>replication slot</em>: a marker on the primary that records how far this
+  standby has got, so the primary keeps every WAL segment the standby still needs, even if it disconnects for an hour.
+</p>
+
+<div class="note warn">
+  <span class="note-title">An abandoned slot fills the disk</span>
+  <p>
+    A slot keeps WAL <em>forever</em> if its standby never comes back. The primary's <code>pg_wal</code> directory grows
+    until the disk is full and the primary stops. Drop slots you no longer need with
+    <code>pg_drop_replication_slot('name')</code>, watch <code>pg_replication_slots</code> for inactive ones, and set
+    <code>max_slot_wal_keep_size</code> (default <code>-1</code>, no limit) to cap how much WAL a slot may hold.
+  </p>
+</div>
+
+<h2 id="observe">2. Watching replication: pg_stat_replication and lag</h2>
+
+<p>
+  On the primary, <code>pg_stat_replication</code> has one row per connected standby. On the course server it is
+  empty, because nothing replicates from it. That is the normal answer on a single server, not an error:
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">am I a primary, and who replicates from me?</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">-- Am I a primary? Who is replicating from me?
+select pg_is_in_recovery() as in_recovery,
+       current_setting('wal_level') as wal_level,
+       (select count(*) from pg_stat_replication) as standbys,
+       (select count(*) from pg_replication_slots) as slots;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  Both the playground and the Docker database answer <code>f</code>, <code>replica</code>, <code>0</code>, <code>0</code>:
+  a primary with no standbys and no slots. On the throwaway primary with one standby attached, the same view showed
+  this:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">on a primary with a standby</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select application_name, state, sent_lsn, write_lsn, flush_lsn, replay_lsn, sync_state
+from pg_stat_replication;</code></pre>
+</figure>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">output on the throwaway primary</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code> application_name |   state   | sent_lsn  | write_lsn | flush_lsn | replay_lsn | sync_state
+------------------+-----------+-----------+-----------+-----------+------------+------------
+ walreceiver      | streaming | 0/7000000 | 0/7000000 | 0/7000000 | 0/7000000  | async</code></pre>
+</figure>
+
+<p>
+  An <em>LSN</em> (log sequence number) is a position in the WAL, written as two hexadecimal numbers. The four columns
+  are four steps: the primary <em>sent</em> the WAL, the standby <em>wrote</em> it, <em>flushed</em> it to disk, and
+  <em>replayed</em> it so queries can see it. The view also has <code>write_lag</code>, <code>flush_lag</code> and
+  <code>replay_lag</code>, which are times.
+</p>
+
+<h3>Lag in bytes</h3>
+
+<p>
+  <code>pg_current_wal_lsn()</code> is the primary's current position, and <code>pg_wal_lsn_diff(a, b)</code> subtracts
+  two positions and returns bytes. The difference between the primary's position and a standby's
+  <code>replay_lsn</code> is how much WAL the standby still has to apply:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">lag per standby, on the primary</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select application_name,
+       pg_wal_lsn_diff(pg_current_wal_lsn(), replay_lsn) as replay_lag_bytes,
+       replay_lag
+from pg_stat_replication;</code></pre>
+</figure>
+
+<p>
+  The same subtraction tells you how much WAL a statement writes, which is what a standby must then receive. Try it:
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">WAL positions are byte offsets you can subtract</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">-- How many bytes of WAL does one UPDATE write? The same subtraction measures lag.
+create temp table mark as select pg_current_wal_insert_lsn() as lsn;
+update shop.products set stock = stock + 1;
+select (select lsn from mark) as before_lsn,
+       pg_current_wal_insert_lsn() as after_lsn,
+       pg_wal_lsn_diff(pg_current_wal_insert_lsn(), (select lsn from mark)) as wal_bytes;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  The positions differ from run to run; the point is that <code>wal_bytes</code> is a plain number of bytes (712 in one
+  test run, for 8 products). The example uses <code>pg_current_wal_insert_lsn()</code>, the position where the next
+  record will be inserted, because in the browser's single process the flushed position does not always move inside one
+  script. On a standby, ask the reverse question: how long since the last replayed transaction?
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">on a standby</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select now() - pg_last_xact_replay_timestamp() as lag_time,
+       pg_last_wal_receive_lsn() as received,
+       pg_last_wal_replay_lsn()  as replayed;</code></pre>
+</figure>
+
+<div class="note warn">
+  <span class="note-title">Time-based lag grows when nothing happens</span>
+  <p>
+    <code>now() - pg_last_xact_replay_timestamp()</code> measures time since the last <em>replayed transaction</em>. On
+    a quiet primary nothing new is committed, so this number keeps growing although the standby is fully caught up.
+    Alert on the byte lag from the primary, or on <code>replay_lag</code>, and treat time-based lag on a standby as
+    meaningful only when the primary is busy.
+  </p>
+</div>
+
+<h3>Synchronous replication</h3>
+
+<p>
+  By default replication is <em>asynchronous</em>: <code>COMMIT</code> returns once the primary has flushed its own WAL,
+  and the standby catches up a moment later. If the primary dies in that moment, the last few commits exist only on the
+  dead machine. <code>synchronous_standby_names</code> makes <code>COMMIT</code> wait for standbys too:
+</p>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">postgresql.conf on the primary</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code>synchronous_standby_names = 'ANY 1 (standby_a, standby_b)'   # wait for either of the two
+synchronous_commit = on                                      # wait until the standby has flushed the WAL</code></pre>
+</figure>
+
+<p>
+  The names match each standby's <code>application_name</code> (set in its <code>primary_conninfo</code>).
+  <code>pg_stat_replication.sync_state</code> then shows <code>sync</code> or <code>quorum</code> instead of
+  <code>async</code>. <code>synchronous_commit = remote_apply</code> waits until the standby has also replayed the
+  change, so a read on the standby right after the commit sees it.
+  <a href="22-wal-and-durability.html">Lesson 22</a> covers the other values.
+</p>
+
+<div class="note danger">
+  <span class="note-title">One synchronous standby stops all writes when it stops</span>
+  <p>
+    With <code>synchronous_standby_names = 'standby_a'</code> and only that one standby, every <code>COMMIT</code> on the
+    primary waits forever when <code>standby_a</code> goes down. Synchronous replication needs at least two candidate
+    standbys (<code>ANY 1 (a, b)</code>), so losing one does not stop the primary.
+  </p>
+</div>
+
+<h2 id="logical">3. Logical replication: chosen tables, as row changes</h2>
+
+<p>
+  Logical replication sends <em>row changes</em> (this row was inserted, that one updated) instead of WAL bytes. The
+  source server <em>publishes</em> a set of tables and the target server <em>subscribes</em> to them. Because the target
+  receives rows, not bytes, it can be a different major version, have extra tables and indexes of its own, and accept
+  writes to other tables.
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">on the source (publisher), and on the target (subscriber)</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>-- on the publisher
+create publication shop_pub for table shop.orders, shop.order_items;
+
+-- on the subscriber: the tables must already exist there, with the same names and columns
+create subscription shop_sub
+  connection 'host=publisher.example dbname=shop user=replicator'
+  publication shop_pub;</code></pre>
+</figure>
+
+<p>
+  <code>CREATE SUBSCRIPTION</code> copies the existing rows first, then streams changes. It creates a <em>logical
+  replication slot</em> on the publisher. Unlike streaming replication, it does not copy table definitions (DDL),
+  sequences' current values or roles: you create the tables on the subscriber yourself, usually with
+  <code>pg_dump --schema-only</code>.
+</p>
+
+<h3>wal_level = logical</h3>
+
+<p>
+  To decode row changes from the WAL, the publisher needs <code>wal_level = logical</code>, which writes a little extra
+  information into the WAL. Changing it needs a restart. The course server runs with <code>replica</code>, so creating
+  a publication there succeeds but warns you:
+</p>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">output of CREATE PUBLICATION in the course container</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code>WARNING:  "wal_level" is insufficient to publish logical changes
+HINT:  Set "wal_level" to "logical" before creating subscriptions.
+CREATE PUBLICATION</code></pre>
+</figure>
+
+<p>
+  A publication is just catalog data, so it can exist before anyone subscribes. Create one and look at it:
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">create a publication and read it back</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">create publication catalog_pub for table shop.products, shop.categories;
+
+select p.pubname, t.schemaname, t.tablename, p.pubinsert, p.pubupdate, p.pubdelete
+from pg_publication p
+join pg_publication_tables t on t.pubname = p.pubname
+order by t.tablename;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  The browser shows the result but not the <code>wal_level</code> warning, because the playground displays rows and
+  errors only. A publication can be narrower than whole tables:
+</p>
+
+<ul>
+  <li><code>with (publish = 'insert, update')</code> sends only those kinds of change.</li>
+  <li>A <em>column list</em>, <code>for table shop.orders (id, status, total)</code>, sends only those columns.</li>
+  <li>A <em>row filter</em>, <code>for table shop.orders where (shipping_country = 'NL')</code>, sends only matching rows.</li>
+  <li><code>for all tables</code> publishes every table in the database, including ones created later.</li>
+</ul>
+
+<h3>REPLICA IDENTITY: which row was updated?</h3>
+
+<p>
+  When a row is updated or deleted, the subscriber has to find the same row. The <em>replica identity</em> of a table
+  is the set of columns sent to identify it. By default it is the primary key. A table with no primary key has no
+  replica identity, and once it is in a publication that publishes updates, PostgreSQL <strong>refuses the
+  update</strong> on the publisher itself:
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">step 1: a table without a primary key, published</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">create table public.page_views (url text, seen_at timestamptz);
+create publication everything for all tables;
+insert into public.page_views values ('/home', '2026-01-01 10:00+00');
+select count(*) as rows_inserted from public.page_views;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">step 2: the update is refused</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">update public.page_views set url = '/start';   -- fails: the table has no replica identity</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  The error is <code>cannot update table "page_views" because it does not have a replica identity and publishes
+  updates</code>. Inserts still work, because a new row needs no identifying. There are three fixes: add a primary key
+  (best), name a unique index on non-null columns with <code>replica identity using index</code>, or send the whole old
+  row with <code>replica identity full</code>. The last works for any table but makes the subscriber search for each
+  row, which is slow on big tables without a suitable index.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">step 3: give the table a replica identity, then clean up</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">alter table public.page_views replica identity full;
+update public.page_views set url = '/start';   -- now it works
+drop publication everything;
+drop publication catalog_pub;
+select relreplident, (select count(*) from pg_publication) as publications_left
+from pg_class where oid = 'public.page_views'::regclass;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  <code>relreplident</code> is <code>d</code> for the default (the primary key), <code>f</code> for full,
+  <code>i</code> for an index, and <code>n</code> for nothing. In the shop dataset, <code>shop.order_items</code> has no
+  primary key, so it needs one of these fixes before you publish updates of it. Exercise 3 meets a subtler version: a row
+  filter or column list must cover the replica identity, too.
+</p>
+
+<div class="note tip">
+  <span class="note-title">Logical replication as an upgrade path</span>
+  <p>
+    Because the subscriber can run a newer major version, logical replication can upgrade with only a few seconds of
+    downtime. You subscribe a new server to the old one, wait until it has caught up, stop writes, and point the
+    application at the new server. <a href="26-connections-and-upgrades.html">Lesson 26</a> compares this with
+    <code>pg_upgrade</code>.
+  </p>
+</div>
+
+<h2 id="ha">4. Failover, split-brain and what HA tools add</h2>
+
+<p>
+  <em>Failover</em> means making a standby the new primary when the old one fails. In PostgreSQL itself it is one
+  command on the standby, and it worked on the throwaway pair:
+</p>
+
+<figure class="code" data-lang="bash">
+  <figcaption><span class="path">on the standby (or: select pg_promote(); from SQL)</span><span class="grow"></span><span class="lang">bash</span></figcaption>
+<pre><code>pg_ctl -D /var/lib/postgresql/18/main promote
+# waiting for server to promote.... done
+# server promoted</code></pre>
+</figure>
+
+<p>
+  After that <code>pg_is_in_recovery()</code> returns <code>f</code> and the server accepts writes. The command is the
+  easy part. The hard parts are deciding <em>that</em> the primary has failed, making sure it stays down, and moving the
+  clients. PostgreSQL does none of that by itself.
+</p>
+
+<p>
+  <em>Split-brain</em> is the failure you must design against: the old primary was only unreachable, not dead. It comes
+  back, still believes it is the primary, and now two servers accept writes. Their data diverges, and there is no
+  automatic way to merge it. Preventing this is called <em>fencing</em>: before promoting a standby, make sure the old
+  primary cannot accept writes, for example by stopping it, cutting its network, or making it lose a lock in a
+  consensus store. A distributed key-value store such as etcd is the usual consensus store.
+</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Tool</th><th class="wrap">Where it runs</th><th class="wrap">What it adds to plain PostgreSQL</th></tr></thead>
+  <tbody>
+    <tr><td>Patroni</td><td class="wrap">Your servers or VMs</td><td class="wrap">Leader election through etcd, Consul or ZooKeeper; automatic failover and fencing; rebuilds old primaries as standbys; a REST API for health checks</td></tr>
+    <tr><td>CloudNativePG</td><td class="wrap">Kubernetes</td><td class="wrap">An operator that creates the primary and standbys, fails over, moves a service to the new primary, and schedules backups</td></tr>
+    <tr><td class="wrap">Managed services (Amazon RDS and Aurora, Google Cloud SQL, Azure Database for PostgreSQL, …)</td><td class="wrap">The provider</td><td class="wrap">Standbys, failover, a stable endpoint, backups and PITR, all behind a setting; less control and no superuser</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>
+  Clients find the current primary through something that moves on failover: a DNS name, a virtual IP, a Kubernetes
+  service, or a connection string listing several hosts with <code>target_session_attrs=read-write</code>, which makes
+  libpq-based drivers try each host until one accepts writes.
+</p>
+
+<div class="note warn">
+  <span class="note-title">A replica is not a backup</span>
+  <p>
+    A standby replays every change, including <code>DROP TABLE</code> and the <code>DELETE</code> without a
+    <code>WHERE</code>, within milliseconds. Replication protects you against losing a machine, not against mistakes.
+    Keep the backups and WAL archive of <a href="23-backup-and-recovery.html">lesson 23</a> as well.
+  </p>
+</div>
+
+<h2 id="when">When to use, when not to</h2>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Situation</th><th class="wrap">✅ Do this</th><th class="wrap">❌ Not this</th></tr></thead>
+  <tbody>
+    <tr><td class="wrap">Survive the loss of the database machine</td><td class="wrap">Streaming standbys with an HA tool or a managed service</td><td class="wrap">A hand-written script that promotes a standby when a ping fails</td></tr>
+    <tr><td class="wrap">Move reporting queries off the primary</td><td class="wrap">A hot standby for read-only queries, accepting a little lag</td><td class="wrap">Reading your own just-written data from the standby without <code>remote_apply</code></td></tr>
+    <tr><td class="wrap">Send a few tables to another system or service</td><td class="wrap">Logical replication with a publication of those tables</td><td class="wrap">A full streaming replica of the whole cluster</td></tr>
+    <tr><td class="wrap">Upgrade a major version with minimal downtime</td><td class="wrap">Logical replication into a new-version server, then switch over</td><td class="wrap">Streaming replication between different major versions (impossible)</td></tr>
+    <tr><td class="wrap">Never lose a committed transaction</td><td class="wrap"><code>synchronous_standby_names = 'ANY 1 (a, b)'</code> with two standbys</td><td class="wrap">A single synchronous standby that can stop every write</td></tr>
+    <tr><td class="wrap">Undo an accidental <code>DELETE</code></td><td class="wrap">Point-in-time recovery from backups</td><td class="wrap">Hoping the replica has not replayed it yet</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="inspect">Inspect it</h2>
+
+<p>All three catalog views exist on any server. On the course server each one is empty, and that is the answer:</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">replication state of this server</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select slot_name, slot_type, active, restart_lsn, wal_status from pg_replication_slots;
+select pubname, puballtables from pg_publication;          -- per database
+select subname, subenabled from pg_subscription;           -- per database
+select name, setting from pg_settings
+where name in ('wal_level', 'max_wal_senders', 'max_replication_slots', 'hot_standby', 'synchronous_standby_names')
+order by name;</code></pre>
+</figure>
+
+<p>When you finish the lesson, drop the scratch database: <code>./pg sql "drop database if exists lab_s24_scratch with (force)" postgres</code>.</p>
+
+<h2 id="exercises">Your turn</h2>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 1</span><span class="grow"></span><span class="lvl">basic</span></div>
+  <div class="ex-body">
+    <p>
+      Report this server's replication status in one row with the columns <code>in_recovery</code>,
+      <code>standbys</code>, <code>slots</code>, <code>wal_level</code>, <code>logical_ready</code> and
+      <code>max_wal_senders</code>, as the file describes.
+    </p>
+    <p>Open <code>exercises/24/1.sql</code>, write your answer, then run <code>./pg check 24 1</code>.</p>
+  </div>
+  <figure class="code" data-lang="sql">
+  <figcaption><span class="path">exercises/24/1.sql</span><span class="grow"></span><span class="lang">your starting file</span></figcaption>
+<pre><code>-- Is this server a primary, and is it ready for replicas? Return ONE row with
+-- these columns:
+--   in_recovery        boolean  true on a standby, false on a primary
+--   standbys           bigint   standbys connected right now (pg_stat_replication)
+--   slots              bigint   replication slots that exist (pg_replication_slots)
+--   wal_level          text     the current wal_level setting
+--   logical_ready      boolean  true when wal_level is 'logical'
+--   max_wal_senders    integer  the max_wal_senders setting, as an integer
+-- Then run ./pg check 24 1.</code></pre>
+</figure>
+  <details><summary>Hint</summary><p><code>current_setting('name')</code> returns a setting as text; cast it with <code>::integer</code>. Scalar subqueries such as <code>(select count(*) from …)</code> fit in one <code>select</code> list.</p></details>
+  <details class="solution"><summary>Show a model solution for exercise 1 (try first!)</summary>
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">solutions/24/1.sql</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select pg_is_in_recovery()                                    as in_recovery,
+       (select count(*) from pg_stat_replication)             as standbys,
+       (select count(*) from pg_replication_slots)            as slots,
+       current_setting('wal_level')                           as wal_level,
+       current_setting('wal_level') = 'logical'               as logical_ready,
+       current_setting('max_wal_senders')::integer            as max_wal_senders;</code></pre>
+</figure>
+</details>
+</section>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 2</span><span class="grow"></span><span class="lvl">intermediate</span></div>
+  <div class="ex-body">
+    <p>
+      Create a publication <code>lab_orders_pub</code> for <code>shop.orders</code> and <code>shop.order_items</code> that
+      publishes inserts and updates only.
+    </p>
+    <p>Open <code>exercises/24/2.sql</code>, write your answer, then run <code>./pg check 24 2</code>.</p>
+  </div>
+  <figure class="code" data-lang="sql">
+  <figcaption><span class="path">exercises/24/2.sql</span><span class="grow"></span><span class="lang">your starting file</span></figcaption>
+<pre><code>-- Prepare logical replication of the order data. Create a publication named
+-- lab_orders_pub that publishes the tables shop.orders and shop.order_items,
+-- and only INSERT and UPDATE changes (not DELETE, not TRUNCATE).
+-- PostgreSQL will warn that wal_level is too low for logical replication;
+-- that warning is expected here. Then run ./pg check 24 2.</code></pre>
+</figure>
+  <details><summary>Hint</summary><p>The kinds of change go in a <code>with (publish = '…')</code> clause at the end of <code>CREATE PUBLICATION</code>.</p></details>
+  <details class="solution"><summary>Show a model solution for exercise 2 (try first!)</summary>
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">solutions/24/2.sql</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create publication lab_orders_pub
+  for table shop.orders, shop.order_items
+  with (publish = 'insert, update');</code></pre>
+</figure>
+</details>
+</section>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 3</span><span class="grow"></span><span class="lvl">challenge</span></div>
+  <div class="ex-body">
+    <p>
+      Publish only the European orders, and only five columns of them. Then make ordinary updates of
+      <code>shop.orders</code> work again, without dropping the primary key and without changing the publication.
+    </p>
+    <p>Open <code>exercises/24/3.sql</code>, write your answer, then run <code>./pg check 24 3</code>.</p>
+  </div>
+  <figure class="code" data-lang="sql">
+  <figcaption><span class="path">exercises/24/3.sql</span><span class="grow"></span><span class="lang">your starting file</span></figcaption>
+<pre><code>-- A European warehouse should receive only part of shop.orders. Create a
+-- publication lab_eu_orders that publishes INSERT and UPDATE changes of
+-- shop.orders, only for rows whose shipping_country is 'NL', 'BE' or 'DE',
+-- and only the columns id, customer_id, status, total, shipping_country.
+-- After that, an ordinary UPDATE of shop.orders must still work, for example:
+--   update shop.orders set total = total where id = 1;
+-- (try it: at first it fails). Fix that without dropping the primary key and
+-- without changing the publication. Then run ./pg check 24 3.</code></pre>
+</figure>
+  <details><summary>Hint</summary><p>Read the error's DETAIL line. The replica identity must contain the column the row filter uses, and must fit inside the column list. A unique index on <code>(id, shipping_country)</code> can be the replica identity.</p></details>
+  <details class="solution"><summary>Show a model solution for exercise 3 (try first!)</summary>
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">solutions/24/3.sql</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create publication lab_eu_orders
+  for table shop.orders (id, customer_id, status, total, shipping_country)
+  where (shipping_country in ('NL', 'BE', 'DE'))
+  with (publish = 'insert, update');
+
+-- The row filter uses shipping_country, so the replica identity (the columns
+-- that identify an updated row) must include it. REPLICA IDENTITY FULL would
+-- not work either: the column list must cover the whole replica identity.
+create unique index orders_id_country_key on shop.orders (id, shipping_country);
+alter table shop.orders replica identity using index orders_id_country_key;
+
+update shop.orders set total = total where id = 1;</code></pre>
+</figure>
+</details>
+</section>
+
+<h2 id="summary">Summary</h2>
+<ul>
+  <li>A streaming standby starts from a base backup and replays the primary's WAL continuously; it copies the whole cluster.</li>
+  <li><code>primary_conninfo</code> says where the primary is; a replication slot makes the primary keep the WAL a standby still needs, and an abandoned slot fills the disk.</li>
+  <li><code>pg_stat_replication</code> (empty on a single server) shows each standby's sent, written, flushed and replayed position; <code>pg_wal_lsn_diff</code> turns positions into bytes of lag.</li>
+  <li>Logical replication publishes chosen tables as row changes, needs <code>wal_level = logical</code>, and needs a replica identity on every table whose updates or deletes it publishes.</li>
+  <li>Promoting a standby is one command; deciding when, fencing the old primary and moving clients is what Patroni, CloudNativePG and managed services do.</li>
+  <li>Replication is not a backup: mistakes replicate too.</li>
+</ul>
+
+<h2 id="next">Looking ahead</h2>
+<p>
+  A standby is one more server to watch, and lag is one of many numbers worth watching. In
+  <a href="25-monitoring.html">lesson 25</a> you will read the <code>pg_stat_*</code> views, find blocked sessions and
+  slow statements, and work through a checklist for "the database is slow".
+</p>
+<div class="lesson-done" data-lesson="24-replication"></div>
+<nav class="pager"><a class="prev" href="../lessons/23-backup-and-recovery.html"><span class="dir">Previous</span><span class="lbl">23 · Backup, restore and PITR</span></a><a class="next" href="../lessons/25-monitoring.html"><span class="dir">Next</span><span class="lbl">25 · Monitoring and diagnostics</span></a></nav>
+</main>
+<aside class="toc" aria-label="On this page"></aside>
+</div>
+</div>
+<script src="../assets/js/search-index.js"></script>
+<script src="../assets/js/mini-seed.js"></script>
+<script src="../assets/js/course.js"></script>
+</body>
+</html>

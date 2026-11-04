@@ -1,0 +1,4 @@
+-- Create a login role lab_02_dev. Create a schema named dev that is OWNED BY
+-- lab_02_dev. Then make sure that whenever lab_02_dev connects, unqualified
+-- table names are looked up in dev first, then in shop, and nowhere else.
+-- Run ./pg check 02 2 when you are done.

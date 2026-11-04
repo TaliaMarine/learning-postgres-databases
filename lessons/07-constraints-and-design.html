@@ -1,0 +1,949 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Constraints and schema design &mdash; Learning PostgreSQL</title>
+<meta name="description" content="Keys, foreign keys and their actions, check and exclusion constraints, identity, generated columns, normalisation.">
+<link rel="stylesheet" href="../assets/css/course.css">
+</head>
+<body data-root="../" data-page="07-constraints-and-design">
+<a class="skip-link" href="#content">Skip to content</a>
+<header class="topbar">
+  <button class="icon-btn menu-btn" type="button" aria-label="Toggle navigation" aria-expanded="false" aria-controls="sidebar">&#9776;</button>
+  <a class="brand" href="../index.html"><span class="mark pgm">PG</span> Learning PostgreSQL <span class="sub">PostgreSQL 18</span></a>
+  <span class="spacer"></span>
+  <div class="search" role="search">
+    <span class="glyph" aria-hidden="true">&#9906;</span>
+    <input type="search" placeholder="Search the course&#8230;" aria-label="Search the course" autocomplete="off" spellcheck="false">
+    <kbd>/</kbd>
+    <div class="search-results" role="listbox"></div>
+  </div>
+  <nav class="topbar-links">
+    <a class="hide-sm" href="../appendices/d-glossary.html">Glossary</a>
+    <a class="hide-sm" href="../appendices/b-psql.html">psql</a>
+  </nav>
+  <button class="icon-btn theme-btn" type="button" aria-label="Toggle theme">&#9790;</button>
+</header>
+<div class="scrim"></div>
+<div class="shell">
+<nav class="sidebar" id="sidebar" aria-label="Course contents">
+  <h4>Start here</h4>
+  <ol>
+    <li><a href="../start/setup.html" data-page="setup"><span class="n">00</span><span>Set up your lab</span></a></li>
+  </ol>
+  <h4>Part 1 — Foundations: the server, databases, schemas and roles</h4>
+  <ol>
+    <li><a href="../lessons/01-architecture.html" data-page="01-architecture"><span class="n">01</span><span>How PostgreSQL is built</span></a></li>
+    <li><a href="../lessons/02-databases-and-schemas.html" data-page="02-databases-and-schemas"><span class="n">02</span><span>Databases and schemas</span></a></li>
+    <li><a href="../lessons/03-roles-and-users.html" data-page="03-roles-and-users"><span class="n">03</span><span>Roles and users</span></a></li>
+    <li><a href="../lessons/04-privileges-and-grants.html" data-page="04-privileges-and-grants"><span class="n">04</span><span>Privileges and grants</span></a></li>
+    <li><a href="../lessons/05-security-and-rls.html" data-page="05-security-and-rls"><span class="n">05</span><span>Hardening and row-level security</span></a></li>
+  </ol>
+  <h4>Part 2 — Modelling and SQL in depth</h4>
+  <ol>
+    <li><a href="../lessons/06-data-types.html" data-page="06-data-types"><span class="n">06</span><span>Data types</span></a></li>
+    <li><a href="../lessons/07-constraints-and-design.html" data-page="07-constraints-and-design"><span class="n">07</span><span>Constraints and schema design</span></a></li>
+    <li><a href="../lessons/08-advanced-queries.html" data-page="08-advanced-queries"><span class="n">08</span><span>Advanced queries</span></a></li>
+    <li><a href="../lessons/09-changing-data.html" data-page="09-changing-data"><span class="n">09</span><span>Changing data safely</span></a></li>
+    <li><a href="../lessons/10-json-and-arrays.html" data-page="10-json-and-arrays"><span class="n">10</span><span>JSONB and arrays</span></a></li>
+    <li><a href="../lessons/11-text-search.html" data-page="11-text-search"><span class="n">11</span><span>Text search and pattern matching</span></a></li>
+  </ol>
+  <h4>Part 3 — Performance</h4>
+  <ol>
+    <li><a href="../lessons/12-indexes.html" data-page="12-indexes"><span class="n">12</span><span>Indexes</span></a></li>
+    <li><a href="../lessons/13-explain-and-planner.html" data-page="13-explain-and-planner"><span class="n">13</span><span>EXPLAIN and the planner</span></a></li>
+    <li><a href="../lessons/14-query-tuning.html" data-page="14-query-tuning"><span class="n">14</span><span>A query-tuning workflow</span></a></li>
+  </ol>
+  <h4>Part 4 — Transactions and concurrency</h4>
+  <ol>
+    <li><a href="../lessons/15-transactions-and-mvcc.html" data-page="15-transactions-and-mvcc"><span class="n">15</span><span>Transactions and MVCC</span></a></li>
+    <li><a href="../lessons/16-locking.html" data-page="16-locking"><span class="n">16</span><span>Locking and concurrency</span></a></li>
+    <li><a href="../lessons/17-vacuum-and-bloat.html" data-page="17-vacuum-and-bloat"><span class="n">17</span><span>Vacuum, bloat and autovacuum</span></a></li>
+  </ol>
+  <h4>Part 5 — Programming the database</h4>
+  <ol>
+    <li><a href="../lessons/18-views-and-functions.html" data-page="18-views-and-functions"><span class="n">18</span><span>Views, functions and procedures</span></a></li>
+    <li><a href="../lessons/19-triggers-and-events.html" data-page="19-triggers-and-events"><span class="n">19</span><span>Triggers, LISTEN/NOTIFY and audit</span></a></li>
+    <li><a href="../lessons/20-partitioning.html" data-page="20-partitioning"><span class="n">20</span><span>Partitioning</span></a></li>
+  </ol>
+  <h4>Part 6 — Operating PostgreSQL</h4>
+  <ol>
+    <li><a href="../lessons/21-configuration.html" data-page="21-configuration"><span class="n">21</span><span>Configuration and tuning</span></a></li>
+    <li><a href="../lessons/22-wal-and-durability.html" data-page="22-wal-and-durability"><span class="n">22</span><span>WAL, checkpoints and durability</span></a></li>
+    <li><a href="../lessons/23-backup-and-recovery.html" data-page="23-backup-and-recovery"><span class="n">23</span><span>Backup, restore and PITR</span></a></li>
+    <li><a href="../lessons/24-replication.html" data-page="24-replication"><span class="n">24</span><span>Replication and high availability</span></a></li>
+    <li><a href="../lessons/25-monitoring.html" data-page="25-monitoring"><span class="n">25</span><span>Monitoring and diagnostics</span></a></li>
+    <li><a href="../lessons/26-connections-and-upgrades.html" data-page="26-connections-and-upgrades"><span class="n">26</span><span>Connections, pooling, extensions and upgrades</span></a></li>
+  </ol>
+  <h4>Part 7 — Putting it together</h4>
+  <ol>
+    <li><a href="../lessons/27-capstone.html" data-page="27-capstone"><span class="n">27</span><span>Capstone project</span></a></li>
+  </ol>
+  <h4>Annexes</h4>
+  <ol>
+    <li><a href="../appendices/a1-select-basics.html" data-page="a1-select-basics"><span class="n">A1</span><span>SELECT, filtering and sorting</span></a></li>
+    <li><a href="../appendices/a2-joins.html" data-page="a2-joins"><span class="n">A2</span><span>Joins and combining tables</span></a></li>
+    <li><a href="../appendices/a3-aggregation.html" data-page="a3-aggregation"><span class="n">A3</span><span>Aggregation and grouping</span></a></li>
+    <li><a href="../appendices/a4-subqueries-and-ctes.html" data-page="a4-subqueries-and-ctes"><span class="n">A4</span><span>Subqueries and CTEs</span></a></li>
+    <li><a href="../appendices/a5-ddl-and-dml.html" data-page="a5-ddl-and-dml"><span class="n">A5</span><span>Creating and changing things</span></a></li>
+    <li><a href="../appendices/b-psql.html" data-page="b-psql"><span class="n">B</span><span>psql cheat sheet</span></a></li>
+    <li><a href="../appendices/c-catalog-queries.html" data-page="c-catalog-queries"><span class="n">C</span><span>Catalog and diagnostic queries</span></a></li>
+    <li><a href="../appendices/d-glossary.html" data-page="d-glossary"><span class="n">D</span><span>Glossary</span></a></li>
+    <li><a href="../appendices/e-troubleshooting.html" data-page="e-troubleshooting"><span class="n">E</span><span>Troubleshooting</span></a></li>
+    <li><a href="../appendices/f-whats-next.html" data-page="f-whats-next"><span class="n">F</span><span>What to learn next</span></a></li>
+  </ol>
+</nav>
+<div class="main">
+<main class="content" id="content">
+<p class="eyebrow">Lesson 07 &middot; Part 2</p>
+<h1>Constraints and schema design</h1>
+<div class="meta-row"><span class="tag">lesson 07</span><span class="tag">Docker exercises</span><span class="tag">live playground</span></div>
+<p class="lede">
+  A constraint is a rule the database enforces on every write, from every client, forever. This lesson
+  shows the constraints PostgreSQL offers (keys, foreign keys with their actions, check and exclusion
+  constraints), how to postpone a check until commit, how identity columns and generated columns replace
+  hand-written counters and derived values, and how to tell whether a table is shaped well.
+</p>
+
+<h2 id="goals">Learning goals</h2>
+<ul>
+  <li>Choose between a primary key, a unique constraint and a unique index, and explain what <code>NULL</code> does to each.</li>
+  <li>Pick the right foreign key action (<code>NO ACTION</code>, <code>RESTRICT</code>, <code>CASCADE</code>, <code>SET NULL</code>, <code>SET DEFAULT</code>) for a delete and for an update.</li>
+  <li>Write check and exclusion constraints, and add a check to a big table without a long lock using <code>NOT VALID</code>.</li>
+  <li>Use <code>DEFERRABLE</code> constraints for cyclic references and multi-row swaps.</li>
+  <li>Prefer identity columns to <code>serial</code>, and explain why sequence gaps are normal.</li>
+  <li>Use generated columns, and say how <code>STORED</code> and <code>VIRTUAL</code> differ in PostgreSQL 18.</li>
+  <li>Spot a table that breaks first, second or third normal form, and say what to do about it.</li>
+</ul>
+
+<h2 id="lab">Set up for this lesson</h2>
+<p>
+  Use the <code>shop</code> database; it is already seeded. The shop tables already carry constraints, so you
+  can read real ones before you write your own. The exercises create tables whose names start with
+  <code>lab_07_</code>. One of them needs the <code>btree_gist</code> extension, which the course image
+  includes. Start with <code>./pg up</code> if the container is not running.
+</p>
+
+<figure class="code" data-lang="bash">
+  <figcaption><span class="path">terminal</span><span class="grow"></span><span class="lang">bash</span></figcaption>
+<pre><code>./pg psql
+\d shop.order_items</code></pre>
+</figure>
+
+<p>
+  <code>\d</code> prints the columns, the primary key, the check constraints and the foreign keys of a table.
+  Keep it in mind: it is the quickest way to see which rules a table enforces.
+</p>
+
+<div class="note info">
+  <span class="note-title">Playground and Docker</span>
+  <p>
+    The playground boxes on this page create small tables of their own, so you can break rules without harming
+    anything. They share one database per page. A box that creates tables starts with <code>drop table if exists</code>, so you
+    can run it again. The lesson shows an error in a box only as that box's last statement, because a box runs
+    as one transaction and an error undoes the whole box.
+  </p>
+</div>
+
+<h2 id="keys">1. Primary and unique keys</h2>
+
+<p>
+  A <em>primary key</em> says: this column (or this set of columns) identifies one row, and there is at most
+  one row per value. It is a unique constraint plus <code>NOT NULL</code>, and a table has at most one. A
+  <em>unique constraint</em> says only that no two rows share a value; a table can have many. Both are
+  enforced by a unique index that PostgreSQL creates for you, so lookups by that key are fast.
+</p>
+
+<p>
+  The shop uses a <em>surrogate key</em> (a meaningless number the database makes up, such as
+  <code>customers.id</code>) as the primary key and keeps the <em>natural key</em> (a value from the real world,
+  such as <code>email</code> or <code>sku</code>) as a unique constraint. That way an email change touches one
+  column in one table, not every table that points at the customer.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">unique allows NULLs; a check refuses bad values</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">drop table if exists promo;
+create table promo (
+  code    text unique,
+  pct_off integer not null check (pct_off between 1 and 90)
+);
+insert into promo values (null, 10), (null, 20);   -- two NULLs are accepted
+insert into promo values ('SPRING', 15);
+select code, pct_off from promo order by pct_off;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  Two rows with <code>code = NULL</code> went in. By default a unique constraint treats every <code>NULL</code>
+  as different from every other value, because <code>NULL = NULL</code> is not true. If you want at most one
+  <code>NULL</code>, say so (PostgreSQL 15 and later):
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">nulls not distinct</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create table promo_strict (
+  code text unique nulls not distinct
+);</code></pre>
+</figure>
+
+<p>Now break a rule on purpose. This box ends with an error, on purpose:</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">expected error: duplicate key</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">insert into promo values ('SPRING', 20);</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  You should see <code>duplicate key value violates unique constraint "promo_code_key"</code>. PostgreSQL
+  named the constraint for you (table, column, <code>key</code>). Change the statement to
+  <code>insert into promo values ('HUGE', 95);</code> and run it again to see a check constraint refuse the
+  row: <code>new row for relation "promo" violates check constraint "promo_pct_off_check"</code>.
+</p>
+
+<div class="note tip">
+  <span class="note-title">Name your constraints</span>
+  <p>
+    Write <code>constraint promo_pct_off_range check (pct_off between 1 and 90)</code> instead of leaving the
+    name to PostgreSQL. The name appears in every error message your application will log, and you need it for
+    <code>ALTER TABLE ... DROP CONSTRAINT</code>.
+  </p>
+</div>
+
+<h2 id="fk">2. Foreign keys and their actions</h2>
+
+<p>
+  A <em>foreign key</em> says: the value in this column must exist in a key of another table (or be
+  <code>NULL</code>). The other table's column must itself be a primary key or have a unique constraint, or
+  PostgreSQL refuses to create the foreign key (<code>there is no unique constraint matching given keys for
+  referenced table</code>). The <em>child</em> table holds the foreign key; the <em>parent</em> table is the one
+  it points at.
+</p>
+
+<p>
+  Inserting a child row with no parent is always an error. What happens when you delete or change a
+  <em>parent</em> row that children still point at is up to the foreign key's <em>action</em>. You choose one
+  for <code>ON DELETE</code> and one for <code>ON UPDATE</code>:
+</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Action</th><th>When the parent row is deleted or its key changes</th><th>Can be deferred</th></tr></thead>
+  <tbody>
+    <tr><td><code>NO ACTION</code> (default)</td><td class="wrap">Error, if children still point at the old value when the statement ends</td><td>yes</td></tr>
+    <tr><td><code>RESTRICT</code></td><td class="wrap">Error immediately, even if the statement would put things right later</td><td>no</td></tr>
+    <tr><td><code>CASCADE</code></td><td class="wrap">Delete the children (on delete) or copy the new key into them (on update)</td><td>no</td></tr>
+    <tr><td><code>SET NULL</code></td><td class="wrap">Set the child's foreign key column to <code>NULL</code></td><td>no</td></tr>
+    <tr><td><code>SET DEFAULT</code></td><td class="wrap">Set the child's column to its default value, which must itself exist in the parent</td><td>no</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>
+  Every foreign key in the shop uses the default, <code>NO ACTION</code>. Run the lesson's first query in the
+  Inspect section to see them. The playground below sets up two child tables with different actions and deletes
+  one parent row:
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">the same delete, two different actions</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">drop table if exists fk_emp_cascade, fk_emp_setnull, fk_dept;
+create table fk_dept (id integer primary key, name text not null);
+create table fk_emp_cascade (id integer primary key,
+  dept_id integer references fk_dept (id) on delete cascade);
+create table fk_emp_setnull (id integer primary key,
+  dept_id integer references fk_dept (id) on delete set null);
+insert into fk_dept values (1, 'Sales'), (2, 'Support');
+insert into fk_emp_cascade values (1, 1), (2, 1), (3, 2);
+insert into fk_emp_setnull values (1, 1), (2, 1), (3, 2);
+
+delete from fk_dept where id = 1;
+
+select 'cascade: rows left' as what, count(*) as n from fk_emp_cascade
+union all
+select 'set null: rows left', count(*) from fk_emp_setnull
+union all
+select 'set null: still linked', count(dept_id) from fk_emp_setnull;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  Department 1 had two employees in each table. With <code>CASCADE</code> they were deleted along with the
+  department, so one row is left. With <code>SET NULL</code> all three rows survive, and only one is still
+  linked to a department.
+</p>
+
+<div class="note warn">
+  <span class="note-title">CASCADE deletes more than you think</span>
+  <p>
+    A cascade can chain: delete a customer, which deletes their orders, which deletes their order items. That
+    is correct for data that has no meaning without its parent (order items), and wrong for data you must keep
+    (invoices, audit rows). The shop's default, <code>NO ACTION</code>, makes deletes fail loudly, which is the
+    safe starting point. Use <code>CASCADE</code> where you can say, in one sentence, why the child is worthless
+    without the parent.
+  </p>
+</div>
+
+<p>
+  See the default in action. In the mini shop of the playground, product 1 is on order, so deleting it must
+  fail. This box ends with an error, on purpose:
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">expected error: foreign key violation</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">delete from shop.products where id = 1;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  The message is <code>update or delete on table "products" violates foreign key constraint
+  "order_items_product_id_fkey" on table "order_items"</code>. It names the constraint and the child table,
+  which is how you find out who still depends on the row.
+</p>
+
+<h3 id="fk-details">NO ACTION or RESTRICT?</h3>
+<p>
+  They sound the same and differ in one way: <em>when</em> the check happens. <code>NO ACTION</code> checks at
+  the end of the statement, and, if you declare the constraint <code>DEFERRABLE</code>
+  (<a href="#deferrable">section 5</a>), at commit. <code>RESTRICT</code> checks at once and can never be
+  deferred. In a transaction that deletes a parent and then re-inserts the same key before commit,
+  a deferred <code>NO ACTION</code> foreign key accepts the result; a <code>RESTRICT</code> one refuses at the
+  <code>DELETE</code>. In practice, use the default unless you need the strict behaviour.
+</p>
+
+<p>
+  <code>SET NULL</code> can name the columns to clear, which matters for a composite foreign key that shares a
+  column with something else (PostgreSQL 15 and later):
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">set null on some columns only</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create table child (
+  tenant_id integer not null,
+  parent_id integer,
+  foreign key (tenant_id, parent_id) references parent (tenant_id, id)
+    on delete set null (parent_id)   -- keep tenant_id, clear only parent_id
+);</code></pre>
+</figure>
+
+<div class="note danger">
+  <span class="note-title">Foreign keys are not indexed for you</span>
+  <p>
+    PostgreSQL indexes the <em>parent</em> side of a foreign key (it is a primary key or unique constraint). It
+    does <em>not</em> index the child side. In the shop, nothing indexes <code>orders.customer_id</code> or
+    <code>order_items.product_id</code>. Deleting a product then forces PostgreSQL to scan all of
+    <code>order_items</code> to check that no row still points at it, and the same scan runs for every
+    <code>ON DELETE CASCADE</code>. Joins from parent to child need the index too. Add one to every foreign key
+    column you join on or delete through. The Inspect section has a query that lists the unindexed ones, and
+    <a href="12-indexes.html">lesson 12</a> covers the indexes themselves.
+  </p>
+</div>
+
+<div class="note warn">
+  <span class="note-title">A composite foreign key with a NULL is not checked</span>
+  <p>
+    The default matching rule, <code>MATCH SIMPLE</code>, skips the check if <em>any</em> column of a composite
+    foreign key is <code>NULL</code>. Mark every column of a composite foreign key <code>NOT NULL</code>, or
+    use <code>MATCH FULL</code>, which refuses a mix of null and non-null values.
+  </p>
+</div>
+
+<h2 id="check">3. Check and NOT NULL constraints</h2>
+
+<p>
+  A <em>check constraint</em> is a boolean expression over the columns of one row. The write is refused when the
+  expression is <em>false</em>. Read that sentence twice, because <code>NULL</code> is not false:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">a check lets NULL through</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create table ck (x integer check (x &gt; 0));
+insert into ck values (null);     -- accepted: null &gt; 0 is null, not false
+select count(*) from ck;          -- 1</code></pre>
+</figure>
+
+<p>
+  If the column must have a value, add <code>NOT NULL</code> as well. Since PostgreSQL 18, <code>NOT NULL</code>
+  is stored as a constraint with a name, like the others, and you can give it one:
+  <code>b integer constraint b_required not null</code>. It appears in <code>pg_constraint</code> with type
+  <code>n</code>.
+</p>
+
+<p>Two limits to know:</p>
+<ul>
+  <li>A check sees only its own row. <code>check (x in (select id from other))</code> fails with <code>cannot use subquery in check constraint</code>. Use a foreign key for rules about other tables.</li>
+  <li>The expression must be <em>immutable</em> (same inputs, same output, always). <code>check (created_at &lt; now())</code> would change its answer over time, and does not belong in a constraint.</li>
+</ul>
+
+<h3 id="not-valid">Adding a check to a table that already has data</h3>
+<p>
+  <code>ALTER TABLE ... ADD CONSTRAINT ... CHECK</code> scans the whole table to prove every existing row passes,
+  and holds a strong lock while it does. On a big table, add the constraint as <code>NOT VALID</code> first:
+  new writes are checked at once, old rows are not. Then <code>VALIDATE CONSTRAINT</code> checks the old rows with
+  a much weaker lock. This block runs in a transaction that rolls back, so your shop stays untouched:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">not valid, then validate</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>begin;
+alter table shop.products
+  add constraint products_price_cap check (price &lt; 100) not valid;
+select conname, convalidated from pg_constraint where conname = 'products_price_cap';
+alter table shop.products validate constraint products_price_cap;
+rollback;</code></pre>
+</figure>
+
+<p>
+  <code>convalidated</code> is <code>f</code> until validation. Here the <code>VALIDATE</code> fails with
+  <code>check constraint "products_price_cap" of relation "products" is violated by some row</code>, because the
+  shop sells products above 100. That is the point of the pattern: you find the bad rows, fix them, and validate
+  again. The same <code>NOT VALID</code> option exists for foreign keys.
+</p>
+
+<h2 id="exclusion">4. Exclusion constraints: no overlaps</h2>
+
+<p>
+  A unique constraint says “no two rows are <em>equal</em>”. An <em>exclusion constraint</em> generalises it: “no
+  two rows are in <em>relation</em> X”, for an operator you choose. The classic use is “no two bookings overlap”,
+  with the range overlap operator <code>&amp;&amp;</code>. A <em>range</em> is a single value that holds a start
+  and an end, such as <code>daterange</code> or <code>tstzrange</code> (<a href="06-data-types.html">lesson 6</a>).
+  Exclusion constraints are backed by a GiST index (an index type for non-equality questions such as “overlaps”),
+  hence <code>using gist</code>.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">bookings may touch, but not overlap</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">drop table if exists room_booking;
+create table room_booking (
+  id     integer generated always as identity primary key,
+  stay   daterange not null,
+  exclude using gist (stay with &amp;&amp;)
+);
+insert into room_booking (stay) values
+  ('[2030-05-01, 2030-05-04)'),
+  ('[2030-05-04, 2030-05-06)');   -- starts the day the first one ends: allowed
+select id, stay from room_booking order by id;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  A range written <code>[a, b)</code> includes <code>a</code> and excludes <code>b</code>, so a stay that ends on
+  the 4th does not collide with one that starts on the 4th. Now try an overlapping stay. This box ends with an
+  error, on purpose:
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">expected error: conflicting key value</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">insert into room_booking (stay) values ('[2030-05-03, 2030-05-05)');</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  The error is <code>conflicting key value violates exclusion constraint "room_booking_stay_excl"</code>
+  followed by a detail line that shows both ranges. Two warnings go with this feature. First, a check in the
+  application (“select, then insert if free”) cannot do this job: two sessions can both see the room as free.
+  The constraint can, because the index serializes the conflicting inserts. Second, the more useful form is
+  “no overlap <em>for the same room</em>”, which mixes <code>=</code> on a column with <code>&amp;&amp;</code> on
+  a range. A plain GiST index cannot handle <code>=</code> on an integer or text column. The extension
+  <code>btree_gist</code> adds that, and the course image ships it:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">one room cannot be double-booked</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create extension if not exists btree_gist;
+create table booking (
+  id     integer generated always as identity primary key,
+  room   integer not null,
+  during tstzrange not null,
+  exclude using gist (room with =, during with &amp;&amp;)
+);</code></pre>
+</figure>
+
+<div class="note info">
+  <span class="note-title">The playground cannot load btree_gist</span>
+  <p>
+    The in-browser PostgreSQL on this page does not load extensions, so the playground boxes use only a range
+    column. The <code>room with =</code> form above runs in the Docker database, and exercise 3 uses it.
+  </p>
+</div>
+
+<h2 id="deferrable">5. Deferrable constraints</h2>
+
+<p>
+  Normally PostgreSQL checks a unique, foreign key or exclusion constraint right away. A constraint created
+  <code>DEFERRABLE</code> can instead be checked at <em>commit</em>, so the data may be wrong in the middle of a
+  transaction as long as it is right at the end. There are two flavours:
+</p>
+<ul>
+  <li><code>DEFERRABLE INITIALLY IMMEDIATE</code>: checked at the end of each statement by default; you can switch it to commit time with <code>SET CONSTRAINTS name DEFERRED</code>.</li>
+  <li><code>DEFERRABLE INITIALLY DEFERRED</code>: checked at commit by default.</li>
+</ul>
+
+<h3 id="deferrable-swap">Why you need it: swapping two rows</h3>
+<p>
+  A plain unique constraint is checked one row at a time. Swapping two values with a single
+  <code>UPDATE</code> fails halfway, when the first row already holds the second row's value. This box ends
+  with an error, on purpose:
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">expected error: the swap collides in the middle</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">drop table if exists queue;
+create table queue (
+  id  integer primary key,
+  pos integer not null unique
+);
+insert into queue values (1, 1), (2, 2);
+update queue set pos = 3 - pos;   -- swap 1 and 2</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  You should see <code>duplicate key value violates unique constraint "queue_pos_key"</code>. The data before
+  and after the swap is valid; only the middle is not. Declare the constraint deferrable, and ask for the check
+  at commit:
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">the same swap, with the check postponed</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">drop table if exists queue2;
+create table queue2 (
+  id  integer primary key,
+  pos integer not null unique deferrable initially immediate
+);
+insert into queue2 values (1, 1), (2, 2);
+
+begin;
+set constraints queue2_pos_key deferred;
+update queue2 set pos = 3 - pos;
+commit;
+
+select id, pos from queue2 order by id;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  The swap works. (A deferred unique check at commit is also why a deferrable unique constraint cannot be the
+  target of <code>INSERT ... ON CONFLICT</code>, see <a href="09-changing-data.html">lesson 9</a>.)
+</p>
+
+<h3 id="deferrable-cycle">Why you need it: a cycle</h3>
+<p>
+  Table <code>a</code> points at <code>b</code>, and <code>b</code> points back at <code>a</code>. Whichever row you
+  insert first has no parent yet. Make at least one of the two foreign keys
+  <code>DEFERRABLE INITIALLY DEFERRED</code>, insert both rows in one transaction, and the check runs at commit,
+  when both exist. The same trick lets you delete a parent and re-insert it in a single transaction.
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">a cycle (run it in a scratch database)</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create table ca (id integer primary key, b_id integer);
+create table cb (id integer primary key,
+  a_id integer references ca (id) deferrable initially deferred);
+alter table ca add foreign key (b_id) references cb (id) deferrable initially deferred;
+
+begin;
+insert into ca values (1, 1);
+insert into cb values (1, 1);
+commit;                        -- both checks pass here</code></pre>
+</figure>
+
+<div class="note warn">
+  <span class="note-title">Deferred errors arrive late</span>
+  <p>
+    A deferred violation is reported by <code>COMMIT</code>, far from the statement that caused it, so the error
+    is harder to trace in application code. Defer only the constraints that need it. Only <code>UNIQUE</code>,
+    <code>PRIMARY KEY</code>, <code>EXCLUDE</code> and <code>FOREIGN KEY</code> constraints can be deferrable;
+    <code>CHECK</code> and <code>NOT NULL</code> cannot.
+  </p>
+</div>
+
+<h2 id="identity">6. Identity columns versus serial</h2>
+
+<p>
+  A <em>sequence</em> is a separate database object that hands out increasing numbers. Two column features use
+  one to fill an id automatically:
+</p>
+<ul>
+  <li><code>serial</code>: an old shorthand. It creates a sequence, sets <code>DEFAULT nextval(...)</code> and links the sequence to the column. It is not in the SQL standard.</li>
+  <li><code>GENERATED ... AS IDENTITY</code>: the standard way. The shop uses it everywhere, for example <code>shop.customers.id</code>.</li>
+</ul>
+
+<p>Why identity is the better default:</p>
+<ul>
+  <li><strong>It protects the column.</strong> With <code>GENERATED ALWAYS</code>, an <code>INSERT</code> that supplies its own value fails with <code>cannot insert a non-DEFAULT value into column "id"</code>, unless you write <code>OVERRIDING SYSTEM VALUE</code> on purpose. A <code>serial</code> column happily accepts a manual value that collides later.</li>
+  <li><strong>Privileges follow the table.</strong> A role with <code>INSERT</code> on a table with an identity column can insert. With <code>serial</code> the role also needs <code>USAGE</code> on the sequence, or the insert fails with <code>permission denied for sequence</code> (<a href="04-privileges-and-grants.html">lesson 4</a>).</li>
+  <li><strong>It is tidier to copy.</strong> The sequence is part of the column, so dropping the column or the table drops the sequence.</li>
+</ul>
+
+<p>
+  <code>GENERATED BY DEFAULT AS IDENTITY</code> is the relaxed form: the database fills the value only when you
+  give none. Use it when you load rows that already have ids. The shop's <code>customers.id</code> is
+  <code>ALWAYS</code>, which <code>information_schema.columns.identity_generation</code> reports.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">a skipped insert still uses a number</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">drop table if exists ticket;
+create table ticket (
+  id   integer generated always as identity primary key,
+  code text not null unique
+);
+insert into ticket (code) values ('a');
+insert into ticket (code) values ('a') on conflict do nothing;   -- skipped, but a number was taken
+insert into ticket (code) values ('b');
+select id, code from ticket order by id;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<div class="note warn">
+  <span class="note-title">Gaps in ids are normal</span>
+  <p>
+    Ticket <code>b</code> got id 3, not 2: the skipped insert used number 2. A sequence hands out each number once,
+    and it does not hand it back if the transaction rolls back, if the insert hits a unique violation, or if
+    <code>INSERT ... ON CONFLICT DO NOTHING</code> skips the row. Never use an id as a count or as a gap-free invoice number. If the law
+    requires gap-free numbers, generate them in a separate table under a lock, and accept the contention.
+  </p>
+</div>
+
+<div class="note warn">
+  <span class="note-title">Reloading data? Reset the sequence</span>
+  <p>
+    If you copy rows in with explicit ids, the sequence does not know. The next normal insert then reuses an
+    existing id and fails. Fix it once with
+    <code>select setval(pg_get_serial_sequence('shop.customers', 'id'), (select max(id) from shop.customers));</code>.
+    <code>pg_get_serial_sequence</code> finds the sequence behind an identity column as well as a
+    <code>serial</code> one.
+  </p>
+</div>
+
+<h2 id="generated">7. Generated columns</h2>
+
+<p>
+  A <em>generated column</em> holds a value the database computes from other columns of the same row. You
+  cannot write to it, and it cannot drift out of date the way a copy maintained by application code can.
+  PostgreSQL 18 has two kinds:
+</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th></th><th><code>STORED</code></th><th><code>VIRTUAL</code> (the default in 18)</th></tr></thead>
+  <tbody>
+    <tr><td>When it is computed</td><td class="wrap">On every insert and update, then written to the table</td><td class="wrap">When you read it</td></tr>
+    <tr><td>Takes disk space</td><td>yes</td><td>no</td></tr>
+    <tr><td>Can be indexed</td><td>yes</td><td class="wrap">no (<code>indexes on virtual generated columns are not supported</code>)</td></tr>
+    <tr><td>Adding it to an existing table</td><td class="wrap">Rewrites the whole table</td><td class="wrap">No rewrite, instant</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>
+  If you write <code>GENERATED ALWAYS AS (expr)</code> with neither keyword, you get <code>VIRTUAL</code> in
+  PostgreSQL 18. Releases before 18 had only <code>STORED</code>, and required you to say so. Write the keyword
+  every time, so the table means the same on every version.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">one stored and one virtual column</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">drop table if exists line;
+create table line (
+  qty        integer not null,
+  unit_price numeric(10,2) not null,
+  total      numeric(12,2) generated always as (qty * unit_price) stored,
+  is_cheap   boolean generated always as (unit_price &lt; 20) virtual
+);
+insert into line (qty, unit_price) values (3, 14.90), (1, 219.00);
+select qty, unit_price, total, is_cheap from line order by unit_price;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>Writing to a generated column is refused. This box ends with an error, on purpose:</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">expected error: generated column</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">insert into line (qty, unit_price, total) values (1, 10, 99);</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  The message is <code>cannot insert a non-DEFAULT value into column "total"</code>. A generated column may use
+  only immutable functions and columns of its own row: no subqueries, no other tables, and no other generated
+  column.
+</p>
+
+<div class="note tip">
+  <span class="note-title">Choosing between them</span>
+  <p>
+    Use <code>STORED</code> when you want to index or sort by the value, or when computing it is expensive and you
+    read it often. Use <code>VIRTUAL</code> when it is cheap to compute and you would rather not pay disk space.
+    For an index on a derived value, you can also index an expression directly
+    (<a href="12-indexes.html">lesson 12</a>).
+  </p>
+</div>
+
+<h2 id="normal">8. Normalisation in one example</h2>
+
+<p>
+  <em>Normalising</em> means arranging tables so each fact is stored once, which keeps updates from
+  contradicting each other. You do not need the theory; you need to recognise three smells. Start with a table
+  that stores orders the way a spreadsheet would:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">a spreadsheet in a table</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create table order_sheet (
+  order_id       integer primary key,
+  customer_email text,
+  customer_name  text,
+  customer_city  text,
+  city_zip       text,
+  product_skus   text      -- 'SKU-1, SKU-4, SKU-4'
+);</code></pre>
+</figure>
+
+<ol>
+  <li>
+    <strong>First normal form (1NF): one value per cell.</strong> <code>product_skus</code> packs a list into one
+    column, so you cannot count, join or constrain it. Move the list to rows: a table
+    <code>order_items (order_id, line_no, sku, ...)</code> with a composite primary key. That is what the shop has.
+  </li>
+  <li>
+    <strong>Second normal form (2NF): every non-key column depends on the whole key.</strong> In
+    <code>order_items</code>, if you also stored <code>product_name</code>, it would depend only on the product,
+    not on the (order, line) pair. Rename a product and old rows disagree. Move it to <code>products</code>.
+  </li>
+  <li>
+    <strong>Third normal form (3NF): non-key columns depend on the key and on nothing else.</strong>
+    <code>customer_name</code> depends on the customer, not on the order, and <code>city_zip</code> depends on
+    <code>customer_city</code>, not on the order. Both belong in their own tables (<code>customers</code>,
+    <code>cities</code>), referenced by a foreign key.
+  </li>
+</ol>
+
+<p>
+  The shop is built this way: <code>orders</code> holds a <code>customer_id</code>, not a name and an email.
+  The rule of thumb for “which table does this column belong to?” is: <em>what does this value describe?</em>
+  Put it with that thing.
+</p>
+
+<div class="note info">
+  <span class="note-title">Deliberate duplication is allowed</span>
+  <p>
+    <code>order_items.unit_price</code> copies a price that also lives in <code>products.price</code>. That is
+    correct: the price on an order must stay as it was on the day of the order, even if the product's price later
+    changes. A copy that records history is not a normalisation error. A copy that is supposed to <em>stay equal</em>
+    is. Likewise <code>orders.total</code> duplicates a sum of its items for speed; if you keep such a total, keep
+    it correct in one place (a trigger, <a href="19-triggers-and-events.html">lesson 19</a>, or a single write path) and
+    document it.
+  </p>
+</div>
+
+<h2 id="when">When to use, when not to</h2>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Situation</th><th class="wrap">✅ Do this</th><th class="wrap">❌ Not this</th></tr></thead>
+  <tbody>
+    <tr><td class="wrap">A value must be unique (email, SKU)</td><td class="wrap">A <code>UNIQUE</code> constraint</td><td class="wrap">Select first, insert if absent, in application code</td></tr>
+    <tr><td class="wrap">A row refers to another table</td><td class="wrap">A foreign key, with an index on the child column</td><td class="wrap">A bare <code>integer</code> column and a hope</td></tr>
+    <tr><td class="wrap">Children are meaningless without the parent (order lines)</td><td class="wrap"><code>ON DELETE CASCADE</code></td><td class="wrap">Cascade onto data you must keep (invoices)</td></tr>
+    <tr><td class="wrap">Intervals must not overlap</td><td class="wrap">An exclusion constraint with <code>&amp;&amp;</code></td><td class="wrap">A race-prone check in the application</td></tr>
+    <tr><td class="wrap">Valid state needs several rows to change together</td><td class="wrap"><code>DEFERRABLE</code> constraint inside one transaction</td><td class="wrap">Dropping the constraint during the load</td></tr>
+    <tr><td class="wrap">A rule over a column of the same row</td><td class="wrap"><code>CHECK</code> plus <code>NOT NULL</code> where required</td><td class="wrap">A check with a subquery, or <code>now()</code></td></tr>
+    <tr><td class="wrap">An auto-incrementing id</td><td class="wrap"><code>GENERATED ALWAYS AS IDENTITY</code></td><td class="wrap"><code>serial</code> in a new design; ids used as a gap-free counter</td></tr>
+    <tr><td class="wrap">A value derived from the same row</td><td class="wrap">A generated column</td><td class="wrap">A copy that code or a trigger must keep in sync</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="inspect">Inspect it</h2>
+
+<p>The shop's foreign keys, with their actions, and which of them have no index on the child side:</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">foreign keys and their actions</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select conrelid::regclass as child, conname,
+       confrelid::regclass as parent,
+       case confdeltype when 'a' then 'no action' when 'r' then 'restrict'
+                        when 'c' then 'cascade'   when 'n' then 'set null'
+                        when 'd' then 'set default' end as on_delete
+from pg_constraint
+where contype = 'f' and connamespace = 'shop'::regnamespace
+order by 1, 2;</code></pre>
+</figure>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">foreign keys with no index on the child column</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select c.conrelid::regclass as child, c.conname, a.attname as first_column
+from pg_constraint c
+join pg_attribute a on a.attrelid = c.conrelid and a.attnum = c.conkey[1]
+where c.contype = 'f' and c.connamespace = 'shop'::regnamespace
+  and not exists (
+    select 1 from pg_index i
+    where i.indrelid = c.conrelid and i.indkey[0] = c.conkey[1])
+order by 1, 2;</code></pre>
+</figure>
+
+<p>
+  In the course database the first query lists six foreign keys, all <code>no action</code>. The second lists
+  five of them. Only <code>order_items.order_id</code> is missing from the list, because it is the first column
+  of the primary key <code>(order_id, line_no)</code>, and that index serves it. Every other foreign key column
+  has no index at all.
+</p>
+
+<p>
+  To read every rule on one table in plain text, ask for the definitions:
+  <code>select conname, pg_get_constraintdef(oid) from pg_constraint where conrelid = 'shop.products'::regclass;</code>
+</p>
+
+<h2 id="exercises">Your turn</h2>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 1</span><span class="grow"></span><span class="lvl">basic</span></div>
+  <div class="ex-body">
+    <p>
+      Create a table <code>lab_07_coupon</code> with an identity primary key <code>id</code>, a <code>code</code>
+      that is required and unique, and an integer <code>pct_off</code> that is required and must be between 1 and
+      90. Check it with <code>./pg check 07 1</code>.
+    </p>
+  </div>
+  <figure class="code" data-lang="sql">
+  <figcaption><span class="path">exercises/07/1.sql</span><span class="grow"></span><span class="lang">your starting file</span></figcaption>
+<pre><code>-- Create a table lab_07_coupon with: id (identity primary key), code (text, required, unique)
+-- and pct_off (integer, required, between 1 and 90).
+-- Run ./pg check 07 1 when you are done.</code></pre>
+</figure>
+  <details><summary>Hint</summary><p>Put the rules in the column definitions: <code>not null unique</code> and <code>check (... between ... and ...)</code>.</p></details>
+  <details class="solution"><summary>Show a model solution for exercise 1 (try first!)</summary>
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">solutions/07/1.sql</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create table lab_07_coupon (
+  id      integer generated always as identity primary key,
+  code    text not null unique,
+  pct_off integer not null check (pct_off between 1 and 90)
+);</code></pre>
+</figure>
+</details>
+</section>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 2</span><span class="grow"></span><span class="lvl">intermediate</span></div>
+  <div class="ex-body">
+    <p>
+      Create <code>lab_07_note</code> and <code>lab_07_note_tag</code>. A note has an identity <code>id</code> and a
+      <code>body</code>. A tag row has a <code>note_id</code> and a <code>tag</code>; its primary key is the pair, and
+      it must reference a note. Deleting a note must delete its tags. Also add a generated column
+      <code>tag_len</code> (stored) to the tag table holding <code>length(tag)</code>. Check it with
+      <code>./pg check 07 2</code>.
+    </p>
+  </div>
+  <figure class="code" data-lang="sql">
+  <figcaption><span class="path">exercises/07/2.sql</span><span class="grow"></span><span class="lang">your starting file</span></figcaption>
+<pre><code>-- Create lab_07_note (id identity primary key, body text not null) and
+-- lab_07_note_tag (note_id, tag text; primary key (note_id, tag); note_id references
+-- lab_07_note and deleting a note deletes its tags). Add a STORED generated column
+-- tag_len = length(tag) to lab_07_note_tag.
+-- Run ./pg check 07 2 when you are done.</code></pre>
+</figure>
+  <details><summary>Hint</summary><p>The foreign key needs <code>on delete cascade</code>. The generated column is <code>integer generated always as (length(tag)) stored</code>.</p></details>
+  <details class="solution"><summary>Show a model solution for exercise 2 (try first!)</summary>
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">solutions/07/2.sql</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create table lab_07_note (
+  id   integer generated always as identity primary key,
+  body text not null
+);
+create table lab_07_note_tag (
+  note_id integer not null references lab_07_note (id) on delete cascade,
+  tag     text not null,
+  tag_len integer generated always as (length(tag)) stored,
+  primary key (note_id, tag)
+);</code></pre>
+</figure>
+</details>
+</section>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 3</span><span class="grow"></span><span class="lvl">challenge</span></div>
+  <div class="ex-body">
+    <p>
+      Create <code>lab_07_booking</code> so that no room can be booked twice for overlapping times. Columns:
+      identity <code>id</code>, integer <code>room</code>, <code>during</code> of type <code>tstzrange</code> (both
+      required). Different rooms may overlap in time; the same room may not. Bookings that only touch (one ends
+      when the next starts) are fine. Check it with <code>./pg check 07 3</code>.
+    </p>
+  </div>
+  <figure class="code" data-lang="sql">
+  <figcaption><span class="path">exercises/07/3.sql</span><span class="grow"></span><span class="lang">your starting file</span></figcaption>
+<pre><code>-- Create lab_07_booking (id identity primary key, room integer not null,
+-- during tstzrange not null) so that the same room can never be booked for overlapping
+-- times, while different rooms may overlap and back-to-back bookings are fine.
+-- Run ./pg check 07 3 when you are done.</code></pre>
+</figure>
+  <details><summary>Hint</summary><p>You need <code>create extension if not exists btree_gist</code> first, then <code>exclude using gist (room with =, during with &amp;&amp;)</code>.</p></details>
+  <details class="solution"><summary>Show a model solution for exercise 3 (try first!)</summary>
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">solutions/07/3.sql</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create extension if not exists btree_gist;
+create table lab_07_booking (
+  id     integer generated always as identity primary key,
+  room   integer not null,
+  during tstzrange not null,
+  exclude using gist (room with =, during with &amp;&amp;)
+);</code></pre>
+</figure>
+</details>
+</section>
+
+<h2 id="summary">Summary</h2>
+<ul>
+  <li>A primary key is unique plus not null; unique constraints allow several <code>NULL</code>s unless you say <code>NULLS NOT DISTINCT</code>.</li>
+  <li>Foreign key actions decide what a parent delete or update does: <code>NO ACTION</code> and <code>RESTRICT</code> refuse, <code>CASCADE</code> follows, <code>SET NULL</code> and <code>SET DEFAULT</code> detach. Index the child column yourself.</li>
+  <li>A check fails only on <code>false</code>, so add <code>NOT NULL</code> when the value is required. Use <code>NOT VALID</code> then <code>VALIDATE</code> on big tables.</li>
+  <li>Exclusion constraints forbid overlaps and need no race-prone application check; <code>btree_gist</code> lets them combine <code>=</code> and <code>&amp;&amp;</code>.</li>
+  <li><code>DEFERRABLE</code> constraints let a transaction pass through invalid states: swaps, cycles, delete-and-reinsert.</li>
+  <li>Prefer <code>GENERATED ... AS IDENTITY</code> to <code>serial</code>; expect gaps. Generated columns are <code>VIRTUAL</code> by default in PostgreSQL 18, and only <code>STORED</code> ones can be indexed.</li>
+  <li>Store each fact once, with the thing it describes. Copy a value only when the copy is a snapshot (a price on an order).</li>
+</ul>
+
+<h2 id="next">Looking ahead</h2>
+<p>
+  Constraints define what the data may be; queries read it. <a href="08-advanced-queries.html">Lesson 8</a>
+  goes beyond joins and aggregates: common table expressions, window functions, <code>LATERAL</code>, grouping
+  sets and recursive queries.
+</p>
+<div class="lesson-done" data-lesson="07-constraints-and-design"></div>
+<nav class="pager"><a class="prev" href="../lessons/06-data-types.html"><span class="dir">Previous</span><span class="lbl">06 · Data types</span></a><a class="next" href="../lessons/08-advanced-queries.html"><span class="dir">Next</span><span class="lbl">08 · Advanced queries</span></a></nav>
+</main>
+<aside class="toc" aria-label="On this page"></aside>
+</div>
+</div>
+<script src="../assets/js/search-index.js"></script>
+<script src="../assets/js/mini-seed.js"></script>
+<script src="../assets/js/course.js"></script>
+</body>
+</html>

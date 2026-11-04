@@ -1,0 +1,170 @@
+<p class="lede">
+  You need Docker and a terminal. The course database runs in a container on your machine, so you can
+  break it, drop it and rebuild it without consequences. Nothing is installed on your system except Docker.
+</p>
+
+<div class="meta-row">
+  <span class="tag">about 10 minutes</span>
+  <span class="tag">Docker Desktop or Docker Engine</span>
+  <span class="tag">macOS · Linux · Windows (WSL 2)</span>
+</div>
+
+<h2 id="docker">1. Install Docker</h2>
+<p>
+  Install Docker Desktop (macOS, Windows) or Docker Engine with the Compose plugin (Linux). Then check it works:
+</p>
+
+<figure class="code" data-lang="bash">
+  <figcaption><span class="path">terminal</span><span class="grow"></span><span class="lang">bash</span></figcaption>
+<pre><code>docker version
+docker compose version</code></pre>
+</figure>
+
+<div class="note info">
+  <span class="note-title">Windows</span>
+  <p>Run every command below inside WSL 2 (Ubuntu), not in PowerShell. The <code>./pg</code> helper is a Bash script.</p>
+</div>
+
+<h2 id="repo">2. Get the course</h2>
+<p>
+  Clone the repository, or download it as a zip and unpack it. Then open a terminal in its folder.
+</p>
+
+<figure class="code" data-lang="bash">
+  <figcaption><span class="path">terminal</span><span class="grow"></span><span class="lang">bash</span></figcaption>
+<pre><code>git clone https://github.com/&lt;owner&gt;/learning-postgres-databases.git
+cd learning-postgres-databases
+./pg help</code></pre>
+</figure>
+
+<h2 id="up">3. Start PostgreSQL 18</h2>
+
+<figure class="code" data-lang="bash">
+  <figcaption><span class="path">terminal</span><span class="grow"></span><span class="lang">bash</span></figcaption>
+<pre><code>./pg up</code></pre>
+</figure>
+
+<p>
+  The first start takes half a minute: the image is downloaded, the cluster is created, and the course dataset is
+  loaded (about 240 MB, one million analytics events). When you see <code>ready</code>, the database is
+  listening on <code>127.0.0.1:55432</code> with user <code>postgres</code>, password <code>course</code>.
+</p>
+
+<div class="note warn">
+  <span class="note-title">Port already in use?</span>
+  <p>
+    Another PostgreSQL may be on port 55432. Run <code>PG_PORT=55433 ./pg up</code> instead. The helper
+    passes the port to Docker Compose; the exercises use the helper, so they follow the port automatically.
+  </p>
+</div>
+
+<h2 id="check">4. Confirm it works</h2>
+
+<figure class="code" data-lang="bash">
+  <figcaption><span class="path">terminal</span><span class="grow"></span><span class="lang">bash</span></figcaption>
+<pre><code>./pg status
+./pg sql "select version()"
+./pg sql "select count(*) from shop.orders"</code></pre>
+</figure>
+
+<p>
+  The count should be <strong>200 000</strong>. Open a full interactive session with <code>./pg psql</code>, type
+  <code>\dn</code> to list the schemas, and <code>\q</code> to leave.
+</p>
+
+<h2 id="pg">The ./pg helper</h2>
+
+<p>
+  Every exercise and most commands in the course go through one script, so you never need to remember Docker
+  flags. The commands you will use most:
+</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Command</th><th>What it does</th></tr></thead>
+  <tbody>
+    <tr><td class="wrap"><code>./pg up</code> / <code>./pg down</code></td><td class="wrap">Start and stop the container. Your data is kept.</td></tr>
+    <tr><td class="wrap"><code>./pg psql</code></td><td class="wrap">Interactive <code>psql</code> as the superuser, in database <code>shop</code>.</td></tr>
+    <tr><td class="wrap"><code>./pg sql "…" [db]</code></td><td class="wrap">Run one statement and print the result.</td></tr>
+    <tr><td class="wrap"><code>./pg run FILE.sql [db]</code></td><td class="wrap">Run a whole file.</td></tr>
+    <tr><td class="wrap"><code>./pg psql-as ROLE</code></td><td class="wrap">Connect as another role, to see what its privileges allow.</td></tr>
+    <tr><td class="wrap"><code>./pg check LESSON [N]</code></td><td class="wrap">Check your exercises. For example <code>./pg check 03</code> or <code>./pg check 03 2</code>.</td></tr>
+    <tr><td class="wrap"><code>./pg solution LESSON N</code></td><td class="wrap">Print a model solution. Try the exercise first.</td></tr>
+    <tr><td class="wrap"><code>./pg reset</code></td><td class="wrap">Delete all data and start again from the seeded dataset. Use this when you have changed the shop data and want it back.</td></tr>
+    <tr><td class="wrap"><code>./pg logs</code></td><td class="wrap">Follow the server log. Useful when something is slow or failing.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="note tip">
+  <span class="note-title">Two databases, one server</span>
+  <p>
+    Your practice database is <code>shop</code>. The exercise checker never touches it: it copies a clean
+    template for every check and throws the copy away. You can therefore experiment in <code>shop</code>
+    freely and still have the checker work.
+  </p>
+</div>
+
+<h2 id="shop">The shop dataset</h2>
+
+<p>
+  Almost every lesson uses the same data. Learn its shape once here; you will see it again and again.
+</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Table</th><th>Rows</th><th>What it is</th></tr></thead>
+  <tbody>
+    <tr><td><code>shop.customers</code></td><td>20 000</td><td>Customers with country, status, a JSONB profile and an optional self-reference (<code>referred_by</code>).</td></tr>
+    <tr><td><code>shop.categories</code></td><td>13</td><td>A two-level category tree.</td></tr>
+    <tr><td><code>shop.products</code></td><td>500</td><td>Products with price, stock, text tags and JSONB attributes.</td></tr>
+    <tr><td><code>shop.orders</code></td><td>200 000</td><td>Orders across 2023–2025, with an enum status.</td></tr>
+    <tr><td><code>shop.order_items</code></td><td>≈600 000</td><td>Order lines, primary key <code>(order_id, line_no)</code>.</td></tr>
+    <tr><td><code>analytics.events</code></td><td>1 000 000</td><td>An append-only event stream with no secondary indexes. The lessons on performance start here.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>
+  The seed is deterministic, so a result you see on your machine is the result described in the lessons. The
+  browser playgrounds use a much smaller copy of the same tables, so plans and timings differ there; each lesson
+  says so where it matters.
+</p>
+
+<h2 id="playground">The in-browser playground</h2>
+
+<p>
+  Some pages have a box marked <em>playground</em>. It runs a real PostgreSQL 18 inside your browser (WebAssembly,
+  via PGlite). Nothing is sent to a server: the database lives in the page and is lost when you reload. Press
+  <kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>Enter</kbd> to run what is in the box.
+</p>
+
+<p>
+  The playground behaves like <code>psql</code>: each statement runs on its own (autocommit), and a script stops at its
+  first error. Everything before the error has already happened, so running a box that creates things a second time
+  can fail with <em>already exists</em>. Use <em>Reset data</em> to start over. A few extensions (such as
+  <code>pg_trgm</code>) and everything that needs several sessions, replication or the server's statistics are
+  only available in the Docker database; the lessons say so where it applies.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">try it: the first lesson is three clicks away</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select current_user, version();</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<h2 id="troubles">If something goes wrong</h2>
+
+<ul>
+  <li><strong>“docker: command not found”</strong> — Docker is not installed or not on your PATH. Restart the terminal after installing it.</li>
+  <li><strong>“not ready after 120 s”</strong> — run <code>./pg logs</code>. The usual cause is a failed seed step, which the log shows.</li>
+  <li><strong>Checks fail with “role already exists”</strong> — an earlier run left a <code>lab_*</code> role behind. Run <code>./pg clean-roles</code>.</li>
+  <li><strong>Anything else</strong> — see <a href="../appendices/e-troubleshooting.html">Annex E</a>.</li>
+</ul>
+
+<div class="note tip">
+  <span class="note-title">Ready?</span>
+  <p>Continue with <a href="../lessons/01-architecture.html">lesson 1: How PostgreSQL is built</a>.</p>
+</div>

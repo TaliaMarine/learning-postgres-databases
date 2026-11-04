@@ -1,0 +1,497 @@
+<p class="lede">
+  Partitioning splits one big table into smaller physical tables that still look like one table to your queries.
+  Done well, queries read only the pieces they need, and old data disappears by dropping a piece instead of
+  deleting millions of rows. Done for the wrong reason, it adds complexity and speeds up nothing. This lesson shows both, using
+  <code>analytics.events</code> as the worked example.
+</p>
+
+<h2 id="goals">Learning goals</h2>
+<ul>
+  <li>Create range, list and hash partitioned tables and say which one fits which data.</li>
+  <li>Explain why a primary key on a partitioned table must contain the partition key.</li>
+  <li>Read an <code>EXPLAIN</code> plan to see which partitions were skipped (partition pruning), and write queries that allow it.</li>
+  <li>Use a default partition, and explain what it costs when you add a new partition later.</li>
+  <li>Remove old data with <code>DETACH PARTITION</code> and <code>DROP TABLE</code>, and attach a ready-made table as a partition.</li>
+  <li>Decide when a table should <em>not</em> be partitioned.</li>
+</ul>
+
+<h2 id="lab">Set up for this lesson</h2>
+<p>
+  Use the <code>shop</code> database, where <code>analytics.events</code> holds one million rows. The examples build a <em>copy</em>
+  called <code>analytics.events_p</code>, so the original stays as it is for the other lessons; run them in a scratch
+  database (<code>./pg sql "create database lab_scratch template shop_template"</code>, then
+  <code>./pg psql lab_scratch</code>) if you want to keep <code>shop</code> clean. Copying the rows takes a few seconds.
+</p>
+<p>
+  The playgrounds use the small in-browser events table (240 rows, all in the first nine days of January 2025), so they
+  partition by <em>days</em> rather than months. They show that pruning happens, but not how much time it saves: the data
+  is too small for that, so plans and counts there differ from the Docker output below. Every plan on this page uses
+  <code>EXPLAIN (COSTS OFF)</code> without timings so it stays stable.
+</p>
+
+<h2 id="why">1. What partitioning is, and what it is for</h2>
+
+<p>
+  A <strong>partitioned table</strong> is an empty shell with a rule. The rows live in <strong>partitions</strong>: ordinary tables
+  that each hold the rows matching part of the rule. You insert into and query the parent; PostgreSQL routes each row to
+  its partition and, for queries, looks only into the partitions that can match.
+</p>
+
+<figure class="dia">
+  <div class="dia-hold">
+    <svg class="d" viewBox="0 0 860 280" role="img" aria-labelledby="part-t part-d">
+      <title id="part-t">A partitioned table with three monthly partitions and a default partition</title>
+      <desc id="part-d">The parent table analytics.events_p holds no rows. Rows with occurred_at in January go to events_2025_01, February to events_2025_02, and everything else to events_default.</desc>
+      <defs>
+        <marker id="pa" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z"/></marker>
+      </defs>
+      <rect class="box accent" x="270" y="20" width="320" height="70" rx="8"/>
+      <text class="hd ctr" x="430" y="48">analytics.events_p</text>
+      <text class="lbl ctr" x="430" y="70">parent · no rows · range (occurred_at)</text>
+      <rect class="box teal" x="30" y="170" width="240" height="70" rx="8"/>
+      <text class="hd ctr" x="150" y="198">events_2025_01</text>
+      <text class="lbl ctr" x="150" y="220">Jan 2025</text>
+      <rect class="box teal" x="310" y="170" width="240" height="70" rx="8"/>
+      <text class="hd ctr" x="430" y="198">events_2025_02</text>
+      <text class="lbl ctr" x="430" y="220">Feb 2025</text>
+      <rect class="box" x="590" y="170" width="240" height="70" rx="8"/>
+      <text class="hd ctr" x="710" y="198">events_default</text>
+      <text class="lbl ctr" x="710" y="220">everything else</text>
+      <path class="line" d="M370 90 L190 168" marker-end="url(#pa)"/>
+      <path class="line" d="M430 90 L430 168" marker-end="url(#pa)"/>
+      <path class="line" d="M490 90 L670 168" marker-end="url(#pa)"/>
+    </svg>
+  </div>
+  <figcaption>Rows are stored in the partitions. A query with a condition on <code>occurred_at</code> is sent only to the partitions whose range can match.</figcaption>
+</figure>
+
+<p>There are two real reasons to do this, and one popular wrong one:</p>
+<ul>
+  <li><strong>Retention.</strong> Dropping a partition is instant and leaves no dead tuples. A <code>DELETE</code> of 80,000 old rows is slow, writes WAL, and needs <a href="17-vacuum-and-bloat.html">vacuum</a> afterwards.</li>
+  <li><strong>Pruning for big scans.</strong> Reports that read one month of a table that holds years read only that month's partition.</li>
+  <li><strong>“It will make everything faster.”</strong> It will not. A query that does not filter on the partition key reads <em>every</em> partition, and the planner has more work to do. A well-indexed single table is often faster for lookups by id.</li>
+</ul>
+
+<h2 id="range">2. Range partitioning: events by month</h2>
+
+<p>
+  Range partitioning fits data with a natural ordering, above all time. Each partition has a half-open range:
+  <code>FROM</code> is included, <code>TO</code> is <em>not</em>. That is why one partition can end at
+  <code>2025-02-01</code> and the next can start there with no gap and no overlap.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">a range-partitioned copy of the events (by day, because the data is tiny)</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">set time zone 'UTC';   -- so bounds and plans read the same on every machine
+
+create table analytics.events_p (
+  id          bigint generated always as identity,
+  occurred_at timestamptz not null,
+  customer_id integer,
+  kind        text        not null,
+  payload     jsonb       not null default '{}',
+  primary key (id, occurred_at)
+) partition by range (occurred_at);
+
+create table analytics.events_early partition of analytics.events_p
+  for values from ('2025-01-01') to ('2025-01-05');
+create table analytics.events_late partition of analytics.events_p
+  for values from ('2025-01-05') to ('2025-01-10');
+create table analytics.events_default partition of analytics.events_p default;
+
+insert into analytics.events_p (occurred_at, customer_id, kind, payload)
+select occurred_at, customer_id, kind, payload from analytics.events;
+
+select tableoid::regclass as partition, count(*) as events
+from analytics.events_p group by 1 order by 1;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  <code>tableoid::regclass</code> is a hidden column that names the table a row physically sits in. The default partition is
+  empty because every event fits one of the two ranges. On the Docker database the same idea, with one partition for
+  each month of 2025 (created by a small loop, shown below), gives roughly 80,000 to 86,000 rows per month.
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">the real thing, on analytics.events (Docker database)</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create table analytics.events_p (
+  id          bigint      not null,
+  occurred_at timestamptz not null,
+  customer_id integer,
+  kind        text        not null,
+  payload     jsonb       not null default '{}',
+  primary key (id, occurred_at)
+) partition by range (occurred_at);
+
+do $$
+declare
+  m date;
+begin
+  for m in select generate_series(date '2025-01-01', date '2025-12-01', interval '1 month')::date loop
+    execute format('create table analytics.%I partition of analytics.events_p for values from (%L) to (%L)',
+                   'events_' || to_char(m, 'YYYY_MM'), m, (m + interval '1 month')::date);
+  end loop;
+end
+$$;
+create table analytics.events_default partition of analytics.events_p default;
+
+insert into analytics.events_p select id, occurred_at, customer_id, kind, payload from analytics.events;
+analyze analytics.events_p;</code></pre>
+</figure>
+
+<p>
+  Notice <code>id</code> has no <code>generated always as identity</code> here. For a copy you keep the old ids; for a new table, an
+  identity column on the parent is fine (new partitions inherit it), but you cannot <em>attach</em> an existing table that has
+  its own identity column.
+</p>
+
+<h2 id="key">3. The primary key must include the partition key</h2>
+
+<p>
+  PostgreSQL enforces uniqueness inside each partition's own index; it has no index that spans partitions. So a unique
+  constraint on the parent can only be guaranteed if the partition key is part of it, which forces every duplicate to
+  land in the same partition. Try the obvious thing (this fails on purpose):
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">this one fails on purpose</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">create table analytics.bad (
+  id bigint primary key,
+  occurred_at timestamptz not null
+) partition by range (occurred_at);</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  The error is <em>unique constraint on partitioned table must include all partitioning columns</em>. The usual answer is the composite key
+  <code>(id, occurred_at)</code>. It has a consequence worth knowing: <code>id</code> on its own is <strong>not</strong> guaranteed unique any more.
+  On the Docker database, inserting a second row with <code>id = 5</code> but a different <code>occurred_at</code> succeeds, and
+  <code>select count(*) from analytics.events_p where id = 5</code> returns 2. If other tables must reference a row by <code>id</code>
+  alone, you need another design: keep the ids from a sequence (as identity does) and treat uniqueness as a property of the generator, not of the table.
+</p>
+
+<h2 id="pruning">4. Partition pruning</h2>
+
+<p>
+  <strong>Pruning</strong> means the planner leaves out partitions that cannot contain matching rows. Look for it in
+  <code>EXPLAIN</code>: the pruned partitions are simply absent from the plan.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">only events_late appears in the plan (run the previous playground first)</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">explain (costs off)
+select count(*) from analytics.events_p
+where occurred_at >= '2025-01-05' and occurred_at < '2025-01-10';</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>On the Docker database the same question for March reads one of twelve partitions:</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">a month</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>explain (costs off)
+select count(*) from analytics.events_p
+where occurred_at &gt;= '2025-03-01' and occurred_at &lt; '2025-04-01';</code></pre>
+</figure>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">output</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code> Aggregate
+   -&gt;  Seq Scan on events_2025_03 events_p
+         Filter: ((occurred_at &gt;= '2025-03-01 00:00:00+00'::timestamp with time zone) AND (occurred_at &lt; '2025-04-01 00:00:00+00'::timestamp with time zone))</code></pre>
+</figure>
+
+<p>
+  Three more cases, each tested on the same twelve partitions:
+</p>
+<ul>
+  <li><strong>A range that straddles two months</strong> (<code>2025-03-15</code> to <code>2025-04-15</code>) scans exactly <code>events_2025_03</code> and <code>events_2025_04</code>, and nothing else.</li>
+  <li><strong>A filter on another column</strong> (<code>where kind = 'purchase'</code>) cannot prune. All 13 partitions, the default included, are scanned.</li>
+  <li><strong>A filter that wraps the key in a function</strong> (<code>where date_trunc('month', occurred_at) = '2025-03-01'</code>) cannot prune either, even though it is logically one month. All 13 partitions are scanned. Compare the column itself with a range, as above.</li>
+</ul>
+
+<p>
+  Pruning also works for values the planner learns at run time, such as a parameter or a subquery result. In that case the
+  plan shows the partitions that remain as <code>Subplans Removed: N</code>. For
+  <code>where occurred_at &gt;= date_trunc('month', now())</code>, the plan of the twelve-month 2025 table shows
+  <code>Subplans Removed: 12</code> and a single scan of the default partition: <code>now()</code> is later than every defined
+  range, so only the default partition could hold such rows. (The result depends on the day you run it, because <code>now()</code> does.)
+</p>
+
+<div class="note warn">
+  <span class="note-title">Pruning needs the key in the WHERE clause, as itself</span>
+  <p>
+    The setting <code>enable_partition_pruning</code> is <code>on</code> by default; leave it on. What turns pruning off in practice is the query: a
+    condition on another column, a cast or function around the partition key, or a join where the key value comes only from
+    another table. Check with <code>EXPLAIN</code> every time you add partitioning, and count the partitions in the plan.
+  </p>
+</div>
+
+<h2 id="default">5. The default partition and its cost</h2>
+
+<p>
+  Without a default partition, inserting a row that matches no range fails with <em>no partition of relation found for row</em>.
+  A <strong>default partition</strong> catches such rows instead, which avoids lost writes when you forget to create next month's
+  partition. But it has a price. Insert a row from March 2026 into the 2025 table and it lands in the default partition:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">a row outside every range</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>insert into analytics.events_p (id, occurred_at, kind) values (1000001, '2026-03-05', 'page_view');
+
+create table analytics.events_2026_03 partition of analytics.events_p
+  for values from ('2026-03-01') to ('2026-04-01');
+-- ERROR:  updated partition constraint for default partition "events_default" would be violated by some row</code></pre>
+</figure>
+
+<p>
+  Creating a partition for a range that the default partition already holds rows for is refused. PostgreSQL must prove the
+  default partition has no row that belongs in the new one. To fix it, move the rows out first: detach the default
+  partition, create the new one, insert the rows into the parent, then attach the default partition again. A default
+  partition also makes <code>DETACH PARTITION ... CONCURRENTLY</code> impossible (<em>cannot detach partitions concurrently when
+  a default partition exists</em>), and when it grows large, pruning cannot skip it for any range that might reach beyond the
+  defined ones.
+</p>
+
+<div class="note tip">
+  <span class="note-title">Create partitions ahead of time</span>
+  <p>
+    Whether or not you keep a default partition, a scheduled job (the <code>pg_partman</code> extension, or your own cron
+    job) should create the next few months of partitions in advance. Monitor the default partition: if its row count is not 0,
+    something is writing data your partition scheme did not expect. It is a smoke alarm.
+  </p>
+</div>
+
+<h2 id="list-hash">6. List and hash partitioning</h2>
+
+<p>The other two methods fit data without a natural order:</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Method</th><th>Rule</th><th>Fits</th><th>Pruning</th></tr></thead>
+  <tbody>
+    <tr><td><code>RANGE</code></td><td class="wrap">Values <code>FROM</code> (inclusive) <code>TO</code> (exclusive)</td><td class="wrap">Time, ids, anything ordered; retention by dropping</td><td class="wrap">Equality and ranges</td></tr>
+    <tr><td><code>LIST</code></td><td class="wrap">An explicit list of values per partition</td><td class="wrap">A few known categories: country, tenant group, region</td><td class="wrap">Equality and <code>IN</code></td></tr>
+    <tr><td><code>HASH</code></td><td class="wrap"><code>MODULUS m</code> and <code>REMAINDER r</code> of a hash of the key</td><td class="wrap">Spreading load evenly when there is no natural grouping</td><td class="wrap">Equality only; a range such as <code>id &gt; 42 and id &lt; 50</code> scans every partition</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">a list-partitioned copy of the orders</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">create table shop.orders_by_country (
+  id integer not null, customer_id integer not null, status shop.order_status not null,
+  ordered_at timestamptz not null, shipping_country char(2) not null, total numeric(12,2) not null default 0,
+  primary key (id, shipping_country)
+) partition by list (shipping_country);
+
+create table shop.orders_nl partition of shop.orders_by_country for values in ('NL');
+create table shop.orders_other partition of shop.orders_by_country default;
+
+insert into shop.orders_by_country
+select id, customer_id, status, ordered_at, shipping_country, total from shop.orders;
+
+explain (costs off) select * from shop.orders_by_country where shipping_country = 'NL';</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>The plan touches <code>orders_nl</code> only. A hash partitioned table is declared like this; the partitions together must cover every remainder from 0 up to modulus minus 1 (here 0 and 1):</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">hash partitions spread the rows</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">create table shop.customers_h (id integer primary key, email text not null) partition by hash (id);
+create table shop.customers_h0 partition of shop.customers_h for values with (modulus 2, remainder 0);
+create table shop.customers_h1 partition of shop.customers_h for values with (modulus 2, remainder 1);
+
+insert into shop.customers_h select id, email from shop.customers;
+select tableoid::regclass as partition, count(*) from shop.customers_h group by 1 order by 1;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  Hash partitioning mostly spreads writes and storage; it does not make queries faster unless they filter on the key with <code>=</code>.
+  On the Docker database, with modulus 4 instead of 2, the 20,000 customers split into partitions of 4,929 to 5,051 rows, and
+  <code>where id = 42</code> read only one of them (<code>customers_h2</code>).
+</p>
+
+<h2 id="retention">7. Retention: detach, then drop</h2>
+
+<p>
+  This is where partitioning pays for itself. Removing January with <code>DELETE</code> would write every row to the WAL and leave
+  dead tuples for vacuum. With partitions it is a metadata change:
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">remove the early days (run the range playground first)</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">alter table analytics.events_p detach partition analytics.events_early;
+
+select (select count(*) from analytics.events_p)     as left_in_parent,
+       (select count(*) from analytics.events_early) as in_detached_table;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  After <code>DETACH PARTITION</code> the table is an ordinary standalone table again. It holds all its rows, but the
+  parent no longer sees them. That is a useful pause: you can archive it (<code>pg_dump -t</code>, see
+  <a href="23-backup-and-recovery.html">lesson 23</a>) or inspect it before deleting. When you are sure, drop it:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">retention in two statements</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>alter table analytics.events_p detach partition analytics.events_2025_01;
+drop table analytics.events_2025_01;
+
+select relid::regclass, isleaf from pg_partition_tree('analytics.events_p') order by 1;</code></pre>
+</figure>
+
+<p>
+  On a busy table, <code>DETACH PARTITION ... CONCURRENTLY</code> avoids blocking readers and writers, but it cannot run inside a
+  transaction block and, as seen above, not while a default partition exists.
+</p>
+
+<h3>Loading a partition without locking the parent</h3>
+<p>
+  The reverse operation also works without a long lock. Build and fill a standalone table, add a <code>CHECK</code> constraint equal to
+  the partition bound (so PostgreSQL need not scan it to verify), attach it, then drop the now-redundant check:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">attach a ready table as June's partition</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create table analytics.ev_2025_06 (
+  id bigint not null, occurred_at timestamptz not null, kind text not null,
+  primary key (id, occurred_at)
+);
+-- ... load the data into analytics.ev_2025_06 ...
+alter table analytics.ev_2025_06 add constraint ev_2025_06_range
+  check (occurred_at &gt;= '2025-06-01' and occurred_at &lt; '2025-07-01');
+alter table analytics.ev attach partition analytics.ev_2025_06
+  for values from ('2025-06-01') to ('2025-07-01');
+alter table analytics.ev_2025_06 drop constraint ev_2025_06_range;</code></pre>
+</figure>
+
+<h2 id="indexes">8. Indexes and other limits</h2>
+<ul>
+  <li><strong>Indexes</strong> created on the parent (<code>create index on analytics.events_p (kind)</code>) are created on every partition, and on partitions you add later. Each partition has its own, smaller index.</li>
+  <li><strong>Uniqueness</strong> across partitions is only possible with the partition key in the index (section 3).</li>
+  <li><strong>Many partitions cost planning time.</strong> Hundreds are fine; tens of thousands are not. Do not partition by hour "just in case".</li>
+  <li><strong>Autovacuum works per partition.</strong> Old, no-longer-written partitions are vacuumed once and then left alone, which is a quiet benefit for append-only data.</li>
+  <li><strong>You cannot convert in place.</strong> Changing a normal table to a partitioned one means creating the new structure and copying the rows (as the exercises do), or detaching and attaching in stages.</li>
+</ul>
+
+<div class="note danger">
+  <span class="note-title">Do not partition a small or well-indexed table</span>
+  <p>
+    A table of a few million rows that you query by <code>id</code> through an index gains nothing from partitioning, and
+    every query that cannot prune pays for it. Reasonable reasons to partition are a table too big to maintain as one piece
+    (vacuum, index builds and backups taking too long), and a retention rule that matches the key. If neither applies, add the right
+    index instead (<a href="12-indexes.html">lesson 12</a>).
+  </p>
+</div>
+
+<h2 id="when">When to use, when not to</h2>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Situation</th><th class="wrap">✅ Do this</th><th class="wrap">❌ Not this</th></tr></thead>
+  <tbody>
+    <tr><td class="wrap">Append-only log or event table that grows without limit</td><td class="wrap">Range-partition by time and drop old partitions</td><td class="wrap">A nightly <code>DELETE ... WHERE occurred_at &lt; ...</code></td></tr>
+    <tr><td class="wrap">Most queries read the last few weeks</td><td class="wrap">Partition by the column those queries filter on</td><td class="wrap">Partition by a column they ignore</td></tr>
+    <tr><td class="wrap">A few known categories you query separately</td><td class="wrap">List partitioning</td><td class="wrap">List partitioning on a column with thousands of values</td></tr>
+    <tr><td class="wrap">Even spread of load, no natural grouping</td><td class="wrap">Hash partitioning, and queries that use <code>=</code> on the key</td><td class="wrap">Hash partitioning for range queries</td></tr>
+    <tr><td class="wrap">Table is 2 million rows and indexed well</td><td class="wrap">Leave it alone</td><td class="wrap">Partition for fashion</td></tr>
+    <tr><td class="wrap">A key must be unique by itself</td><td class="wrap">Keep an unpartitioned table, or accept that uniqueness is per partition key</td><td class="wrap">Assuming <code>(id, occurred_at)</code> makes <code>id</code> unique</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="inspect">Inspect it</h2>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">partitions of a table, their bounds and sizes</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select c.relname as partition,
+       pg_get_expr(c.relpartbound, c.oid) as bounds,
+       pg_size_pretty(pg_total_relation_size(c.oid)) as total_size
+from pg_inherits i
+join pg_class c on c.oid = i.inhrelid
+where i.inhparent = 'analytics.events_p'::regclass
+order by c.relname;
+
+select relid::regclass as relation, level, isleaf from pg_partition_tree('analytics.events_p');
+select partrelid::regclass, partstrat, partdefid::regclass as default_partition from pg_partitioned_table;</code></pre>
+</figure>
+
+<p>In psql, <code>\d+ analytics.events_p</code> lists the partitions with their bounds.</p>
+
+<h2 id="exercises">Your turn</h2>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 1</span><span class="grow"></span><span class="lvl">basic</span></div>
+  <div class="ex-body">
+    <p>
+      Create the range-partitioned table <code>public.lab_readings</code> with two monthly partitions and a default partition.
+      Details are in the file. The check inserts rows and looks at where they land.
+    </p>
+    <p>Open <code>exercises/20/1.sql</code>, write your answer, then run <code>./pg check 20 1</code>.</p>
+  </div>
+  {{stub 20 1}}
+  <details><summary>Hint</summary><p>The primary key must contain <code>taken_at</code>. The second partition ends where the third month starts, because the upper bound is exclusive.</p></details>
+  {{solution 20 1}}
+</section>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 2</span><span class="grow"></span><span class="lvl">intermediate</span></div>
+  <div class="ex-body">
+    <p>
+      Build <code>shop.orders_by_country</code>, a list-partitioned copy of the orders with an NL partition, a DE and BE
+      partition, and a default partition, and copy all rows into it.
+    </p>
+    <p>Open <code>exercises/20/2.sql</code>, write your answer, then run <code>./pg check 20 2</code>.</p>
+  </div>
+  {{stub 20 2}}
+  <details><summary>Hint</summary><p>A primary key on <code>id</code> alone is refused; add the partition column to it. <code>for values in ('DE', 'BE')</code> puts two values in one partition.</p></details>
+  {{solution 20 2}}
+</section>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 3</span><span class="grow"></span><span class="lvl">challenge</span></div>
+  <div class="ex-body">
+    <p>
+      Partition <code>analytics.events</code> by month as in section 2 (twelve monthly partitions for 2025 and a default),
+      copy the data, then apply retention: remove January 2025 by detaching and dropping its partition. The check
+      confirms the data, the partitions and that a query for March is pruned to one partition.
+    </p>
+    <p>Open <code>exercises/20/3.sql</code>, write your answer, then run <code>./pg check 20 3</code>.</p>
+  </div>
+  {{stub 20 3}}
+  <details><summary>Hint</summary><p>Twelve <code>create table ... partition of</code> statements work, but a <code>DO</code> block with <code>format()</code> and <code>generate_series</code> is shorter. Section 2 shows one. Detach before you drop.</p></details>
+  {{solution 20 3}}
+</section>
+
+<h2 id="summary">Summary</h2>
+<ul>
+  <li>A partitioned table is a shell; rows live in partitions chosen by <code>RANGE</code>, <code>LIST</code> or <code>HASH</code> on the partition key.</li>
+  <li>A primary key or unique constraint must include the partition key, so <code>id</code> alone is no longer guaranteed unique.</li>
+  <li>Pruning skips partitions the <code>WHERE</code> clause rules out, but only if you compare the key itself. Check the plan, without timings.</li>
+  <li>A default partition catches stray rows, but blocks creating a partition that overlaps its rows and blocks <code>DETACH ... CONCURRENTLY</code>.</li>
+  <li>Retention by <code>DETACH</code> and <code>DROP</code> is instant and leaves no bloat. That is the strongest reason to partition.</li>
+  <li>Do not partition small tables, or by a column queries ignore.</li>
+</ul>
+
+<h2 id="next">Looking ahead</h2>
+<p>
+  Part 6 moves from the data to the server that runs it. <a href="21-configuration.html">Lesson 21</a> explains how PostgreSQL's settings
+  are layered, which ten matter, and which of them need a restart.
+</p>

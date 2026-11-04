@@ -1,0 +1,612 @@
+<p class="lede">
+  A <em>transaction</em> is a group of statements that the database treats as one unit: all of it happens, or none of it.
+  PostgreSQL also lets many transactions run at the same time without readers waiting for writers. It does this by
+  keeping several versions of a row. This lesson shows you those versions, explains what a snapshot is, and tells you
+  exactly what each isolation level protects you from.
+</p>
+
+<h2 id="goals">Learning goals</h2>
+<ul>
+  <li>Use <code>BEGIN</code>, <code>COMMIT</code>, <code>ROLLBACK</code> and <code>SAVEPOINT</code>, and explain what autocommit does when you do not.</li>
+  <li>Explain MVCC (multi-version concurrency control) in one paragraph: why an <code>UPDATE</code> writes a new row version.</li>
+  <li>Read <code>xmin</code>, <code>xmax</code> and <code>ctid</code> and say what each tells you about a row version.</li>
+  <li>Describe a snapshot, and tell when <code>READ COMMITTED</code> and <code>REPEATABLE READ</code> take theirs.</li>
+  <li>Say which anomalies each of the four isolation levels prevents in PostgreSQL, including write skew.</li>
+  <li>Handle <code>serialization_failure</code> (SQLSTATE <code>40001</code>) by retrying the whole transaction.</li>
+</ul>
+
+<h2 id="lab">Set up for this lesson</h2>
+<p>
+  Use the <code>shop</code> database in Docker (<code>./pg up</code>, then <code>./pg psql</code>). Most examples
+  change data, so run them inside a transaction you end with <code>ROLLBACK</code>, or on the rows the exercises tell you to
+  change. Some demonstrations need <strong>two sessions</strong>: open two terminals, run <code>./pg psql</code> in each, and
+  call them session A and session B. The in-browser playground is a single session, so it can show the mechanics
+  (row versions, savepoints, isolation settings) but not two sessions colliding.
+</p>
+
+<h2 id="tx">1. What a transaction is</h2>
+
+<p>
+  A transaction gives you the four guarantees known as <strong>ACID</strong>:
+</p>
+<ul>
+  <li><strong>Atomic</strong>: all statements take effect, or none do.</li>
+  <li><strong>Consistent</strong>: constraints hold at the end. A transaction that would break a <code>CHECK</code> or a foreign key cannot commit.</li>
+  <li><strong>Isolated</strong>: concurrent transactions do not see each other's half-finished work (how strictly depends on the isolation level, section 5).</li>
+  <li><strong>Durable</strong>: once <code>COMMIT</code> returns, the change survives a crash (the WAL does this, see <a href="01-architecture.html">lesson 1</a>).</li>
+</ul>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">a transfer between two products' stock</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>begin;
+update shop.products set stock = stock - 10 where id = 1;
+update shop.products set stock = stock + 10 where id = 2;
+commit;        -- both changes become visible together; rollback; would undo both</code></pre>
+</figure>
+
+<h3>Autocommit</h3>
+<p>
+  If you do not write <code>BEGIN</code>, PostgreSQL wraps every statement in its own transaction and commits it for you.
+  That is <em>autocommit</em>. It is why a lone <code>UPDATE</code> is atomic, and also why two separate <code>UPDATE</code>
+  statements are <em>not</em>: a crash between them leaves only the first applied.
+</p>
+
+<h3>Errors abort the transaction</h3>
+<p>
+  When any statement in a transaction fails, the whole transaction enters an aborted state. Every following statement is
+  refused until you end it with <code>ROLLBACK</code> (a <code>COMMIT</code> at that point is also turned into a rollback).
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">after an error (intentional errors in this block)</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>begin;
+update shop.products set stock = 0 where id = 1;
+select 1/0;   -- ERROR:  division by zero
+select 1;     -- ERROR:  current transaction is aborted, commands ignored until end of transaction block
+rollback;     -- the stock update is undone too</code></pre>
+</figure>
+
+<h3>Savepoints</h3>
+<p>
+  A <em>savepoint</em> marks a point inside a transaction that you can return to without giving up everything before it.
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">undo only part of a transaction</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>begin;
+update shop.products set stock = stock - 5 where id = 1;
+savepoint before_risky;
+update shop.products set stock = 0 where id = 2;
+rollback to savepoint before_risky;   -- product 2 is untouched, product 1 is still changed
+commit;</code></pre>
+</figure>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">a transfer that commits, and one that fails halfway · single session</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">drop table if exists accounts;
+create table accounts (
+  id      integer primary key,
+  owner   text not null,
+  balance numeric(10,2) not null check (balance >= 0)
+);
+insert into accounts values (1, 'anna', 100), (2, 'ben', 100);
+
+-- A transfer: both updates happen, or neither does.
+begin;
+update accounts set balance = balance - 30 where id = 1;
+update accounts set balance = balance + 30 where id = 2;
+commit;
+select * from accounts order by id;
+
+-- A transfer that breaks the CHECK constraint on its second statement.
+-- The playground stops at this error on purpose (intentional error).
+begin;
+update accounts set balance = balance + 500 where id = 2;
+update accounts set balance = balance - 500 where id = 1;
+commit;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  The second block stops with <em>violates check constraint "accounts_balance_check"</em>, and the playground rolls the
+  open transaction back for you. Run the next one to see that ben's extra 500 never became visible:
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">balances after the failed transfer, then a savepoint</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select * from accounts order by id;
+
+begin;
+update accounts set balance = balance - 10 where id = 1;
+savepoint risky;
+update accounts set balance = 0 where id = 2;
+rollback to savepoint risky;      -- undo only the part after the savepoint
+select * from accounts order by id;
+commit;
+select * from accounts order by id;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<div class="note info">
+  <span class="note-title">DDL is transactional</span>
+  <p>
+    In PostgreSQL, <code>CREATE TABLE</code>, <code>ALTER TABLE</code> and <code>DROP INDEX</code> are rolled back with
+    everything else. That makes a migration that runs in one transaction all-or-nothing. (A few commands refuse to run inside a
+    transaction block, for example <code>CREATE INDEX CONCURRENTLY</code> from
+    <a href="12-indexes.html">lesson 12</a>.)
+  </p>
+</div>
+
+<h2 id="mvcc">2. MVCC: many versions of a row</h2>
+
+<p>
+  Suppose readers and writers had to take turns on a row. A long report would block every order update. PostgreSQL avoids
+  this with <strong>MVCC</strong> (multi-version concurrency control): an <code>UPDATE</code> does not overwrite a row. It
+  writes a <em>new version</em> of the row and marks the old version as no longer current. Each transaction then sees the
+  versions that were valid for it. Readers do not block writers, and writers do not block readers.
+</p>
+
+<figure class="dia">
+  <div class="dia-hold">
+    <svg class="d" viewBox="0 0 860 250" role="img" aria-labelledby="mv-t mv-d">
+      <title id="mv-t">An UPDATE creates a second row version</title>
+      <desc id="mv-d">A heap page holds two versions of product 1. After the update commits, the old version has xmin 770 and xmax 1180 and is dead. The new version has xmin 1180 and xmax 0 and is current.</desc>
+      <defs>
+        <marker id="mvm" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z"/></marker>
+      </defs>
+      <rect class="box" x="40" y="40" width="340" height="120" rx="8"/>
+      <text class="hd" x="60" y="68">old version · ctid (0,1)</text>
+      <text class="lbl" x="60" y="98">stock = 232</text>
+      <text class="lbl" x="60" y="122">xmin = 770 (created by tx 770)</text>
+      <text class="lbl" x="60" y="146">xmax = 1180 (ended by tx 1180)</text>
+      <rect class="box accent" x="480" y="40" width="340" height="120" rx="8"/>
+      <text class="hd" x="500" y="68">new version · ctid (15,21)</text>
+      <text class="lbl" x="500" y="98">stock = 233</text>
+      <text class="lbl" x="500" y="122">xmin = 1180 (created by tx 1180)</text>
+      <text class="lbl" x="500" y="146">xmax = 0 (still current)</text>
+      <path class="line" d="M380 100 L476 100" marker-end="url(#mvm)"/>
+      <text class="mut tiny" x="430" y="90" text-anchor="middle">UPDATE</text>
+      <text class="mut tiny" x="430" y="205" text-anchor="middle">VACUUM later removes the old version once no transaction can still need it (lesson 17).</text>
+    </svg>
+  </div>
+  <figcaption>One logical row, two physical versions. The numbers are examples; yours will differ.</figcaption>
+</figure>
+
+<p>
+  Three consequences follow, and you will meet each of them again:
+</p>
+<ul>
+  <li>Old versions pile up as <em>dead tuples</em> until <code>VACUUM</code> cleans them: <a href="17-vacuum-and-bloat.html">lesson 17</a>.</li>
+  <li>Two writers on the <em>same row</em> still have to take turns: that is locking, in <a href="16-locking.html">lesson 16</a>.</li>
+  <li>An <code>UPDATE</code> that touches an indexed column writes new index entries too, which is part of the write cost from <a href="12-indexes.html">lesson 12</a>.</li>
+</ul>
+
+<h2 id="syscols">3. See the versions: xmin, xmax, ctid</h2>
+
+<p>
+  Every table has hidden <em>system columns</em>. Three of them describe the row version you are looking at:
+</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Column</th><th>Meaning</th></tr></thead>
+  <tbody>
+    <tr><td><code>xmin</code></td><td class="wrap">The id of the transaction that created this version.</td></tr>
+    <tr><td><code>xmax</code></td><td class="wrap">The id of the transaction that deleted or updated it, or <code>0</code> if none has. A non-zero value on a visible row can also mean a transaction that locked the row, or one that has not committed yet.</td></tr>
+    <tr><td><code>ctid</code></td><td class="wrap">Where the version physically sits: <code>(page number, item number)</code>. It changes when the row is updated. Never use it as a key.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>
+  They are not part of <code>SELECT *</code>, but you can name them. Run this in <code>./pg psql</code>. The rollback leaves the
+  data as it was; the aborted <code>UPDATE</code> still leaves its mark in <code>xmax</code>. (Do not use
+  <code>ctid</code> or these ids in application code; they are for looking.)
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">watch a row get a new version</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select id, stock, xmin, xmax, ctid from shop.products where id = 1;
+
+begin;
+update shop.products set stock = stock + 1 where id = 1;
+select id, stock, xmin, xmax, ctid from shop.products where id = 1;   -- new version: new xmin, xmax = 0, new ctid
+select pg_current_xact_id();                                           -- your own transaction id, equal to that xmin
+rollback;
+
+select id, stock, xmin, xmax, ctid from shop.products where id = 1;   -- old version again, but xmax is now set</code></pre>
+</figure>
+
+<p>
+  In the Docker database the first query printed <code>xmin = 770, xmax = 773, ctid = (0,1)</code> for product 1. The
+  non-zero <code>xmax</code> on a live row is typical: a transaction that only <em>locked</em> the row (for example, a foreign-key check when
+  an order item was inserted) leaves its id there without deleting anything. Inside the transaction the row came back as
+  <code>xmin = 1180, xmax = 0, ctid = (15,21)</code>: a new version on a different page. After the rollback the old version was visible again, now with
+  <code>xmax = 1180</code>. That <code>xmax</code> belongs to a transaction that aborted, so PostgreSQL ignores it. Your
+  numbers will be different, but the pattern is the same.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">the same experiment in the browser · numbers differ from Docker</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">-- Each statement outside BEGIN runs in its own transaction (autocommit).
+select xmin, xmax, ctid, id, stock from shop.products where id = 1;
+
+begin;
+update shop.products set stock = stock + 1 where id = 1;
+select xmin, xmax, ctid, id, stock from shop.products where id = 1;
+rollback;
+
+select xmin, xmax, ctid, id, stock from shop.products where id = 1;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<h3>Transaction ids</h3>
+<p>
+  A transaction gets an id only when it first <em>writes</em>. A read-only transaction has none, which keeps it cheap.
+  <code>pg_current_xact_id_if_assigned()</code> returns <code>NULL</code> until the first write. The ids are 32-bit
+  numbers that eventually wrap around, which is one of the reasons <code>VACUUM</code> must run: see
+  <a href="17-vacuum-and-bloat.html">lesson 17</a>.
+</p>
+
+<h2 id="snapshots">4. Snapshots: who sees which version</h2>
+
+<p>
+  A <strong>snapshot</strong> is the list of transactions that had committed at one moment. When your statement reads a row version, PostgreSQL asks: was
+  the transaction in <code>xmin</code> committed in my snapshot? Was the transaction in <code>xmax</code>, if any? A version is visible when it
+  was created before your snapshot and not yet ended before it. Your own changes are always visible to you.
+</p>
+
+<p>
+  The isolation level decides <em>when</em> a snapshot is taken:
+</p>
+<ul>
+  <li><code>READ COMMITTED</code> (the default): a new snapshot for <strong>each statement</strong>.</li>
+  <li><code>REPEATABLE READ</code> and <code>SERIALIZABLE</code>: one snapshot for the <strong>whole transaction</strong>, taken at its first statement.</li>
+</ul>
+
+<h2 id="levels">5. The four isolation levels</h2>
+
+<p>
+  The SQL standard names four levels and defines them by which problems (anomalies) they allow:
+</p>
+<ul>
+  <li><strong>Dirty read</strong>: you see changes another transaction has not committed.</li>
+  <li><strong>Non-repeatable read</strong>: you read a row twice and get different values, because someone committed in between.</li>
+  <li><strong>Phantom read</strong>: you run the same query twice and the <em>set of rows</em> differs, because someone inserted or deleted matching rows.</li>
+  <li><strong>Serialization anomaly</strong>: the combined result of concurrent transactions is not what <em>any</em> one-after-another order would produce. <em>Write skew</em> (section 7) is the classic example.</li>
+</ul>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Level</th><th>Dirty read</th><th>Non-repeatable read</th><th>Phantom read</th><th>Serialization anomaly</th></tr></thead>
+  <tbody>
+    <tr><td><code>READ UNCOMMITTED</code></td><td class="wrap">no (it behaves as <code>READ COMMITTED</code>)</td><td class="wrap">possible</td><td class="wrap">possible</td><td class="wrap">possible</td></tr>
+    <tr><td><code>READ COMMITTED</code> (default)</td><td class="wrap">no</td><td class="wrap">possible</td><td class="wrap">possible</td><td class="wrap">possible</td></tr>
+    <tr><td><code>REPEATABLE READ</code></td><td class="wrap">no</td><td class="wrap">no</td><td class="wrap">no (stricter than the standard requires)</td><td class="wrap">possible</td></tr>
+    <tr><td><code>SERIALIZABLE</code></td><td class="wrap">no</td><td class="wrap">no</td><td class="wrap">no</td><td class="wrap">no</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>
+  PostgreSQL has only three real behaviours. <code>READ UNCOMMITTED</code> is accepted and then treated exactly like
+  <code>READ COMMITTED</code>: you can never see uncommitted data. Choose a level for one transaction, or change the default:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">choosing a level</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>begin isolation level repeatable read;
+select current_setting('transaction_isolation');   -- repeatable read
+commit;
+
+show default_transaction_isolation;                -- read committed
+-- alter role app_user set default_transaction_isolation = 'repeatable read';  -- per-role default</code></pre>
+</figure>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">choose a level · the effect needs two sessions, so use Docker for that</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">begin isolation level repeatable read;
+select current_setting('transaction_isolation') as level;
+select count(*) as orders_seen from shop.orders;
+commit;
+
+begin isolation level read uncommitted;
+select current_setting('transaction_isolation') as level;   -- accepted, but behaves as read committed
+commit;
+
+show default_transaction_isolation;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<h3>READ COMMITTED: a fresh snapshot per statement</h3>
+<p>Two terminals, <code>./pg psql</code> in each. Both sessions work on product 1 (stock 232 in a fresh database):</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">session A, then B, then A</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>-- A
+begin;
+select stock from shop.products where id = 1;          -- 232
+
+-- B (autocommit)
+update shop.products set stock = 500 where id = 1;
+
+-- A
+select stock from shop.products where id = 1;          -- 500: a new statement took a new snapshot (non-repeatable read)
+rollback;
+
+-- B: put it back
+update shop.products set stock = 232 where id = 1;</code></pre>
+</figure>
+
+<p>
+  Under <code>READ COMMITTED</code> session A's second read returns the value session B just committed. (Run it on a scratch copy of the table to keep your practice data tidy.)
+</p>
+
+<h3>REPEATABLE READ: one snapshot per transaction</h3>
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">the same steps at repeatable read</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>-- A
+begin isolation level repeatable read;
+select stock from shop.products where id = 1;          -- 232
+
+-- B (autocommit)
+update shop.products set stock = 500 where id = 1;
+
+-- A
+select stock from shop.products where id = 1;          -- still 232: same snapshot
+commit;
+select stock from shop.products where id = 1;          -- 500: a new transaction, a new snapshot
+
+-- B: put it back
+update shop.products set stock = 232 where id = 1;</code></pre>
+</figure>
+
+<p>
+  Inserts behave the same way: rows committed by another session after A's snapshot stay invisible to A for the rest of its
+  transaction, so there are no phantoms. In the standard, <code>REPEATABLE READ</code> may allow phantoms; PostgreSQL's snapshot
+  does not.
+</p>
+
+<h3>Writing to a row that changed: the update conflict</h3>
+<p>
+  A snapshot protects reads. What if session A (at <code>REPEATABLE READ</code>) tries to <em>update</em> a row that session B
+  changed and committed after A's snapshot? A would silently overwrite a version it has never seen, so PostgreSQL stops it:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">intentional error in session A</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>-- A
+begin isolation level repeatable read;
+select stock from shop.products where id = 1;
+
+-- B (autocommit)
+update shop.products set stock = stock + 1 where id = 1;
+
+-- A
+update shop.products set stock = stock + 10 where id = 1;
+-- ERROR:  could not serialize access due to concurrent update
+rollback;</code></pre>
+</figure>
+
+<p>
+  Under <code>READ COMMITTED</code> the same update would instead <em>wait</em> for B to commit, re-read the newest version of the
+  row, and apply <code>stock + 10</code> to it. That is why <code>stock = stock + 10</code> is safe at the default level, and why
+  <code>select</code>-then-<code>update stock = &lt;value you computed&gt;</code> is not (see the pitfall below).
+</p>
+
+<h2 id="serializable">6. SERIALIZABLE and SSI</h2>
+
+<p>
+  <code>SERIALIZABLE</code> promises the strongest thing: the outcome is the same as if the transactions had run one after another in
+  some order. PostgreSQL does this without blocking readers. It runs <code>REPEATABLE READ</code> snapshots and adds
+  <strong>SSI</strong> (serializable snapshot isolation): it watches for dangerous patterns of read and write dependencies between
+  concurrent transactions. When it finds one, it aborts one transaction with SQLSTATE <code>40001</code>
+  (<code>serialization_failure</code>).
+</p>
+
+<div class="note warn">
+  <span class="note-title">The application must retry</span>
+  <p>
+    A <code>40001</code> error does not mean your SQL is wrong. The message says <em>The transaction might succeed if retried</em>.
+    Code that uses <code>REPEATABLE READ</code> or <code>SERIALIZABLE</code> must catch <code>40001</code> (and the related
+    <code>40P01</code>, deadlock detected, from <a href="16-locking.html">lesson 16</a>) and run the <strong>whole transaction</strong> again from
+    <code>BEGIN</code>. Retrying only the failed statement is wrong: the snapshot is gone.
+  </p>
+</div>
+
+<h2 id="skew">7. Write skew: what REPEATABLE READ does not stop</h2>
+
+<p>
+  Hospital rule: at least one doctor must stay on call. Two doctors, both on duty, each check the count and then take themselves
+  off duty. Each transaction touches a <em>different row</em>, so no update conflict appears, and each saw "2 on duty" in its snapshot.
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">setup (any scratch database, not shop)</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create table on_call (doctor text primary key, on_duty boolean not null);
+insert into on_call values ('alice', true), ('bob', true);</code></pre>
+</figure>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">session A and session B, interleaved</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>-- A: begin isolation level repeatable read;     B: begin isolation level repeatable read;
+-- A: select count(*) from on_call where on_duty;     -- 2        B: same, 2
+-- A: update on_call set on_duty = false where doctor = 'alice';
+-- B: update on_call set on_duty = false where doctor = 'bob';
+-- A: commit;                                          B: commit;   -- both succeed</code></pre>
+</figure>
+
+<p>
+  With two <code>psql</code> sessions on PostgreSQL 18, both transactions committed at <code>REPEATABLE READ</code>, and nobody was on call: <em>write skew</em>.
+  Repeating it with <code>begin isolation level serializable</code> in both sessions, one commit succeeded and the other failed with:
+</p>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">output of the losing session</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code>ERROR:  could not serialize access due to read/write dependencies among transactions
+DETAIL:  Reason code: Canceled on identification as a pivot, during commit attempt.
+HINT:  The transaction might succeed if retried.</code></pre>
+</figure>
+
+<p>
+  Retried, that transaction now sees one doctor on duty and (with your application's rule) refuses to leave. Serializable
+  trades some aborted work for correctness without you having to think about every interleaving.
+</p>
+
+<div class="note tip">
+  <span class="note-title">Two other ways to stop write skew</span>
+  <p>
+    You do not always need <code>SERIALIZABLE</code>. A <code>SELECT ... FOR UPDATE</code> on the rows you depend on makes the
+    second transaction wait (<a href="16-locking.html">lesson 16</a>), and a constraint, such as a unique or exclusion constraint, lets the database reject the bad state itself.
+    Prefer a constraint when one can express the rule.
+  </p>
+</div>
+
+<h2 id="pitfalls">8. Pitfalls</h2>
+
+<div class="note danger">
+  <span class="note-title">Read-modify-write loses updates</span>
+  <p>
+    If your code runs <code>select stock</code>, computes <code>stock - 1</code> in the application, and writes the result with
+    <code>update ... set stock = 41</code>, two concurrent requests both start from the same number and one decrement is lost. At
+    <code>READ COMMITTED</code> nothing stops this. Write the change as one statement (<code>set stock = stock - 1</code>), lock the row first with
+    <code>FOR UPDATE</code>, or use <code>REPEATABLE READ</code> and retry on <code>40001</code>.
+  </p>
+</div>
+
+<div class="note warn">
+  <span class="note-title">An idle open transaction holds the world back</span>
+  <p>
+    A session that ran <code>BEGIN</code> and then went quiet (an app that forgot to commit, a person who walked away) keeps its snapshot
+    alive. <code>VACUUM</code> cannot remove any row version that snapshot might still need, so dead tuples accumulate, and the locks it holds
+    stay held. Look for these in <code>pg_stat_activity</code> (see "Inspect it") and set
+    <code>idle_in_transaction_session_timeout</code> in production.
+  </p>
+</div>
+
+<div class="note warn">
+  <span class="note-title">now() is the transaction's start, not the current moment</span>
+  <p>
+    Inside a transaction <code>now()</code> returns the same value for every statement: the time the transaction started. Use
+    <code>clock_timestamp()</code> if you need the actual time, and avoid <code>now()</code> as a stopwatch inside a long transaction.
+  </p>
+</div>
+
+<div class="note info">
+  <span class="note-title">Sequences ignore rollback</span>
+  <p>
+    A rolled-back <code>INSERT</code> still used a value from its sequence or identity column, and the number is not returned. Gaps in ids are normal.
+  </p>
+</div>
+
+<h2 id="when">When to use, when not to</h2>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Situation</th><th class="wrap">✅ Do this</th><th class="wrap">❌ Not this</th></tr></thead>
+  <tbody>
+    <tr><td class="wrap">Several changes must succeed or fail together</td><td class="wrap">One transaction: <code>BEGIN</code> ... <code>COMMIT</code></td><td class="wrap">Separate autocommit statements from the application</td></tr>
+    <tr><td class="wrap">Ordinary web request, single-row changes</td><td class="wrap"><code>READ COMMITTED</code> (default) and <code>set x = x + 1</code> style updates</td><td class="wrap">Read, compute in the app, write back</td></tr>
+    <tr><td class="wrap">A report that needs one consistent view of many queries</td><td class="wrap"><code>REPEATABLE READ</code>, ideally <code>READ ONLY</code></td><td class="wrap">Running the queries at <code>READ COMMITTED</code> and hoping nothing changes</td></tr>
+    <tr><td class="wrap">An invariant over several rows (at least one on call, budget total)</td><td class="wrap">A constraint, a row lock, or <code>SERIALIZABLE</code> with retry</td><td class="wrap"><code>REPEATABLE READ</code> and trust</td></tr>
+    <tr><td class="wrap">Using <code>SERIALIZABLE</code></td><td class="wrap">Keep transactions short; retry the whole transaction on <code>40001</code></td><td class="wrap">Long transactions or no retry logic</td></tr>
+    <tr><td class="wrap">A transaction that waits for a person or an external API</td><td class="wrap">Do the slow part outside; open the transaction late, commit early</td><td class="wrap">Holding <code>BEGIN</code> open while you wait</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="inspect">Inspect it</h2>
+
+<p>
+  Which sessions have a transaction open, how long, and what they are doing. Look at <code>xact_start</code> and
+  <code>state</code>; <code>idle in transaction</code> is the one to worry about. Run this in a second terminal while another
+  session sits inside a <code>BEGIN</code>.
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">open transactions, oldest first</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select pid, state, backend_xid, backend_xmin,
+       now() - xact_start as open_for, left(query, 40) as last_query
+from pg_stat_activity
+where xact_start is not null and pid &lt;&gt; pg_backend_pid()
+order by xact_start;</code></pre>
+</figure>
+
+<p>
+  <code>backend_xid</code> is the transaction id (empty until the session writes); <code>backend_xmin</code> is the oldest
+  transaction whose changes this session's snapshot still needs, which is what holds <code>VACUUM</code> back.
+</p>
+
+<h2 id="exercises">Your turn</h2>
+
+<p>
+  These exercises change data in <code>shop</code>. The checker runs them in a fresh copy of the database, so you cannot break your practice data. If you want to try an exercise in your own database anyway, wrap it in
+  your own transaction and end with <code>rollback</code> first.
+</p>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 1</span><span class="grow"></span><span class="lvl">basic</span></div>
+  <div class="ex-body">
+    <p>
+      In one transaction, move 10 units of stock from product 1 to product 2 and commit. In a second transaction, set the stock of product 3 to 0,
+      then roll back so it keeps its stock. Check it with <code>./pg check 15 1</code>.
+    </p>
+  </div>
+  {{stub 15 1}}
+  <details><summary>Hint</summary><p>Two <code>BEGIN</code> blocks: the first ends with <code>COMMIT</code>, the second with <code>ROLLBACK</code>.</p></details>
+  {{solution 15 1}}
+</section>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 2</span><span class="grow"></span><span class="lvl">intermediate</span></div>
+  <div class="ex-body">
+    <p>
+      In one transaction, use a savepoint to keep two of three changes: set product 4 to stock 100, then try setting product 5 to 0
+      and undo that change, then set product 6 to stock 200, and commit. Check it with <code>./pg check 15 2</code>.
+    </p>
+  </div>
+  {{stub 15 2}}
+  <details><summary>Hint</summary><p><code>savepoint name</code> before the change you may undo, and <code>rollback to savepoint name</code> after it. The transaction stays open; commit at the end.</p></details>
+  {{solution 15 2}}
+</section>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 3</span><span class="grow"></span><span class="lvl">challenge</span></div>
+  <div class="ex-body">
+    <p>
+      Create the table <code>public.tx_log (level text, row_is_mine boolean)</code>. In one <code>REPEATABLE READ</code> transaction, lower
+      the stock of product 8 by 1, then insert one row into <code>tx_log</code> holding the current isolation level and whether
+      the <code>xmin</code> of product 8's row now equals your own transaction id. Commit. Check it with <code>./pg check 15 3</code>.
+    </p>
+  </div>
+  {{stub 15 3}}
+  <details><summary>Hint</summary><p>
+    Read the level with <code>current_setting('transaction_isolation')</code>. Your transaction id is <code>pg_current_xact_id()</code>; it has type <code>xid8</code>, so cast it with <code>::xid</code> before comparing it with <code>xmin</code>.
+    Insert with <code>insert ... select</code> after the update.
+  </p></details>
+  {{solution 15 3}}
+</section>
+
+<h2 id="summary">Summary</h2>
+<ul>
+  <li>A transaction is all-or-nothing. Without <code>BEGIN</code>, each statement is its own transaction (autocommit). An error aborts the whole block until <code>ROLLBACK</code>.</li>
+  <li>MVCC: an <code>UPDATE</code> writes a new row version. <code>xmin</code> and <code>xmax</code> record who created and who ended a version; <code>ctid</code> is its physical place.</li>
+  <li>A snapshot decides which versions you see. <code>READ COMMITTED</code> takes one per statement; <code>REPEATABLE READ</code> and <code>SERIALIZABLE</code> one per transaction.</li>
+  <li>PostgreSQL never shows dirty reads; <code>READ UNCOMMITTED</code> is <code>READ COMMITTED</code>. <code>REPEATABLE READ</code> also prevents phantoms but still allows write skew.</li>
+  <li><code>SERIALIZABLE</code> uses SSI and may abort a transaction with <code>40001</code>. Retry the whole transaction.</li>
+  <li>Keep transactions short: open ones hold locks and stop <code>VACUUM</code> from cleaning up.</li>
+</ul>
+
+<h2 id="next">Looking ahead</h2>
+<p>
+  MVCC lets readers and writers coexist, but two writers on the same row must still take turns. <a href="16-locking.html">Lesson 16</a>
+  covers row and table locks, lock queues, deadlocks, <code>SELECT ... FOR UPDATE</code>, <code>SKIP LOCKED</code> and safe migrations.
+</p>

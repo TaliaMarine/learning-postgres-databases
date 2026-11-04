@@ -1,0 +1,383 @@
+<p class="lede">
+  PostgreSQL has one kind of account, the <em>role</em>. A “user” is a role that may log in; a “group” is a
+  role that other roles belong to. Everything that acts on the database (connecting, owning, reading,
+  changing) is done by a role. This lesson shows what a role is, how logging in is decided, and how roles
+  combine.
+</p>
+
+<h2 id="goals">Learning goals</h2>
+<ul>
+  <li>Explain why PostgreSQL has roles rather than separate “users” and “groups”.</li>
+  <li>Create login roles and group roles, and tell them apart with <code>\du</code> and <code>pg_roles</code>.</li>
+  <li>Set role attributes (<code>LOGIN</code>, <code>CREATEDB</code>, <code>CREATEROLE</code>, <code>CONNECTION LIMIT</code>, <code>VALID UNTIL</code>).</li>
+  <li>Grant one role to another, and explain what <code>INHERIT</code> changes.</li>
+  <li>Use <code>SET ROLE</code> and <code>current_user</code> versus <code>session_user</code> to see who is acting.</li>
+  <li>Explain, in one sentence, how <code>pg_hba.conf</code> and roles fit together when a client connects.</li>
+</ul>
+
+<h2 id="lab">Set up for this lesson</h2>
+<p>
+  Use the <code>shop</code> database. The exercises create roles whose names start with <code>lab_</code>; the
+  checker removes them for you. Start with <code>./pg up</code> if the container is not running.
+</p>
+
+<figure class="code" data-lang="bash">
+  <figcaption><span class="path">terminal</span><span class="grow"></span><span class="lang">bash</span></figcaption>
+<pre><code>./pg psql
+\du</code></pre>
+</figure>
+
+<p>
+  <code>\du</code> lists the roles. You should see only <code>postgres</code>, plus the built-in <code>pg_*</code>
+  roles that PostgreSQL ships with. The <code>postgres</code> role is the superuser the Docker image creates.
+</p>
+
+<h2 id="one-thing">1. There is only one thing: the role</h2>
+
+<p>
+  In PostgreSQL, “user” and “group” are not separate concepts. Both are roles. The difference is one
+  attribute: whether the role may log in. The command <code>CREATE USER</code> is a shorthand for
+  <code>CREATE ROLE … LOGIN</code>, and nothing more.
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">the same thing, written two ways</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create user maria password 'change-me';
+create role maria login password 'change-me';   -- identical result</code></pre>
+</figure>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">create two roles, then look at the catalogue</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">create role analyst;                      -- a group: cannot log in
+create user maria password 'secret';         -- a user: can log in
+
+select rolname, rolcanlogin
+from pg_roles
+where rolname in ('analyst', 'maria')
+order by rolname;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  The column <code>rolcanlogin</code> is the whole distinction. A role with <code>rolcanlogin = false</code> is a
+  group: you can grant privileges to it and make other roles members of it, but no client can connect as it.
+</p>
+
+<div class="note info">
+  <span class="note-title">Where the catalogue lives</span>
+  <p>
+    Roles are stored once for the whole server, in <code>pg_authid</code>. The view <code>pg_roles</code> hides
+    the password hash. Roles are <em>cluster-wide</em>: a role created in <code>shop</code> exists in
+    <code>postgres</code> too. That is why the course checker has to clean up after itself.
+  </p>
+</div>
+
+<h2 id="attributes">2. Attributes: what a role is allowed to do</h2>
+
+<p>
+  Beyond privileges on objects, a role has a handful of attributes that grant server-wide powers. The ones you
+  will meet most often:
+</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Attribute</th><th>Default</th><th>What it allows</th><th>Caution</th></tr></thead>
+  <tbody>
+    <tr><td><code>LOGIN</code></td><td class="wrap">no (for <code>CREATE ROLE</code>)</td><td class="wrap">Connect to the server</td><td class="wrap">Without it, the role is a group</td></tr>
+    <tr><td><code>SUPERUSER</code></td><td>no</td><td class="wrap">Bypasses permission checks, including row-level security</td><td class="wrap">Never give this to an application role</td></tr>
+    <tr><td><code>CREATEDB</code></td><td>no</td><td class="wrap">Create databases</td><td class="wrap">Grants nothing on existing data</td></tr>
+    <tr><td><code>CREATEROLE</code></td><td>no</td><td class="wrap">Create, alter and drop other roles</td><td class="wrap">Can grant itself most things if careless</td></tr>
+    <tr><td><code>BYPASSRLS</code></td><td>no</td><td class="wrap">Ignore row-level security policies</td><td class="wrap">Reporting roles only, deliberately</td></tr>
+    <tr><td><code>INHERIT</code></td><td>yes</td><td class="wrap">Use the privileges of roles it is a member of, automatically</td><td class="wrap">See section 4</td></tr>
+    <tr><td><code>CONNECTION LIMIT n</code></td><td>−1 (no limit)</td><td class="wrap">At most <em>n</em> simultaneous sessions</td><td class="wrap">Protects the server from one runaway client</td></tr>
+    <tr><td><code>VALID UNTIL</code></td><td>never</td><td class="wrap">Password stops working at this time</td><td class="wrap">Expiry is checked at login, not during a session</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>Set attributes when you create the role, or change them later with <code>ALTER ROLE</code>:</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">attributes</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create role reporting login connection limit 5 valid until '2030-01-01';
+alter role reporting createdb;
+alter role reporting nocreatedb;</code></pre>
+</figure>
+
+<div class="note danger">
+  <span class="note-title">A superuser is not a safer administrator</span>
+  <p>
+    <code>SUPERUSER</code> bypasses privilege checks and row-level security, and can run
+    <code>COPY ... FROM PROGRAM</code>, which executes commands on the server's operating system. An
+    application that connects as a superuser turns a single SQL injection into control of the database
+    host. Give applications an owner role or a narrow role instead
+    (<a href="04-privileges-and-grants.html">lesson 4</a> and <a href="05-security-and-rls.html">lesson 5</a>).
+  </p>
+</div>
+
+<h2 id="membership">3. Membership: roles inside roles</h2>
+
+<p>
+  A role can be a member of another role. This is how you manage privileges for many people at once: grant
+  the privileges to a group role, then add people to the group.
+</p>
+
+<figure class="dia">
+  <div class="dia-hold">
+    <svg class="d" viewBox="0 0 860 300" role="img" aria-labelledby="mem-t mem-d">
+      <title id="mem-t">A group role holding table privileges, with two login roles as members</title>
+      <desc id="mem-d">The group role analyst holds SELECT on shop.orders. The login roles maria and tom are members of analyst. Both inherit the group's privileges.</desc>
+      <defs>
+        <marker id="mm" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z"/></marker>
+      </defs>
+      <rect class="box accent" x="300" y="30" width="260" height="70" rx="8"/>
+      <text class="hd ctr" x="430" y="58">analyst</text>
+      <text class="lbl ctr" x="430" y="80">group · nologin</text>
+      <rect class="box teal" x="40" y="180" width="220" height="60" rx="8"/>
+      <text class="hd ctr" x="150" y="206">maria</text>
+      <text class="lbl ctr" x="150" y="226">login · member</text>
+      <rect class="box teal" x="600" y="180" width="220" height="60" rx="8"/>
+      <text class="hd ctr" x="710" y="206">tom</text>
+      <text class="lbl ctr" x="710" y="226">login · member</text>
+      <path class="line" d="M150 180 L400 104" marker-end="url(#mm)"/>
+      <path class="line" d="M710 180 L460 104" marker-end="url(#mm)"/>
+      <text class="mut tiny" x="430" y="150" text-anchor="middle">is a member of</text>
+    </svg>
+  </div>
+  <figcaption>Membership points upward: <code>maria</code> is a member of <code>analyst</code>, so she gets what <code>analyst</code> has.</figcaption>
+</figure>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">membership</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create role analysts nologin;
+create role maria login;
+grant analysts to maria;             -- maria is now a member of analysts
+revoke analysts from maria;          -- and no longer is</code></pre>
+</figure>
+
+<h2 id="inherit">4. INHERIT and SET ROLE</h2>
+
+<p>
+  Membership comes with two different mechanisms, and the difference matters when you debug a permission
+  error.
+</p>
+
+<ul>
+  <li><strong>INHERIT</strong> (the default): the member automatically uses the privileges of the groups it belongs to.</li>
+  <li><strong>NOINHERIT</strong>: the member does not use the group's privileges until it explicitly switches to the group with <code>SET ROLE</code>.</li>
+</ul>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">watch the group's privilege appear and disappear</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">-- Run this whole block once. If you run it again, first press “Reset data”.
+create role auditors nologin;
+grant usage on schema shop to auditors;
+grant select on shop.products to auditors;
+create role contractor login noinherit;
+grant auditors to contractor;
+
+-- Step 1: act as the contractor. Its own privileges are empty, so this fails.
+set role contractor;
+select count(*) as products_visible from shop.products;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  The playground stops at the first error, as <code>psql</code> does. Now run the second part in the same
+  playground (the first part has left the session in the <code>contractor</code> role, so start with
+  <code>reset role</code>):
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">step 2: switch to the group explicitly</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">reset role;
+set role auditors;
+select count(*) as products_visible from shop.products;
+reset role;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  Read step 1 carefully. <code>set role contractor</code> made the session act as <code>contractor</code>, but
+  <code>contractor</code> was created <code>NOINHERIT</code>, so it does not automatically use the group's
+  <code>SELECT</code>. In step 2, <code>set role auditors</code> switches to the group itself, and the privilege is
+  there. The error in step 1 is the permission system doing its job, not a bug.
+</p>
+
+<div class="note warn">
+  <span class="note-title">Membership is not a password check</span>
+  <p>
+    Membership lets you <em>act as</em> a role, not <em>log in as</em> it. Any member of a role may run
+    <code>SET ROLE</code> to it, so a login role that is a member of a powerful role inherits that power
+    whenever it chooses. Review memberships of powerful roles as carefully as you review the roles themselves.
+  </p>
+</div>
+
+<h2 id="who">5. Who is acting? current_user and session_user</h2>
+
+<p>
+  Two functions answer “who am I?”, and they differ after <code>SET ROLE</code>:
+</p>
+
+<ul>
+  <li><code>session_user</code> — the role that logged in on the connection. It does not change.</li>
+  <li><code>current_user</code> — the role whose privileges are used right now. <code>SET ROLE</code> changes it.</li>
+</ul>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">the difference</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select session_user, current_user;   -- postgres, postgres
+set role analysts;
+select session_user, current_user;   -- postgres, analysts
+reset role;</code></pre>
+</figure>
+
+<p>
+  Audit trails should record <code>session_user</code>, because it identifies the human or service that
+  connected. Permission checks use <code>current_user</code>. The <code>SET ROLE</code> example above is the
+  reason both exist.
+</p>
+
+<h2 id="hba">6. Logging in: pg_hba.conf</h2>
+
+<p>
+  Creating a login role does not, on its own, let anyone connect. Before it checks a password, the server
+  decides <em>whether a connection may use that method at all</em>, by reading <code>pg_hba.conf</code>
+  (host-based authentication). Each line says: for this kind of connection, this database, this role, from this
+  address, use this method. The first matching line wins.
+</p>
+
+<p>You can read the live rules from SQL, which is safer than opening the file in a container:</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">the rules the server is using right now</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select type, database, address, auth_method
+from pg_hba_file_rules
+order by rule_number;</code></pre>
+</figure>
+
+<p>
+  In the course container the image's defaults apply. Connections over the local socket or from
+  <code>127.0.0.1</code> use <code>trust</code>: no password is asked, which is why <code>./pg psql-as</code>
+  works without one. Connections from any other address use <code>scram-sha-256</code>, and a wrong password is
+  rejected. You can see this yourself: connecting over the container's network address with a wrong password fails
+  with <em>password authentication failed</em>.
+</p>
+
+<div class="note warn">
+  <span class="note-title">trust is for a laptop, never for a server</span>
+  <p>
+    <code>trust</code> means “let anyone in, no questions asked” for the matching addresses. It is the image's
+    convenience for the course. On a real server, every line that reaches the network should use
+    <code>scram-sha-256</code> (or a certificate method), and <code>trust</code> should not appear at all.
+  </p>
+</div>
+
+<p>
+  Passwords are stored as SCRAM-SHA-256 verifiers (<code>show password_encryption;</code> confirms the default).
+  A <code>LOGIN</code> role created without a password can still connect where <code>trust</code> applies, but it
+  cannot connect where a password method is required.
+</p>
+
+<div class="note tip">
+  <span class="note-title">Try it</span>
+  <p>
+    Create a role with a password, then try two connections: <code>./pg psql-as</code> (trusted, no prompt), and
+    the same role over the network address with a wrong password (rejected). Remove the role afterwards with
+    <code>./pg clean-roles</code>.
+  </p>
+</div>
+
+<h2 id="when">When to use, when not to</h2>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Situation</th><th class="wrap">✅ Do this</th><th class="wrap">❌ Not this</th></tr></thead>
+  <tbody>
+    <tr><td class="wrap">One application connects to the database</td><td class="wrap">One login role for the app, with only the privileges it needs</td><td class="wrap">Connect as <code>postgres</code></td></tr>
+    <tr><td class="wrap">Ten people need the same read access</td><td class="wrap">A group role holding the privileges, and ten login roles as members</td><td class="wrap">Grant to ten roles one at a time</td></tr>
+    <tr><td class="wrap">A reporting tool needs to read everything</td><td class="wrap">A read-only group role (<code>pg_read_all_data</code> is built in)</td><td class="wrap">A superuser account</td></tr>
+    <tr><td class="wrap">A developer wants to test as a restricted user</td><td class="wrap"><code>SET ROLE</code> in a transaction, or a dedicated login role</td><td class="wrap">Changing privileges on the owner role</td></tr>
+    <tr><td class="wrap">A password must expire</td><td class="wrap"><code>VALID UNTIL</code>, plus your secrets manager's rotation</td><td class="wrap">A calendar reminder</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="inspect">Inspect it</h2>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">which roles exist, and which are members of which</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select r.rolname as role, r.rolcanlogin as can_login, r.rolsuper as superuser,
+       coalesce(string_agg(g.rolname, ', '), '') as member_of
+from pg_roles r
+left join pg_auth_members m on m.member = r.oid
+left join pg_roles g on g.oid = m.roleid
+where r.rolname not like 'pg\_%'
+group by r.rolname, r.rolcanlogin, r.rolsuper
+order by r.rolname;</code></pre>
+</figure>
+
+<h2 id="exercises">Your turn</h2>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 1</span><span class="grow"></span><span class="lvl">basic</span></div>
+  <div class="ex-body">
+    <p>
+      Create a login role <code>lab_reader</code> that can read <code>shop.products</code> and nothing else. Give
+      it the schema privilege it needs too. Check it with <code>./pg check 03 1</code>.
+    </p>
+  </div>
+  {{stub 03 1}}
+  <details><summary>Hint</summary><p>A table is only reachable if the role can also use the schema it lives in.</p></details>
+  {{solution 03 1}}
+</section>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 2</span><span class="grow"></span><span class="lvl">intermediate</span></div>
+  <div class="ex-body">
+    <p>
+      Create a group role <code>lab_analysts</code> that cannot log in, and a login role <code>lab_maria</code> that
+      is a member of it. Give the group the privileges to read <code>shop.orders</code>. Check it with
+      <code>./pg check 03 2</code>.
+    </p>
+  </div>
+  {{stub 03 2}}
+  <details><summary>Hint</summary><p>Give the privileges to the group, not to <code>lab_maria</code>. Membership does the rest.</p></details>
+  {{solution 03 2}}
+</section>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 3</span><span class="grow"></span><span class="lvl">challenge</span></div>
+  <div class="ex-body">
+    <p>
+      Create a login role <code>lab_ops</code> that may create other roles, is not a superuser, cannot create
+      databases, and whose password expires on 2030-01-01. Check it with <code>./pg check 03 3</code>.
+    </p>
+  </div>
+  {{stub 03 3}}
+  <details><summary>Hint</summary><p>Several attributes can go on the same <code>create role</code> statement.</p></details>
+  {{solution 03 3}}
+</section>
+
+<h2 id="summary">Summary</h2>
+<ul>
+  <li>A role is the only account type. <code>LOGIN</code> makes it a user; without it, it is a group.</li>
+  <li>Attributes (<code>SUPERUSER</code>, <code>CREATEDB</code>, <code>CREATEROLE</code>, …) grant server-wide powers. Use the smallest set that works.</li>
+  <li>Grant privileges to group roles and add members to them, rather than granting to many people one by one.</li>
+  <li><code>INHERIT</code> applies a group's privileges automatically; <code>SET ROLE</code> switches to them explicitly.</li>
+  <li><code>session_user</code> is who connected; <code>current_user</code> is whose privileges count now.</li>
+  <li><code>pg_hba.conf</code> decides which authentication method a connection must pass; roles decide what it may do afterwards.</li>
+</ul>
+
+<h2 id="next">Looking ahead</h2>
+<p>
+  Roles can do nothing without privileges. <a href="04-privileges-and-grants.html">Lesson 4</a> covers
+  <code>GRANT</code> and <code>REVOKE</code> at every level, from the database down to a single column, and how
+  to audit what a role can actually reach.
+</p>

@@ -1,0 +1,768 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Text search and pattern matching &mdash; Learning PostgreSQL</title>
+<meta name="description" content="LIKE and its limits, full-text search, ranking, trigram similarity and which index serves each.">
+<link rel="stylesheet" href="../assets/css/course.css">
+</head>
+<body data-root="../" data-page="11-text-search">
+<a class="skip-link" href="#content">Skip to content</a>
+<header class="topbar">
+  <button class="icon-btn menu-btn" type="button" aria-label="Toggle navigation" aria-expanded="false" aria-controls="sidebar">&#9776;</button>
+  <a class="brand" href="../index.html"><span class="mark pgm">PG</span> Learning PostgreSQL <span class="sub">PostgreSQL 18</span></a>
+  <span class="spacer"></span>
+  <div class="search" role="search">
+    <span class="glyph" aria-hidden="true">&#9906;</span>
+    <input type="search" placeholder="Search the course&#8230;" aria-label="Search the course" autocomplete="off" spellcheck="false">
+    <kbd>/</kbd>
+    <div class="search-results" role="listbox"></div>
+  </div>
+  <nav class="topbar-links">
+    <a class="hide-sm" href="../appendices/d-glossary.html">Glossary</a>
+    <a class="hide-sm" href="../appendices/b-psql.html">psql</a>
+  </nav>
+  <button class="icon-btn theme-btn" type="button" aria-label="Toggle theme">&#9790;</button>
+</header>
+<div class="scrim"></div>
+<div class="shell">
+<nav class="sidebar" id="sidebar" aria-label="Course contents">
+  <h4>Start here</h4>
+  <ol>
+    <li><a href="../start/setup.html" data-page="setup"><span class="n">00</span><span>Set up your lab</span></a></li>
+  </ol>
+  <h4>Part 1 — Foundations: the server, databases, schemas and roles</h4>
+  <ol>
+    <li><a href="../lessons/01-architecture.html" data-page="01-architecture"><span class="n">01</span><span>How PostgreSQL is built</span></a></li>
+    <li><a href="../lessons/02-databases-and-schemas.html" data-page="02-databases-and-schemas"><span class="n">02</span><span>Databases and schemas</span></a></li>
+    <li><a href="../lessons/03-roles-and-users.html" data-page="03-roles-and-users"><span class="n">03</span><span>Roles and users</span></a></li>
+    <li><a href="../lessons/04-privileges-and-grants.html" data-page="04-privileges-and-grants"><span class="n">04</span><span>Privileges and grants</span></a></li>
+    <li><a href="../lessons/05-security-and-rls.html" data-page="05-security-and-rls"><span class="n">05</span><span>Hardening and row-level security</span></a></li>
+  </ol>
+  <h4>Part 2 — Modelling and SQL in depth</h4>
+  <ol>
+    <li><a href="../lessons/06-data-types.html" data-page="06-data-types"><span class="n">06</span><span>Data types</span></a></li>
+    <li><a href="../lessons/07-constraints-and-design.html" data-page="07-constraints-and-design"><span class="n">07</span><span>Constraints and schema design</span></a></li>
+    <li><a href="../lessons/08-advanced-queries.html" data-page="08-advanced-queries"><span class="n">08</span><span>Advanced queries</span></a></li>
+    <li><a href="../lessons/09-changing-data.html" data-page="09-changing-data"><span class="n">09</span><span>Changing data safely</span></a></li>
+    <li><a href="../lessons/10-json-and-arrays.html" data-page="10-json-and-arrays"><span class="n">10</span><span>JSONB and arrays</span></a></li>
+    <li><a href="../lessons/11-text-search.html" data-page="11-text-search"><span class="n">11</span><span>Text search and pattern matching</span></a></li>
+  </ol>
+  <h4>Part 3 — Performance</h4>
+  <ol>
+    <li><a href="../lessons/12-indexes.html" data-page="12-indexes"><span class="n">12</span><span>Indexes</span></a></li>
+    <li><a href="../lessons/13-explain-and-planner.html" data-page="13-explain-and-planner"><span class="n">13</span><span>EXPLAIN and the planner</span></a></li>
+    <li><a href="../lessons/14-query-tuning.html" data-page="14-query-tuning"><span class="n">14</span><span>A query-tuning workflow</span></a></li>
+  </ol>
+  <h4>Part 4 — Transactions and concurrency</h4>
+  <ol>
+    <li><a href="../lessons/15-transactions-and-mvcc.html" data-page="15-transactions-and-mvcc"><span class="n">15</span><span>Transactions and MVCC</span></a></li>
+    <li><a href="../lessons/16-locking.html" data-page="16-locking"><span class="n">16</span><span>Locking and concurrency</span></a></li>
+    <li><a href="../lessons/17-vacuum-and-bloat.html" data-page="17-vacuum-and-bloat"><span class="n">17</span><span>Vacuum, bloat and autovacuum</span></a></li>
+  </ol>
+  <h4>Part 5 — Programming the database</h4>
+  <ol>
+    <li><a href="../lessons/18-views-and-functions.html" data-page="18-views-and-functions"><span class="n">18</span><span>Views, functions and procedures</span></a></li>
+    <li><a href="../lessons/19-triggers-and-events.html" data-page="19-triggers-and-events"><span class="n">19</span><span>Triggers, LISTEN/NOTIFY and audit</span></a></li>
+    <li><a href="../lessons/20-partitioning.html" data-page="20-partitioning"><span class="n">20</span><span>Partitioning</span></a></li>
+  </ol>
+  <h4>Part 6 — Operating PostgreSQL</h4>
+  <ol>
+    <li><a href="../lessons/21-configuration.html" data-page="21-configuration"><span class="n">21</span><span>Configuration and tuning</span></a></li>
+    <li><a href="../lessons/22-wal-and-durability.html" data-page="22-wal-and-durability"><span class="n">22</span><span>WAL, checkpoints and durability</span></a></li>
+    <li><a href="../lessons/23-backup-and-recovery.html" data-page="23-backup-and-recovery"><span class="n">23</span><span>Backup, restore and PITR</span></a></li>
+    <li><a href="../lessons/24-replication.html" data-page="24-replication"><span class="n">24</span><span>Replication and high availability</span></a></li>
+    <li><a href="../lessons/25-monitoring.html" data-page="25-monitoring"><span class="n">25</span><span>Monitoring and diagnostics</span></a></li>
+    <li><a href="../lessons/26-connections-and-upgrades.html" data-page="26-connections-and-upgrades"><span class="n">26</span><span>Connections, pooling, extensions and upgrades</span></a></li>
+  </ol>
+  <h4>Part 7 — Putting it together</h4>
+  <ol>
+    <li><a href="../lessons/27-capstone.html" data-page="27-capstone"><span class="n">27</span><span>Capstone project</span></a></li>
+  </ol>
+  <h4>Annexes</h4>
+  <ol>
+    <li><a href="../appendices/a1-select-basics.html" data-page="a1-select-basics"><span class="n">A1</span><span>SELECT, filtering and sorting</span></a></li>
+    <li><a href="../appendices/a2-joins.html" data-page="a2-joins"><span class="n">A2</span><span>Joins and combining tables</span></a></li>
+    <li><a href="../appendices/a3-aggregation.html" data-page="a3-aggregation"><span class="n">A3</span><span>Aggregation and grouping</span></a></li>
+    <li><a href="../appendices/a4-subqueries-and-ctes.html" data-page="a4-subqueries-and-ctes"><span class="n">A4</span><span>Subqueries and CTEs</span></a></li>
+    <li><a href="../appendices/a5-ddl-and-dml.html" data-page="a5-ddl-and-dml"><span class="n">A5</span><span>Creating and changing things</span></a></li>
+    <li><a href="../appendices/b-psql.html" data-page="b-psql"><span class="n">B</span><span>psql cheat sheet</span></a></li>
+    <li><a href="../appendices/c-catalog-queries.html" data-page="c-catalog-queries"><span class="n">C</span><span>Catalog and diagnostic queries</span></a></li>
+    <li><a href="../appendices/d-glossary.html" data-page="d-glossary"><span class="n">D</span><span>Glossary</span></a></li>
+    <li><a href="../appendices/e-troubleshooting.html" data-page="e-troubleshooting"><span class="n">E</span><span>Troubleshooting</span></a></li>
+    <li><a href="../appendices/f-whats-next.html" data-page="f-whats-next"><span class="n">F</span><span>What to learn next</span></a></li>
+  </ol>
+</nav>
+<div class="main">
+<main class="content" id="content">
+<p class="eyebrow">Lesson 11 &middot; Part 2</p>
+<h1>Text search and pattern matching</h1>
+<div class="meta-row"><span class="tag">lesson 11</span><span class="tag">Docker exercises</span><span class="tag">live playground</span></div>
+<p class="lede">
+  Searching text is where <code>LIKE</code> stops being enough. This lesson shows what <code>LIKE</code> and
+  <code>ILIKE</code> can and cannot do with an index, how PostgreSQL's built-in full-text search turns words into
+  searchable stems and ranks the matches, how to store and index a search column, and how trigram similarity
+  finds names that are spelled a little wrong.
+</p>
+
+<h2 id="goals">Learning goals</h2>
+<ul>
+  <li>Say which <code>LIKE</code> patterns a B-tree index can serve, and fix a prefix search with <code>text_pattern_ops</code>.</li>
+  <li>Turn text into a <code>tsvector</code> and a search string into a <code>tsquery</code>, and match them with <code>@@</code>.</li>
+  <li>Choose between <code>to_tsquery</code>, <code>plainto_tsquery</code>, <code>phraseto_tsquery</code> and <code>websearch_to_tsquery</code>.</li>
+  <li>Explain stemming and stop words, and rank results with <code>ts_rank</code> and <code>ts_headline</code>.</li>
+  <li>Keep a <code>tsvector</code> in a generated column and serve it with a GIN index, and write a query the index can actually use.</li>
+  <li>Find similar strings with <code>pg_trgm</code> (<code>%</code>, <code>&lt;-&gt;</code>, <code>similarity()</code>) and index <code>ILIKE '%…%'</code> with it.</li>
+</ul>
+
+<h2 id="lab">Set up for this lesson</h2>
+<p>
+  Use the <code>shop</code> database for queries. The Docker shop has 500 products and 20 000 customers; the browser
+  playground has the same tables with 8 products and 8 customers, so counts differ between the two.
+  Several demos create indexes or install an extension. Run those in a throw-away copy so your practice database stays clean:
+</p>
+
+<figure class="code" data-lang="bash">
+  <figcaption><span class="path">terminal</span><span class="grow"></span><span class="lang">bash</span></figcaption>
+<pre><code>./pg sql "create database lab_text template shop_template" postgres
+./pg psql lab_text
+-- when you are finished:
+-- ./pg sql "drop database lab_text with (force)" postgres</code></pre>
+</figure>
+
+<div class="note warn">
+  <span class="note-title">The trigram part runs in Docker only</span>
+  <p>
+    <code>pg_trgm</code> is shipped with the PostgreSQL 18 Docker image, but the in-browser playground (PGlite) does
+    not load it. Playground boxes in this lesson therefore cover <code>LIKE</code> and full-text search only. Every
+    <code>pg_trgm</code> example is marked <strong>Docker only</strong> and its output comes from the Docker database.
+  </p>
+</div>
+
+<h2 id="like">1. LIKE, ILIKE and what they cannot do</h2>
+
+<p>
+  <code>LIKE</code> matches a string against a pattern. <code>%</code> stands for any run of characters (including none) and
+  <code>_</code> for exactly one character. <code>ILIKE</code> is the case-insensitive version, a PostgreSQL extension.
+  To match a literal <code>%</code> or <code>_</code>, put a backslash in front of it.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">LIKE, ILIKE, wildcards and the regular-expression operator</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select name,
+       name like 'Smart%'       as like_prefix,
+       name like 'smart%'       as like_wrong_case,
+       name ilike 'smart%'      as ilike_prefix,
+       name ilike '%kettle'     as ilike_suffix,
+       name ~* '^(smart|retro)' as regex
+from shop.products
+where name ilike '%kettle%'
+order by name;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  Two rows come back, <em>Retro kettle</em> and <em>Smart kettle</em>. Only <em>Smart kettle</em> matches
+  <code>like 'Smart%'</code>, and <code>like 'smart%'</code> is false for both because <code>LIKE</code> is case-sensitive.
+  The last column uses <code>~*</code>, the case-insensitive regular-expression match: more powerful, and with the same
+  indexing limits.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">the wildcard characters are special</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select 'a_b' like 'a_b'    as underscore_matches_itself,
+       'axb'  like 'a_b'    as underscore_matches_any_char,
+       'axb'  like 'a\_b'   as escaped_underscore,
+       '100%' like '100\%'  as escaped_percent;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  The output is <code>t</code>, <code>t</code>, <code>f</code>, <code>t</code>. The second column is the trap: an
+  unescaped <code>_</code> matches <em>any</em> character, so searching for a SKU or a file name with <code>_</code> in it
+  finds more than you meant. Escape user-supplied text before putting it in a pattern.
+</p>
+
+<h2 id="prefix">2. Which LIKE patterns can use an index</h2>
+
+<p>
+  A B-tree index stores values in sorted order, so it can find a <em>prefix</em> quickly. A pattern with a leading wildcard,
+  such as <code>'%anna%'</code>, has no known starting point, so a B-tree cannot help and the planner reads the whole table.
+  Even for a prefix pattern, a plain index is not enough in most databases. The course database uses the
+  <code>en_US.utf8</code> collation (the language-aware sort order), and a B-tree built with that order is not arranged
+  the way <code>LIKE 'anna%'</code> needs. The plans below are from the Docker database (20 000 customers):
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">plain index: prefix LIKE still scans the table</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create index customers_email_idx on shop.customers (email);
+
+explain select * from shop.customers where email like 'anna%';
+--  Seq Scan on customers  (cost=0.00..707.00 rows=808 width=133)
+--    Filter: (email ~~ 'anna%'::text)
+
+explain select * from shop.customers where email = 'anna.jansen2@example.com';
+--  Index Scan using customers_email_idx on customers  (cost=0.29..8.30 rows=1 width=133)</code></pre>
+</figure>
+
+<p>
+  The plain index serves equality but not the prefix. The fix is an index built with the operator class
+  <code>text_pattern_ops</code> (an <em>operator class</em> tells an index which comparison rules to use for a column).
+  It compares character by character, ignoring the collation, which is exactly what a prefix search needs.
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">text_pattern_ops makes the prefix searchable</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create index customers_email_pat on shop.customers (email text_pattern_ops);
+
+explain select * from shop.customers where email like 'anna%';
+--  Bitmap Heap Scan on customers  (cost=34.37..503.72 rows=808 width=133)
+--    Filter: (email ~~ 'anna%'::text)
+--    ->  Bitmap Index Scan on customers_email_pat  (cost=0.00..34.17 rows=988 width=0)
+--          Index Cond: ((email ~&gt;=~ 'anna'::text) AND (email ~&lt;~ 'annb'::text))
+
+explain select * from shop.customers where email like '%anna%';
+--  Seq Scan on customers  (cost=0.00..707.00 rows=808 width=133)</code></pre>
+</figure>
+
+<p>
+  Read the <code>Index Cond</code> line: the planner rewrote <code>like 'anna%'</code> into a range, "at least
+  <code>anna</code> and below <code>annb</code>", and the index answers that range. The leading-wildcard query is still a
+  sequential scan. The same limits apply to <code>ILIKE</code>; for a case-insensitive prefix, index the lowered value and
+  search the lowered value:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">case-insensitive prefix search</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create index customers_email_lower on shop.customers (lower(email) text_pattern_ops);
+
+explain select id from shop.customers where lower(email) like 'anna%';
+--  Bitmap Heap Scan on customers  (cost=5.31..248.99 rows=100 width=4)
+--    ->  Bitmap Index Scan on customers_email_lower
+--          Index Cond: ((lower(email) ~&gt;=~ 'anna'::text) AND (lower(email) ~&lt;~ 'annb'::text))</code></pre>
+</figure>
+
+<div class="note info">
+  <span class="note-title">This is also how you get case-insensitive text without an extension</span>
+  <p>
+    The <code>citext</code> extension adds a case-insensitive type. You do not need it: store the text as <code>text</code>,
+    and use an index on <code>lower(column)</code> (a unique one if the value must be unique ignoring case) and queries on
+    <code>lower(column)</code>. The index and the query must use the same expression, or the planner will not connect them.
+  </p>
+</div>
+
+<p>
+  When you need <code>%word%</code> anywhere in the text, or typo tolerance, you need a different kind of index. That is
+  what the rest of the lesson is about.
+</p>
+
+<h2 id="fts">3. Full-text search: documents and queries</h2>
+
+<p>
+  <strong>Full-text search</strong> matches <em>meanings of words</em> rather than characters. Two types do the work:
+</p>
+<ul>
+  <li>A <code>tsvector</code> is a document reduced to a sorted list of normalised words (<em>lexemes</em>) with their positions.</li>
+  <li>A <code>tsquery</code> is a search expression over lexemes, combined with <code>&amp;</code> (and), <code>|</code> (or), <code>!</code> (not) and <code>&lt;-&gt;</code> (followed by).</li>
+</ul>
+<p>
+  The operator <code>@@</code> asks "does this document match this query?". Four functions build a <code>tsquery</code>
+  from text; they differ in how forgiving they are:
+</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Function</th><th>Input style</th><th>Use it for</th></tr></thead>
+  <tbody>
+    <tr><td><code>to_tsquery</code></td><td class="wrap">Query syntax: <code>quick &amp; fox</code>, prefix <code>kett:*</code></td><td class="wrap">Queries you write yourself. Raises an error on bad syntax.</td></tr>
+    <tr><td><code>plainto_tsquery</code></td><td class="wrap">Plain words, all combined with AND</td><td class="wrap">Simple "all of these words" boxes.</td></tr>
+    <tr><td><code>phraseto_tsquery</code></td><td class="wrap">Plain words that must appear next to each other, in order</td><td class="wrap">Exact phrases.</td></tr>
+    <tr><td><code>websearch_to_tsquery</code></td><td class="wrap">Search-engine syntax: <code>"quoted phrase"</code>, <code>or</code>, <code>-excluded</code></td><td class="wrap">Text typed by users. Never raises a syntax error.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">one document, four ways to build a query</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select to_tsvector('english', 'The quick brown foxes were jumping over the lazy dogs') as document,
+       to_tsquery('english', 'quick &amp; fox')                    as to_tsquery,
+       plainto_tsquery('english', 'quick brown fox')           as plainto,
+       websearch_to_tsquery('english', '"quick fox" -lazy or dog') as websearch;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>The output, exactly as the engine prints it:</p>
+<ul>
+  <li>document: <code>'brown':3 'dog':10 'fox':4 'jump':6 'lazi':9 'quick':2</code></li>
+  <li>to_tsquery: <code>'quick' &amp; 'fox'</code></li>
+  <li>plainto: <code>'quick' &amp; 'brown' &amp; 'fox'</code></li>
+  <li>websearch: <code>'quick' &lt;-&gt; 'fox' &amp; !'lazi' | 'dog'</code></li>
+</ul>
+<p>
+  Look at what happened to the document. <em>foxes</em> became <code>fox</code>, <em>jumping</em> became <code>jump</code>,
+  <em>lazy</em> became <code>lazi</code>. The words <em>the</em>, <em>were</em> and <em>over</em> are gone. The numbers are positions
+  in the original text (which is why <code>&lt;-&gt;</code> can ask for neighbouring words). The next section explains why.
+</p>
+
+<div class="note warn">
+  <span class="note-title">to_tsquery is not for user input</span>
+  <p>
+    <code>to_tsquery('english', 'quick fox')</code> (two words, no operator) fails with
+    <em>syntax error in tsquery: "quick fox"</em>, and so does any stray quote, parenthesis or <code>&amp;</code>.
+    Pass text typed by users to <code>websearch_to_tsquery</code> or <code>plainto_tsquery</code>; both accept anything.
+    For example <code>websearch_to_tsquery('english', 'quick "fox &amp; (')</code> quietly becomes <code>'quick' &amp; 'fox'</code>.
+  </p>
+</div>
+
+<h2 id="stemming">4. Configurations, stemming and stop words</h2>
+
+<p>
+  A <strong>text search configuration</strong> decides how text is split into words and normalised. The
+  <code>english</code> configuration does two things:
+</p>
+<ul>
+  <li><strong>Stemming</strong> cuts a word to its root, so <em>kettle</em> and <em>kettles</em>, or <em>clean</em> and <em>cleaning</em>, become the same lexeme. The root need not be a real word (<code>lazi</code>).</li>
+  <li><strong>Stop words</strong> are very common words (<em>the</em>, <em>and</em>, <em>of</em>) that are dropped because they match everything.</li>
+</ul>
+<p>
+  The <code>simple</code> configuration does neither: it only lowercases. <code>pg_ts_config</code> lists the configurations
+  the server has (<code>english</code>, <code>dutch</code>, <code>german</code>, and many more). The configuration is part of the
+  data: build the document and the query with the <em>same</em> configuration.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">stemming, stop words, and what ILIKE misses</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select to_tsvector('english', 'The foxes') @@ to_tsquery('english', 'fox') as english_match,
+       to_tsvector('simple',  'The foxes') @@ to_tsquery('simple',  'fox') as simple_match,
+       to_tsvector('english', 'the and of')                                as only_stop_words,
+       (select count(*) from shop.products
+         where description ilike '%cleaning%')                              as ilike_cleaning,
+       (select count(*) from shop.products
+         where to_tsvector('english', description) @@ plainto_tsquery('english', 'cleaning')) as fts_cleaning;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  <code>english_match</code> is true and <code>simple_match</code> is false: without stemming, <em>foxes</em> is not <em>fox</em>.
+  <code>only_stop_words</code> is an empty vector. In the mini seed, the only description with the word is
+  <em>"Easy to clean, rechargeable."</em>: <code>ilike_cleaning</code> is 0 because the text says <em>clean</em>, and
+  <code>fts_cleaning</code> is 1 because stemming connects <em>cleaning</em> to <em>clean</em>.
+</p>
+
+<div class="note tip">
+  <span class="note-title">See why a word did or did not match</span>
+  <p>
+    <code>ts_debug('english', 'The foxes jumped')</code> shows, for each token, which dictionary handled it, and the lexeme
+    it produced (empty for a stop word). Reach for it before guessing.
+  </p>
+</div>
+
+<h3>Phrases and prefixes</h3>
+<p>
+  <code>phraseto_tsquery('english', 'cat sat')</code> matches "the cat sat" but not "cat the sat", because stop words still
+  occupy a position and the words must be adjacent. For "starts with", use a prefix match in a <code>to_tsquery</code>:
+  <code>to_tsquery('english', 'kettl:*')</code> matches <em>kettle</em> and <em>kettles</em>. Write the prefix as a stem,
+  not a full word: <code>kettle:*</code> is stemmed to <code>kettl:*</code> first, but a prefix like <code>kett:*</code> also
+  works since it is a prefix of the stem.
+</p>
+
+<h2 id="rank">5. Ranking and highlighting</h2>
+
+<p>
+  Matching is yes or no. <code>ts_rank</code> turns "how well does it match" into a number (higher is better), based on how
+  often the query lexemes occur. <code>ts_headline</code> returns a snippet of the original text with the matches wrapped
+  in <code>&lt;b&gt;</code> tags. Both take the <em>query</em> as an argument, so a common pattern is to put the query in the
+  <code>FROM</code> clause once and use it three times.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">rank, order and highlight</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select id, name,
+       round(ts_rank(to_tsvector('english', name || ' ' || description), q)::numeric, 4) as rank,
+       ts_headline('english', description, q) as snippet
+from shop.products,
+     websearch_to_tsquery('english', 'kettle') as q
+where to_tsvector('english', name || ' ' || description) @@ q
+order by rank desc, id;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  Two kettles match. <em>Smart kettle</em> ranks 0.0760 and <em>Retro kettle</em> 0.0608, and the headline for the first is
+  <code>A &lt;b&gt;kettle&lt;/b&gt; with a temperature setting.</code> For the second, the word <em>kettle</em> is only in the
+  name, which the headline did not look at, so you get an unmarked snippet of the description. A headline is computed only
+  from the text you pass it.
+</p>
+
+<div class="note info">
+  <span class="note-title">Rank numbers are relative</span>
+  <p>
+    Use rank only to order results of the same query. Do not compare numbers across queries or set a fixed cut-off.
+    <code>ts_rank_cd</code> is a variant that also rewards matched words being close together. Calling
+    <code>ts_headline</code> on every candidate row is slow: apply it only to the few rows you actually show (for example,
+    after a <code>LIMIT</code>, in an outer query).
+  </p>
+</div>
+
+<h2 id="stored">6. A stored search column and a GIN index</h2>
+
+<p>
+  Calling <code>to_tsvector</code> in every query rebuilds the document for every row, and no index can help. Instead, compute
+  it once into a column and index that column. A <strong>generated column</strong> is a column PostgreSQL computes from other
+  columns on every insert or update, so it can never be out of date. A <strong>GIN index</strong> (<em>generalised inverted
+  index</em>) stores, for each lexeme, the list of rows that contain it, which is exactly what text search needs.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">add the column, then search it (press “Reset data” to run this box again)</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">alter table shop.products add column if not exists search tsvector generated always as (
+  setweight(to_tsvector('english', name), 'A') ||
+  setweight(to_tsvector('english', description), 'B')
+) stored;
+
+select id, name, round(ts_rank(search, q)::numeric, 4) as rank
+from shop.products,
+     websearch_to_tsquery('english', 'quiet headphones') as q
+where search @@ q
+order by rank desc, id;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  <code>setweight</code> labels lexemes with a weight from <code>A</code> (most important) to <code>D</code>. Here a hit in the
+  product name counts more than a hit in the description, and <code>ts_rank</code> takes the weights into account. The
+  one row returned is <em>Premium headphones</em>, with rank 0.7541. Look at one stored value to see the weights
+  (<code>select search from shop.products where id = 2</code>):
+  <code>'ear':8B 'headphon':2A,9B 'over-ear':6B 'premium':1A 'quiet':3B 'reliabl':5B</code>.
+</p>
+
+<p>On the Docker database (500 products), add the index and look at the plan:</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">a GIN index on the stored column</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create index products_search_idx on shop.products using gin (search);
+
+explain select id from shop.products
+where search @@ websearch_to_tsquery('english', 'kitchen lightweight');
+--  Bitmap Heap Scan on products  (cost=12.94..16.95 rows=1 width=4)
+--    Recheck Cond: (search @@ '''kitchen'' &amp; ''lightweight'''::tsquery)
+--    ->  Bitmap Index Scan on products_search_idx  (cost=0.00..12.94 rows=1 width=0)
+
+explain select id from shop.products
+where to_tsvector('english', description) @@ websearch_to_tsquery('english', 'kitchen lightweight');
+--  Seq Scan on products  (cost=0.00..163.25 rows=1 width=4)
+--    Filter: (to_tsvector('english'::regconfig, description) @@ '''kitchen'' &amp; ''lightweight'''::tsquery)</code></pre>
+</figure>
+
+<p>
+  The first query uses the index. The second asks the same question about a different expression, so the planner ignores
+  the index and scans the table. This is the most common full-text mistake, and it is silent: both queries return rows.
+</p>
+
+<div class="note warn">
+  <span class="note-title">The index only helps queries written the same way</span>
+  <p>
+    A GIN index on <code>search</code> serves <code>search @@ …</code>. It does not serve
+    <code>to_tsvector('english', description) @@ …</code> (a different expression) and it does not serve a query that
+    uses <code>'simple'</code> or another configuration than the one that built the column. If you index an expression
+    instead (<code>create index … using gin (to_tsvector('english', description))</code>), the query must repeat that expression
+    with the configuration written out as a literal.
+  </p>
+</div>
+
+<div class="note danger">
+  <span class="note-title">Generated columns and indexes need immutable expressions</span>
+  <p>
+    A generated column or an index expression must be <em>immutable</em>: same input, same output, always.
+    <code>to_tsvector('english', description)</code> is immutable because the configuration is a fixed literal.
+    <code>to_tsvector(description)</code>, which reads the session's <code>default_text_search_config</code>, is not, and
+    <code>create table t (d text, v tsvector generated always as (to_tsvector(d)) stored)</code> fails with
+    <em>generation expression is not immutable</em>. Always write the configuration name.
+    If the search document must combine other tables, a generated column cannot read them; use a trigger
+    (<a href="19-triggers-and-events.html">lesson 19</a>) that sets a plain <code>tsvector</code> column instead.
+  </p>
+</div>
+
+<h2 id="trigram">7. Trigram similarity with pg_trgm (Docker only)</h2>
+
+<p>
+  Full-text search compares word roots. It cannot find <em>Jansn</em> when the data says <em>Jansen</em>, and it does not search inside
+  words. A <strong>trigram</strong> is a group of three consecutive characters; the extension <code>pg_trgm</code> compares strings by
+  how many trigrams they share. Its similarity score runs from 0 (nothing in common) to 1 (identical).
+</p>
+
+<div class="note warn">
+  <span class="note-title">Docker only</span>
+  <p>
+    The in-browser playground cannot load <code>pg_trgm</code>, so there is no playground box in this section. Run the code in the
+    <code>lab_text</code> copy of the database from the set-up section. Outputs below come from that Docker database.
+  </p>
+</div>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">install and try the functions (Docker only)</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create extension pg_trgm;
+
+select show_trgm('cat');
+--  {"  c"," ca","at ",cat}
+
+select similarity('Jansen', 'Jansn')       as similarity,   -- 0.44444445
+       'Jansen' % 'Jansn'                  as similar_enough, -- t
+       'Jansen' &lt;-&gt; 'Jansn'                as distance,     -- 0.5555556  (1 - similarity)
+       word_similarity('jansn', 'Anna Jansen') as word_sim;  -- 0.6666667</code></pre>
+</figure>
+
+<p>
+  <code>show_trgm('cat')</code> shows that a string is padded with two spaces in front and one behind before it is cut into
+  trigrams. The operator <code>%</code> is true when <code>similarity()</code> is above the setting
+  <code>pg_trgm.similarity_threshold</code> (default <code>0.3</code>). <code>&lt;-&gt;</code> is the distance, <code>1 - similarity</code>.
+  <code>word_similarity</code> compares the first string against the best-matching part of the second, which suits a short search word
+  against a long text.
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">find the customer despite the typo (Docker only)</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select distinct full_name, round(similarity(full_name, 'Anna Jansn')::numeric, 3) as sim
+from shop.customers
+where full_name % 'Anna Jansn'
+order by sim desc, full_name
+limit 5;
+--   full_name  |  sim
+--  Anna Jansen | 0.643
+--  Anna Jacobs | 0.438
+--  Anna Bos    | 0.333
+--  Anna Kok    | 0.333
+--  Anna Vos    | 0.333</code></pre>
+</figure>
+
+<h3>Indexes for trigrams</h3>
+<p>
+  The big win: a trigram index serves <code>LIKE</code> and <code>ILIKE</code> with a <em>leading wildcard</em>, plus the
+  <code>%</code> operator. The operator class <code>gin_trgm_ops</code> goes with a GIN index.
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">GIN trigram index (Docker only)</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create index customers_name_trgm on shop.customers using gin (full_name gin_trgm_ops);
+
+explain analyze select id from shop.customers where full_name ilike '%vries%';
+--  Bitmap Heap Scan on customers  (actual time=0.082..0.469 rows=981.00 loops=1)
+--    Recheck Cond: (full_name ~~* '%vries%'::text)
+--    ->  Bitmap Index Scan on customers_name_trgm  (actual time=0.057..0.057 rows=981.00 loops=1)
+--  Execution Time: 0.500 ms
+
+explain select id from shop.customers where full_name ilike '%vr%';
+--  Seq Scan on customers  (cost=0.00..707.00 rows=1088 width=4)</code></pre>
+</figure>
+
+<p>
+  The timing is from one run on the course machine; yours will differ. The second query has only two letters, which gives the index
+  too little to work with, so the planner scans the table. Trigram search needs at least three useful characters.
+</p>
+
+<p>
+  A GIN trigram index answers "which rows match" but cannot sort by closeness. For "give me the 5 nearest names" use a GiST index
+  (<code>gist_trgm_ops</code>), which supports <code>order by full_name &lt;-&gt; 'Anna Jansn' limit 5</code> as an index scan. With only
+  the GIN index, that same query reads and sorts all 20 000 rows.
+</p>
+
+<div class="note warn">
+  <span class="note-title">Pitfalls with trigrams</span>
+  <p>
+    <code>%</code> uses the similarity threshold of the session, so the same query returns different rows after
+    <code>set pg_trgm.similarity_threshold = 0.5</code>. A trigram index is big (here 512 kB for 20 000 short names) and slows writes,
+    so index only the columns you search. Case and accents matter to similarity as the characters are compared, not their meaning.
+  </p>
+</div>
+
+<h2 id="choose">8. Choosing the right tool</h2>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>You want to…</th><th>Use</th><th>Index</th></tr></thead>
+  <tbody>
+    <tr><td class="wrap">Match the start of a value (<code>email like 'anna%'</code>)</td><td><code>LIKE</code></td><td class="wrap">B-tree with <code>text_pattern_ops</code></td></tr>
+    <tr><td class="wrap">Match ignoring case</td><td><code>lower(col)</code></td><td class="wrap">B-tree on <code>lower(col)</code></td></tr>
+    <tr><td class="wrap">Find documents about some words, with ranking</td><td>Full-text search</td><td class="wrap">GIN on a <code>tsvector</code></td></tr>
+    <tr><td class="wrap">Find text anywhere inside a value (<code>'%vries%'</code>)</td><td><code>ILIKE</code> + <code>pg_trgm</code></td><td class="wrap">GIN with <code>gin_trgm_ops</code></td></tr>
+    <tr><td class="wrap">Tolerate typos, "did you mean"</td><td><code>%</code>, <code>similarity()</code></td><td class="wrap">GIN or GiST trigram</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="when">When to use, when not to</h2>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Situation</th><th class="wrap">✅ Do this</th><th class="wrap">❌ Not this</th></tr></thead>
+  <tbody>
+    <tr><td class="wrap">Look up a customer by the start of an email</td><td class="wrap"><code>text_pattern_ops</code> index and <code>LIKE 'x%'</code></td><td class="wrap"><code>LIKE '%x%'</code> on a big table with only a B-tree</td></tr>
+    <tr><td class="wrap">Search box over product names and descriptions</td><td class="wrap">Stored <code>tsvector</code>, GIN index, <code>websearch_to_tsquery</code></td><td class="wrap"><code>description ILIKE '%' || :q || '%'</code></td></tr>
+    <tr><td class="wrap">User-typed search text</td><td class="wrap"><code>websearch_to_tsquery</code> or <code>plainto_tsquery</code></td><td class="wrap"><code>to_tsquery</code> on raw input</td></tr>
+    <tr><td class="wrap">Names that may contain typos</td><td class="wrap"><code>pg_trgm</code> similarity</td><td class="wrap">Full-text search (it compares roots, not spelling)</td></tr>
+    <tr><td class="wrap">Searching many languages, fuzzy relevance tuning, facets</td><td class="wrap">A dedicated search engine, fed from PostgreSQL</td><td class="wrap">Stretching <code>ts_rank</code> to do everything</td></tr>
+    <tr><td class="wrap">Search document built from several tables</td><td class="wrap">A trigger-maintained <code>tsvector</code> column</td><td class="wrap">A generated column (it can read only its own row)</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="inspect">Inspect it</h2>
+
+<p>Which search tools does this server have, and how does a sentence become lexemes?</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">configurations, extensions and a token-by-token view</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>show default_text_search_config;
+
+select name, installed_version
+from pg_available_extensions
+where name in ('pg_trgm', 'unaccent')
+order by name;
+
+select alias, token, lexemes
+from ts_debug('english', 'The foxes jumped')
+where alias &lt;&gt; 'blank';</code></pre>
+</figure>
+
+<h2 id="exercises">Your turn</h2>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 1</span><span class="grow"></span><span class="lvl">basic</span></div>
+  <div class="ex-body">
+    <p>
+      List the products whose <em>description</em> matches the full-text query <code>quiet reliable</code> (the
+      <code>english</code> configuration; both words must match). Return the columns <code>id</code> and <code>name</code>,
+      ordered by <code>id</code>.
+    </p>
+    <p>Open <code>exercises/11/1.sql</code>, write your answer, then run <code>./pg check 11 1</code>.</p>
+  </div>
+  <figure class="code" data-lang="sql">
+  <figcaption><span class="path">exercises/11/1.sql</span><span class="grow"></span><span class="lang">your starting file</span></figcaption>
+<pre><code>-- List the products whose description matches the full-text query 'quiet reliable'
+-- (use the english configuration; both words must match). Return the columns
+-- id and name, ordered by id. Run ./pg check 11 1 when you are done.</code></pre>
+</figure>
+  <details><summary>Hint</summary><p>Build the document with <code>to_tsvector('english', description)</code> and the query with <code>plainto_tsquery</code>, and join them with <code>@@</code>.</p></details>
+  <details class="solution"><summary>Show a model solution for exercise 1 (try first!)</summary>
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">solutions/11/1.sql</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>-- ordered
+select id, name
+from shop.products
+where to_tsvector('english', description) @@ plainto_tsquery('english', 'quiet reliable')
+order by id;</code></pre>
+</figure>
+</details>
+</section>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 2</span><span class="grow"></span><span class="lvl">intermediate</span></div>
+  <div class="ex-body">
+    <p>
+      Add a column <code>search</code> to <code>shop.products</code>: a <code>tsvector</code> that PostgreSQL keeps up to date
+      itself, built from <code>name</code> and <code>description</code> with the <code>english</code> configuration. Then create a
+      GIN index on it called <code>products_search_idx</code>.
+    </p>
+    <p>Open <code>exercises/11/2.sql</code>, write your answer, then run <code>./pg check 11 2</code>.</p>
+  </div>
+  <figure class="code" data-lang="sql">
+  <figcaption><span class="path">exercises/11/2.sql</span><span class="grow"></span><span class="lang">your starting file</span></figcaption>
+<pre><code>-- Add a column called search to shop.products: a tsvector that PostgreSQL keeps
+-- up to date by itself, built from name and description with the english
+-- configuration. Then create a GIN index on it called products_search_idx.
+-- Run ./pg check 11 2 when you are done.</code></pre>
+</figure>
+  <details><summary>Hint</summary><p>Use <code>generated always as (…) stored</code>. Concatenate two <code>tsvector</code> values with <code>||</code>, and write <code>'english'</code> as a literal in each <code>to_tsvector</code> call.</p></details>
+  <details class="solution"><summary>Show a model solution for exercise 2 (try first!)</summary>
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">solutions/11/2.sql</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>alter table shop.products
+  add column search tsvector generated always as (
+    setweight(to_tsvector('english', name), 'A') ||
+    setweight(to_tsvector('english', description), 'B')
+  ) stored;
+
+create index products_search_idx on shop.products using gin (search);</code></pre>
+</figure>
+</details>
+</section>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 3</span><span class="grow"></span><span class="lvl">challenge</span></div>
+  <div class="ex-body">
+    <p>
+      Install <code>pg_trgm</code>, create a GIN trigram index called <code>customers_full_name_trgm</code> on
+      <code>shop.customers (full_name)</code>, and create a function <code>shop.find_customers(q text)</code> that returns
+      <code>(id integer, full_name text, sim real)</code>: the customers whose <code>full_name</code> is similar to
+      <code>q</code> (the <code>%</code> operator), best match first, then lowest <code>id</code>.
+    </p>
+    <p>Open <code>exercises/11/3.sql</code>, write your answer, then run <code>./pg check 11 3</code>.</p>
+  </div>
+  <figure class="code" data-lang="sql">
+  <figcaption><span class="path">exercises/11/3.sql</span><span class="grow"></span><span class="lang">your starting file</span></figcaption>
+<pre><code>-- Install pg_trgm, put a GIN trigram index called customers_full_name_trgm on
+-- shop.customers (full_name), and create a function shop.find_customers(q text)
+-- that returns (id integer, full_name text, sim real): the customers whose
+-- full_name is similar to q (the % operator), best match first, then lowest id.
+-- Run ./pg check 11 3 when you are done.</code></pre>
+</figure>
+  <details><summary>Hint</summary><p>A <code>language sql</code> function with <code>returns table (…)</code> can be a single <code>select … where full_name % q order by 3 desc, 1</code>. Name the output columns in the <code>returns table</code> list.</p></details>
+  <details class="solution"><summary>Show a model solution for exercise 3 (try first!)</summary>
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">solutions/11/3.sql</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create extension pg_trgm;
+
+create index customers_full_name_trgm on shop.customers using gin (full_name gin_trgm_ops);
+
+create function shop.find_customers(q text)
+returns table (id integer, full_name text, sim real)
+language sql stable
+as $$
+  select c.id, c.full_name, similarity(c.full_name, q)
+  from shop.customers c
+  where c.full_name % q
+  order by 3 desc, 1
+$$;</code></pre>
+</figure>
+</details>
+</section>
+
+<h2 id="summary">Summary</h2>
+<ul>
+  <li>A B-tree can serve <code>LIKE 'abc%'</code> only if it is built with <code>text_pattern_ops</code>; a leading <code>%</code> always scans.</li>
+  <li>For case-insensitive matching, index and query <code>lower(column)</code>; no extension needed.</li>
+  <li>Full-text search turns text into stemmed lexemes (<code>tsvector</code>) and searches them with a <code>tsquery</code> and <code>@@</code>. Use <code>websearch_to_tsquery</code> for user input.</li>
+  <li><code>ts_rank</code> orders matches, <code>ts_headline</code> highlights them; compute headlines only for the rows you show.</li>
+  <li>Store the document in a generated <code>tsvector</code> column with an explicit configuration, and put a GIN index on it. Queries must use that column, or the index is ignored.</li>
+  <li><code>pg_trgm</code> (Docker only here) finds similar strings and indexes <code>ILIKE '%…%'</code>; it needs at least three useful characters.</li>
+</ul>
+
+<h2 id="next">Looking ahead</h2>
+<p>
+  You used GIN, B-tree and GiST indexes in this lesson without comparing them. <a href="12-indexes.html">Lesson 12</a> covers every
+  index type, composite, partial and expression indexes, and what each one costs on writes.
+</p>
+<div class="lesson-done" data-lesson="11-text-search"></div>
+<nav class="pager"><a class="prev" href="../lessons/10-json-and-arrays.html"><span class="dir">Previous</span><span class="lbl">10 · JSONB and arrays</span></a><a class="next" href="../lessons/12-indexes.html"><span class="dir">Next</span><span class="lbl">12 · Indexes</span></a></nav>
+</main>
+<aside class="toc" aria-label="On this page"></aside>
+</div>
+</div>
+<script src="../assets/js/search-index.js"></script>
+<script src="../assets/js/mini-seed.js"></script>
+<script src="../assets/js/course.js"></script>
+</body>
+</html>

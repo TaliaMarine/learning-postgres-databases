@@ -1,0 +1,936 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hardening and row-level security &mdash; Learning PostgreSQL</title>
+<meta name="description" content="A least-privilege layout for an application, the public schema trap, row-level security, SECURITY DEFINER and passwords.">
+<link rel="stylesheet" href="../assets/css/course.css">
+</head>
+<body data-root="../" data-page="05-security-and-rls">
+<a class="skip-link" href="#content">Skip to content</a>
+<header class="topbar">
+  <button class="icon-btn menu-btn" type="button" aria-label="Toggle navigation" aria-expanded="false" aria-controls="sidebar">&#9776;</button>
+  <a class="brand" href="../index.html"><span class="mark pgm">PG</span> Learning PostgreSQL <span class="sub">PostgreSQL 18</span></a>
+  <span class="spacer"></span>
+  <div class="search" role="search">
+    <span class="glyph" aria-hidden="true">&#9906;</span>
+    <input type="search" placeholder="Search the course&#8230;" aria-label="Search the course" autocomplete="off" spellcheck="false">
+    <kbd>/</kbd>
+    <div class="search-results" role="listbox"></div>
+  </div>
+  <nav class="topbar-links">
+    <a class="hide-sm" href="../appendices/d-glossary.html">Glossary</a>
+    <a class="hide-sm" href="../appendices/b-psql.html">psql</a>
+  </nav>
+  <button class="icon-btn theme-btn" type="button" aria-label="Toggle theme">&#9790;</button>
+</header>
+<div class="scrim"></div>
+<div class="shell">
+<nav class="sidebar" id="sidebar" aria-label="Course contents">
+  <h4>Start here</h4>
+  <ol>
+    <li><a href="../start/setup.html" data-page="setup"><span class="n">00</span><span>Set up your lab</span></a></li>
+  </ol>
+  <h4>Part 1 — Foundations: the server, databases, schemas and roles</h4>
+  <ol>
+    <li><a href="../lessons/01-architecture.html" data-page="01-architecture"><span class="n">01</span><span>How PostgreSQL is built</span></a></li>
+    <li><a href="../lessons/02-databases-and-schemas.html" data-page="02-databases-and-schemas"><span class="n">02</span><span>Databases and schemas</span></a></li>
+    <li><a href="../lessons/03-roles-and-users.html" data-page="03-roles-and-users"><span class="n">03</span><span>Roles and users</span></a></li>
+    <li><a href="../lessons/04-privileges-and-grants.html" data-page="04-privileges-and-grants"><span class="n">04</span><span>Privileges and grants</span></a></li>
+    <li><a href="../lessons/05-security-and-rls.html" data-page="05-security-and-rls"><span class="n">05</span><span>Hardening and row-level security</span></a></li>
+  </ol>
+  <h4>Part 2 — Modelling and SQL in depth</h4>
+  <ol>
+    <li><a href="../lessons/06-data-types.html" data-page="06-data-types"><span class="n">06</span><span>Data types</span></a></li>
+    <li><a href="../lessons/07-constraints-and-design.html" data-page="07-constraints-and-design"><span class="n">07</span><span>Constraints and schema design</span></a></li>
+    <li><a href="../lessons/08-advanced-queries.html" data-page="08-advanced-queries"><span class="n">08</span><span>Advanced queries</span></a></li>
+    <li><a href="../lessons/09-changing-data.html" data-page="09-changing-data"><span class="n">09</span><span>Changing data safely</span></a></li>
+    <li><a href="../lessons/10-json-and-arrays.html" data-page="10-json-and-arrays"><span class="n">10</span><span>JSONB and arrays</span></a></li>
+    <li><a href="../lessons/11-text-search.html" data-page="11-text-search"><span class="n">11</span><span>Text search and pattern matching</span></a></li>
+  </ol>
+  <h4>Part 3 — Performance</h4>
+  <ol>
+    <li><a href="../lessons/12-indexes.html" data-page="12-indexes"><span class="n">12</span><span>Indexes</span></a></li>
+    <li><a href="../lessons/13-explain-and-planner.html" data-page="13-explain-and-planner"><span class="n">13</span><span>EXPLAIN and the planner</span></a></li>
+    <li><a href="../lessons/14-query-tuning.html" data-page="14-query-tuning"><span class="n">14</span><span>A query-tuning workflow</span></a></li>
+  </ol>
+  <h4>Part 4 — Transactions and concurrency</h4>
+  <ol>
+    <li><a href="../lessons/15-transactions-and-mvcc.html" data-page="15-transactions-and-mvcc"><span class="n">15</span><span>Transactions and MVCC</span></a></li>
+    <li><a href="../lessons/16-locking.html" data-page="16-locking"><span class="n">16</span><span>Locking and concurrency</span></a></li>
+    <li><a href="../lessons/17-vacuum-and-bloat.html" data-page="17-vacuum-and-bloat"><span class="n">17</span><span>Vacuum, bloat and autovacuum</span></a></li>
+  </ol>
+  <h4>Part 5 — Programming the database</h4>
+  <ol>
+    <li><a href="../lessons/18-views-and-functions.html" data-page="18-views-and-functions"><span class="n">18</span><span>Views, functions and procedures</span></a></li>
+    <li><a href="../lessons/19-triggers-and-events.html" data-page="19-triggers-and-events"><span class="n">19</span><span>Triggers, LISTEN/NOTIFY and audit</span></a></li>
+    <li><a href="../lessons/20-partitioning.html" data-page="20-partitioning"><span class="n">20</span><span>Partitioning</span></a></li>
+  </ol>
+  <h4>Part 6 — Operating PostgreSQL</h4>
+  <ol>
+    <li><a href="../lessons/21-configuration.html" data-page="21-configuration"><span class="n">21</span><span>Configuration and tuning</span></a></li>
+    <li><a href="../lessons/22-wal-and-durability.html" data-page="22-wal-and-durability"><span class="n">22</span><span>WAL, checkpoints and durability</span></a></li>
+    <li><a href="../lessons/23-backup-and-recovery.html" data-page="23-backup-and-recovery"><span class="n">23</span><span>Backup, restore and PITR</span></a></li>
+    <li><a href="../lessons/24-replication.html" data-page="24-replication"><span class="n">24</span><span>Replication and high availability</span></a></li>
+    <li><a href="../lessons/25-monitoring.html" data-page="25-monitoring"><span class="n">25</span><span>Monitoring and diagnostics</span></a></li>
+    <li><a href="../lessons/26-connections-and-upgrades.html" data-page="26-connections-and-upgrades"><span class="n">26</span><span>Connections, pooling, extensions and upgrades</span></a></li>
+  </ol>
+  <h4>Part 7 — Putting it together</h4>
+  <ol>
+    <li><a href="../lessons/27-capstone.html" data-page="27-capstone"><span class="n">27</span><span>Capstone project</span></a></li>
+  </ol>
+  <h4>Annexes</h4>
+  <ol>
+    <li><a href="../appendices/a1-select-basics.html" data-page="a1-select-basics"><span class="n">A1</span><span>SELECT, filtering and sorting</span></a></li>
+    <li><a href="../appendices/a2-joins.html" data-page="a2-joins"><span class="n">A2</span><span>Joins and combining tables</span></a></li>
+    <li><a href="../appendices/a3-aggregation.html" data-page="a3-aggregation"><span class="n">A3</span><span>Aggregation and grouping</span></a></li>
+    <li><a href="../appendices/a4-subqueries-and-ctes.html" data-page="a4-subqueries-and-ctes"><span class="n">A4</span><span>Subqueries and CTEs</span></a></li>
+    <li><a href="../appendices/a5-ddl-and-dml.html" data-page="a5-ddl-and-dml"><span class="n">A5</span><span>Creating and changing things</span></a></li>
+    <li><a href="../appendices/b-psql.html" data-page="b-psql"><span class="n">B</span><span>psql cheat sheet</span></a></li>
+    <li><a href="../appendices/c-catalog-queries.html" data-page="c-catalog-queries"><span class="n">C</span><span>Catalog and diagnostic queries</span></a></li>
+    <li><a href="../appendices/d-glossary.html" data-page="d-glossary"><span class="n">D</span><span>Glossary</span></a></li>
+    <li><a href="../appendices/e-troubleshooting.html" data-page="e-troubleshooting"><span class="n">E</span><span>Troubleshooting</span></a></li>
+    <li><a href="../appendices/f-whats-next.html" data-page="f-whats-next"><span class="n">F</span><span>What to learn next</span></a></li>
+  </ol>
+</nav>
+<div class="main">
+<main class="content" id="content">
+<p class="eyebrow">Lesson 05 &middot; Part 1</p>
+<h1>Hardening and row-level security</h1>
+<div class="meta-row"><span class="tag">lesson 05</span><span class="tag">Docker exercises</span><span class="tag">live playground</span></div>
+<p class="lede">
+  A database is secure when each role can do its job and nothing more. This lesson puts the earlier lessons
+  together into a layout you can copy for a real application: one role that owns the tables, one that the
+  application uses, one for reporting. Then it adds the sharper tools: row-level security, functions that run
+  with their owner's rights, and passwords.
+</p>
+
+<h2 id="goals">Learning goals</h2>
+<ul>
+  <li>Lay out three roles for an application (owner, app, read-only) and explain why the app must not own its tables.</li>
+  <li>Make new tables pick up the right privileges automatically with default privileges.</li>
+  <li>Read the <code>public</code> schema's access list on PostgreSQL 18 and say what is, and is not, still a risk.</li>
+  <li>Turn on row-level security, write <code>USING</code> and <code>WITH CHECK</code> policies, and explain who bypasses them.</li>
+  <li>Write a <code>SECURITY DEFINER</code> function that cannot be hijacked through <code>search_path</code>.</li>
+  <li>Explain how passwords are stored, and what <code>pg_hba.conf</code> does with them in the course container.</li>
+</ul>
+
+<h2 id="lab">Set up for this lesson</h2>
+<p>
+  The playgrounds on this page use the small in-browser shop. For the Docker commands, use the <code>shop</code>
+  database for read-only queries, and create a scratch copy for anything that changes objects:
+</p>
+
+<figure class="code" data-lang="bash">
+  <figcaption><span class="path">terminal</span><span class="grow"></span><span class="lang">bash</span></figcaption>
+<pre><code>./pg up
+./pg sql "create database lab_scratch05 template shop_template" postgres
+./pg psql lab_scratch05</code></pre>
+</figure>
+
+<p>
+  A database whose name starts with <code>lab_</code> is removed by the checker's cleanup, so you cannot leave a mess.
+  Every role in this lesson is named <code>lab_05_…</code> for the same reason. When you finish, drop the scratch
+  database with <code>./pg sql "drop database lab_scratch05 with (force)" postgres</code>.
+</p>
+
+<div class="note info">
+  <span class="note-title">Roles are cluster-wide</span>
+  <p>
+    A role you create while connected to the scratch database exists in every database of the server, as
+    <a href="03-roles-and-users.html">lesson 3</a> explained. Its <em>privileges</em>, however, are stored per database.
+    When you drop a role that has privileges in a database, run <code>drop owned by …</code> in that database first.
+  </p>
+</div>
+
+<h2 id="layout">1. A least-privilege layout: owner, app, read-only</h2>
+
+<p>
+  <em>Least privilege</em> means giving each role only the rights it needs. For one application, three roles cover
+  almost every case:
+</p>
+
+<figure class="dia">
+  <div class="dia-hold">
+    <svg class="d" viewBox="0 0 860 330" role="img" aria-labelledby="lay-t lay-d">
+      <title id="lay-t">Three roles: an owner that owns the tables, an app role that changes data, and a read-only role</title>
+      <desc id="lay-d">The owner role owns schema shop and its tables and never logs in. The app role has SELECT, INSERT, UPDATE and DELETE on those tables. The read-only role has SELECT only. Neither can change the tables themselves.</desc>
+      <defs>
+        <marker id="lm" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z"/></marker>
+      </defs>
+      <rect class="box accent" x="270" y="20" width="320" height="86" rx="8"/>
+      <text class="hd ctr" x="430" y="52">lab_05_owner</text>
+      <text class="lbl ctr" x="430" y="74">owns schema shop and every table</text>
+      <text class="lbl ctr" x="430" y="94">nologin · used only for migrations</text>
+      <rect class="box teal" x="30" y="200" width="330" height="86" rx="8"/>
+      <text class="hd ctr" x="195" y="232">lab_05_app</text>
+      <text class="lbl ctr" x="195" y="254">the application · login</text>
+      <text class="lbl ctr" x="195" y="274">SELECT, INSERT, UPDATE, DELETE</text>
+      <rect class="box teal" x="500" y="200" width="330" height="86" rx="8"/>
+      <text class="hd ctr" x="665" y="232">lab_05_ro</text>
+      <text class="lbl ctr" x="665" y="254">reporting · group role</text>
+      <text class="lbl ctr" x="665" y="274">SELECT only</text>
+      <path class="line" d="M195 200 L360 110" marker-end="url(#lm)"/>
+      <path class="line" d="M665 200 L500 110" marker-end="url(#lm)"/>
+      <text class="mut tiny" x="430" y="170" text-anchor="middle">both are granted privileges on what the owner owns</text>
+    </svg>
+  </div>
+  <figcaption>Ownership sits with a role nobody logs in as. The roles that connect hold grants, never ownership.</figcaption>
+</figure>
+
+<ul>
+  <li><strong>Owner</strong> (<code>nologin</code>): owns the schema and the tables. Only schema migrations run as the owner (an administrator uses <code>SET ROLE</code> to it, or a separate migration login is made a member of it).</li>
+  <li><strong>App</strong> (<code>login</code>): what the application connects as. It reads and writes rows. It does not change the shape of anything.</li>
+  <li><strong>Read-only</strong> (<code>nologin</code> group): reporting and BI tools. People or tools get a login role that is a member of it.</li>
+</ul>
+
+<p>
+  Why must the app not own its tables? In PostgreSQL the owner can always <code>ALTER</code>, <code>DROP</code> and
+  <code>TRUNCATE</code> the table and can grant it to others, whatever has been granted or revoked. An application
+  that owns its tables turns a SQL injection bug into <code>drop table</code>. Try it in the playground. It builds the layout on
+  <code>shop.products</code> and then prints what each role may do.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">build the three roles on one table · run once, then press “Reset data” to run it again</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">-- Reset data first if you have run this before.
+create role lab_05_owner nologin;       -- owns the tables, never logs in
+create role lab_05_app login;           -- the application: data changes only
+create role lab_05_ro nologin;          -- group role for reporting: read only
+
+alter table shop.products owner to lab_05_owner;
+grant usage on schema shop to lab_05_app, lab_05_ro;
+grant select, insert, update, delete on shop.products to lab_05_app;
+grant select on shop.products to lab_05_ro;
+
+select r.role,
+       has_table_privilege(r.role, 'shop.products', 'select')   as can_select,
+       has_table_privilege(r.role, 'shop.products', 'update')   as can_update,
+       has_table_privilege(r.role, 'shop.products', 'truncate') as can_truncate
+from (values ('lab_05_owner'), ('lab_05_app'), ('lab_05_ro')) as r(role)
+order by r.role;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  The owner can do everything, <code>lab_05_app</code> changes rows but cannot <code>TRUNCATE</code>, and
+  <code>lab_05_ro</code> can only read. (<code>has_table_privilege</code> answers “may this role do this?”;
+  <a href="04-privileges-and-grants.html">lesson 4</a> uses it for auditing.) Now act as the application:
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">step 2: the app role at work</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">set role lab_05_app;
+select count(*) as products_visible from shop.products;
+reset role;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>Reading works. Now let the “application” try something it has no business doing:</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">step 3: an error on purpose</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">reset role;
+set role lab_05_app;
+drop table shop.products;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  The error is <code>must be owner of table products</code>. Because the app does not own the table, dropping it is
+  refused, as is <code>ALTER TABLE</code>. The playground stops at the first error, as <code>psql</code> does, so an
+  intentional error goes last.
+</p>
+
+<h2 id="defaults">2. New tables: default privileges</h2>
+
+<p>
+  <code>grant … on all tables in schema shop</code> covers the tables that exist <em>today</em>. A table created next
+  month has no grants, and the app fails with “permission denied” after the next deployment. The fix is to say, once,
+  what every future table created by the owner should get. This is <code>ALTER DEFAULT PRIVILEGES</code>
+  (<a href="04-privileges-and-grants.html">lesson 4</a> explains it in depth). Run this in your scratch database:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">the whole layout on the real shop schema</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create role lab_05_owner nologin;
+create role lab_05_app login password 'lab-only';
+create role lab_05_ro nologin;
+
+alter schema shop owner to lab_05_owner;
+grant usage on schema shop to lab_05_app, lab_05_ro;
+
+-- tables that exist today
+grant select, insert, update, delete on all tables in schema shop to lab_05_app;
+grant select on all tables in schema shop to lab_05_ro;
+
+-- tables the owner creates from now on
+alter default privileges for role lab_05_owner in schema shop
+  grant select, insert, update, delete on tables to lab_05_app;
+alter default privileges for role lab_05_owner in schema shop
+  grant select on tables to lab_05_ro;
+alter default privileges for role lab_05_owner in schema shop
+  grant usage on sequences to lab_05_app;</code></pre>
+</figure>
+
+<p>
+  The tables you already have are still owned by <code>postgres</code>. To make them match the layout, change
+  their owner with <code>ALTER TABLE … OWNER TO lab_05_owner</code> (one statement per table, and the sequences
+  that belong to identity columns follow automatically). After that, a table the owner creates is usable at once:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">proof that defaults work (what we saw: app can insert, ro can only select)</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>set role lab_05_owner;
+create table shop.coupons (id integer generated always as identity primary key, code text);
+reset role;
+
+select has_table_privilege('lab_05_app', 'shop.coupons', 'insert') as app_insert,
+       has_table_privilege('lab_05_ro',  'shop.coupons', 'select') as ro_select,
+       has_table_privilege('lab_05_ro',  'shop.coupons', 'insert') as ro_insert;</code></pre>
+</figure>
+
+<p>This returns <code>t</code>, <code>t</code>, <code>f</code>: the app may insert, the reporting role may read, and may not write.</p>
+
+<div class="note warn">
+  <span class="note-title">Default privileges belong to the creator</span>
+  <p>
+    <code>ALTER DEFAULT PRIVILEGES FOR ROLE lab_05_owner</code> only affects objects created <em>by</em>
+    <code>lab_05_owner</code>. If a migration runs as <code>postgres</code> instead, the new table gets nothing. Run
+    migrations as the owner role (<code>SET ROLE lab_05_owner</code>), or repeat the statement for each creator.
+  </p>
+</div>
+
+<h2 id="public">3. The public schema, on PostgreSQL 18</h2>
+
+<p>
+  Older tutorials warn that “anyone can create tables in <code>public</code>”. That was true until PostgreSQL 14. From
+  version 15 on, a normal role cannot create objects in <code>public</code>. Read the access list yourself instead of
+  trusting a blog post, including this one:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">who may do what in schema public</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select nspname, pg_get_userbyid(nspowner) as owner, nspacl
+from pg_namespace
+where nspname = 'public';</code></pre>
+</figure>
+
+<p>In the course container, and in a new PostgreSQL 18 database, the answer is:</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>nspname</th><th>owner</th><th>nspacl</th></tr></thead>
+  <tbody>
+    <tr><td>public</td><td>pg_database_owner</td><td class="wrap"><code>{pg_database_owner=UC/pg_database_owner,=U/pg_database_owner}</code></td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>
+  Read each item as <code>grantee=privileges/grantor</code>. The first says the database owner has <code>U</code>
+  (USAGE) and <code>C</code> (CREATE). The second has an <em>empty</em> grantee, which means <code>PUBLIC</code>
+  (everybody): USAGE only. So everybody can look up names in <code>public</code>, and only the database owner can create
+  there. The special role <code>pg_database_owner</code> is a placeholder that means “whoever owns the current database”.
+</p>
+
+<div class="note danger">
+  <span class="note-title">The trap has moved, not gone</span>
+  <p>
+    Three things can still bite you. (1) A database restored or upgraded from an old version keeps its old access list,
+    where <code>PUBLIC</code> had <code>CREATE</code>. Run the query above on every database. (2) The default
+    <code>search_path</code> is <code>"$user", public</code>, so <code>public</code> is searched by everyone. Any
+    schema where untrusted roles <em>can</em> create objects can shadow the names you meant, which is exactly how the
+    function attack in the next sections works. (3) Granting <code>CREATE</code> on a schema to the app role to “make a
+    migration work” brings the problem back. <a href="02-databases-and-schemas.html">Lesson 2</a> explains
+    <code>search_path</code> and the <code>public</code> schema in detail.
+  </p>
+</div>
+
+<h2 id="rls">4. Row-level security</h2>
+
+<p>
+  Privileges decide which <em>tables</em> a role may touch. <em>Row-level security</em> (RLS) decides which
+  <em>rows</em> of that table it sees or changes. One table can hold every tenant's or every agent's rows, and the database itself
+  enforces who sees what, even when the application has a bug.
+</p>
+
+<p>RLS has three parts:</p>
+<ol>
+  <li><code>ALTER TABLE … ENABLE ROW LEVEL SECURITY</code> turns it on for a table.</li>
+  <li><code>CREATE POLICY</code> adds a rule. <code>USING (…)</code> says which existing rows are visible, and for <code>UPDATE</code>/<code>DELETE</code>, which can be touched. <code>WITH CHECK (…)</code> says which new or changed rows are allowed to be written.</li>
+  <li>A role that is not exempt (next sections) is then limited to what the policies allow.</li>
+</ol>
+
+<p>
+  The next playground builds a <code>tickets</code> table where each row belongs to the role that created it, turns
+  RLS on and, deliberately, adds no policy yet:
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">RLS on, no policy · run once, “Reset data” to repeat</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">-- Reset data first if you have run this before.
+create table shop.tickets (
+  id         integer generated always as identity primary key,
+  owner_name text not null default current_user,
+  subject    text not null
+);
+insert into shop.tickets (owner_name, subject) values
+  ('lab_05_alice', 'Lost parcel'), ('lab_05_alice', 'Wrong size'), ('lab_05_bob', 'Refund please');
+
+create role lab_05_alice login;
+create role lab_05_bob login;
+grant usage on schema shop to lab_05_alice, lab_05_bob;
+grant select, insert, update, delete on shop.tickets to lab_05_alice, lab_05_bob;
+
+alter table shop.tickets enable row level security;   -- switched on, but no policy yet
+
+set role lab_05_alice;
+select count(*) as rows_alice_can_see from shop.tickets;
+reset role;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  The answer is <strong>0</strong>. With RLS on and no policy, PostgreSQL applies <em>default deny</em>: nobody who is
+  subject to RLS sees any row. That is the safe failure mode. Add a policy that lets each role see its own rows:
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">step 2: a policy for both reading and writing</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">create policy own_rows on shop.tickets
+  using (owner_name = current_user)
+  with check (owner_name = current_user);
+
+set role lab_05_alice;
+select id, owner_name, subject from shop.tickets order by id;
+reset role;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  <code>lab_05_alice</code> sees her two rows and not Bob's. The same policy has a <code>WITH CHECK</code> part, which
+  stops her writing a row for someone else. Last step, an attempt to do that (it fails, so it goes last):
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">step 3: WITH CHECK refuses the write</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">reset role;
+set role lab_05_alice;
+insert into shop.tickets (owner_name, subject) values ('lab_05_bob', 'sneaky');</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  The error is <code>new row violates row-level security policy for table "tickets"</code>. Some behaviour worth
+  knowing, all seen in the course container with the same policy:
+</p>
+
+<ul>
+  <li><strong>Reading and filtering is silent.</strong> An <code>UPDATE</code> or <code>DELETE</code> aimed at somebody else's row does not fail: it reports <code>UPDATE 0</code> or <code>DELETE 0</code>, because the row is invisible to you.</li>
+  <li><strong>Writing a forbidden row is loud.</strong> An <code>INSERT</code>, or an <code>UPDATE</code> that would hand your row to someone else, is rejected by <code>WITH CHECK</code>.</li>
+  <li><strong>One policy per command is possible.</strong> <code>CREATE POLICY … FOR SELECT | INSERT | UPDATE | DELETE</code> lets reading follow one rule and writing another. <code>FOR ALL</code> (the default) covers all four. <code>INSERT</code> policies take only <code>WITH CHECK</code>.</li>
+  <li><strong>Several permissive policies are OR-ed.</strong> A row passes if any policy allows it. Add <code>AS RESTRICTIVE</code> to make a policy that must <em>also</em> pass.</li>
+</ul>
+
+<h3>Who is exempt from RLS?</h3>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Role</th><th>Subject to policies?</th><th class="wrap">Notes</th></tr></thead>
+  <tbody>
+    <tr><td class="wrap">A normal role with grants</td><td>yes</td><td class="wrap">The case RLS is for.</td></tr>
+    <tr><td class="wrap">The table owner</td><td>no, by default</td><td class="wrap"><code>ALTER TABLE … FORCE ROW LEVEL SECURITY</code> applies the policies to the owner as well.</td></tr>
+    <tr><td class="wrap">A role with <code>BYPASSRLS</code></td><td>no</td><td class="wrap">Intended for backup and reporting roles. We saw such a role read every row.</td></tr>
+    <tr><td class="wrap">A superuser</td><td>no, always</td><td class="wrap">Even with <code>FORCE</code>. But after <code>SET ROLE</code> to a normal role, you are subject to its policies, which is how the playgrounds above work.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="note warn">
+  <span class="note-title">Test as the role, not as postgres</span>
+  <p>
+    When you test a policy while connected as <code>postgres</code> you see every row, and the policy looks broken or
+    useless. Use <code>SET ROLE some_role</code> (as the playground does) or <code>./pg psql-as some_role</code>.
+    A table that has policies but is owned by the role your app connects as is also not protected. This is another
+    reason for the owner/app split in section 1.
+  </p>
+</div>
+
+<h3>Tenant ids with current_setting</h3>
+
+<p>
+  A web application usually connects as one database role for all its users, so <code>current_user</code> cannot
+  tell tenants apart. A common pattern is to pass the tenant id as a custom setting at the start of each transaction
+  and to compare it in the policy:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">a per-tenant policy driven by a setting</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create table shop.notes (id int, tenant_id int, body text);
+alter table shop.notes enable row level security;
+create policy tenant on shop.notes
+  using (tenant_id = nullif(current_setting('app.tenant_id', true), '')::int);
+
+-- in the application, at the start of each transaction:
+select set_config('app.tenant_id', '10', true);   -- true = only for this transaction</code></pre>
+</figure>
+
+<p>
+  <code>current_setting(name, true)</code> returns NULL instead of an error when the setting was never set, so a
+  session that forgot to set it sees <strong>0 rows</strong>, not everything. With a few rows for tenants 10 and 20, we saw
+  0 rows before <code>set_config</code> and the right 2 rows after it.
+</p>
+
+<div class="note danger">
+  <span class="note-title">A setting is not a credential</span>
+  <p>
+    Any session that can run SQL as the app role can also run <code>set_config('app.tenant_id', '20', …)</code>. This
+    pattern protects against bugs in the application (a forgotten <code>WHERE</code>), not against an attacker who
+    already has SQL access as that role. When the user must be unable to cross tenants, give each user their own
+    database role and use <code>current_user</code>. Use <code>set_config(…, true)</code> (transaction-local) so a
+    pooled connection does not keep the previous user's value.
+  </p>
+</div>
+
+<h2 id="definer">5. SECURITY DEFINER and search_path</h2>
+
+<p>
+  A normal function runs with the privileges of the role that calls it. A <code>SECURITY DEFINER</code> function runs
+  with the privileges of the role that <em>owns</em> it. That is useful: you can let a role get one narrow answer from a
+  table it cannot read. It is also dangerous, because the function now executes caller-influenced code with the owner's
+  power. The weak point is <code>search_path</code>, the list of schemas used to resolve a name like
+  <code>refund_staff</code> that is not written as <code>schema.name</code>. The caller chooses their own
+  <code>search_path</code>, and the function inherits it.
+</p>
+
+<p>
+  This three-step demonstration uses a function that answers “may this person approve refunds?”. First the honest
+  version, with three roles: the function owner, a clerk who is on the list, and Mallory who is not:
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">step 1: the function works · run once, “Reset data” to repeat</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">-- Reset data first if you have run this before.
+create role lab_05_definer nologin;
+create role lab_05_clerk login;
+create role lab_05_mallory login;
+grant usage on schema shop to lab_05_definer, lab_05_clerk, lab_05_mallory;
+
+create table shop.refund_staff (name text primary key);
+insert into shop.refund_staff values ('lab_05_clerk');
+alter table shop.refund_staff owner to lab_05_definer;
+
+set search_path = shop;     -- so the unqualified name below resolves while we create the function
+create function shop.can_refund(who text) returns boolean
+  language sql security definer
+  as $$ select exists (select 1 from refund_staff where name = who) $$;
+reset search_path;
+alter function shop.can_refund(text) owner to lab_05_definer;
+
+set role lab_05_mallory;
+set search_path = shop;
+select shop.can_refund('lab_05_clerk') as clerk, shop.can_refund('lab_05_mallory') as mallory;
+reset search_path;
+reset role;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  The clerk gets <code>true</code>, Mallory <code>false</code>. Notice two details: the function body says
+  <code>refund_staff</code> without a schema, and the function owner needed <code>USAGE</code> on schema
+  <code>shop</code> to find the table. Now Mallory creates her own schema, in which she <em>can</em> create tables,
+  puts a look-alike table in it, and calls the function with her own <code>search_path</code>:
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">step 2: the hijack</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">create schema lab_05_sandbox authorization lab_05_mallory;      -- a schema the caller controls
+
+set role lab_05_mallory;
+create table lab_05_sandbox.refund_staff (name text);
+insert into lab_05_sandbox.refund_staff values ('lab_05_mallory');
+grant usage on schema lab_05_sandbox to public;
+grant select on lab_05_sandbox.refund_staff to public;
+
+set search_path = lab_05_sandbox, shop;                    -- the caller chooses the search_path
+select shop.can_refund('lab_05_mallory') as mallory_after_hijack;
+reset search_path;
+reset role;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  Mallory is now an approved refund clerk: <code>mallory_after_hijack</code> is <code>true</code>. The function looked up
+  <code>refund_staff</code> in <code>lab_05_sandbox</code> first, found her fake table, and trusted it. (She made her
+  schema readable to everybody. An attacker has to do this, because the function runs as its owner, who must be able to
+  see the schema.) The fix has two parts, both in the function definition: <strong>pin the function's own
+  <code>search_path</code></strong> and <strong>qualify every name</strong>.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">step 3: the fix</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">create or replace function shop.can_refund(who text) returns boolean
+  language sql security definer
+  set search_path = pg_catalog, pg_temp
+  as $$ select exists (select 1 from shop.refund_staff where name = who) $$;
+
+set role lab_05_mallory;
+set search_path = lab_05_sandbox, shop;
+select shop.can_refund('lab_05_mallory') as mallory, shop.can_refund('lab_05_clerk') as clerk;
+reset search_path;
+reset role;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  Mallory is rejected again (<code>false</code>) and the clerk still passes (<code>true</code>), even though Mallory's
+  session still uses the hostile <code>search_path</code>. The setting <code>pg_catalog, pg_temp</code> keeps the built-in
+  schema first and puts the temporary-table schema last. That is deliberate: by default PostgreSQL searches
+  <code>pg_temp</code> <em>first</em>, so any role could shadow a name with a temporary table.
+</p>
+
+<div class="note warn">
+  <span class="note-title">Checklist for every SECURITY DEFINER function</span>
+  <ul>
+    <li>Put <code>SET search_path = pg_catalog, pg_temp</code> in the definition.</li>
+    <li>Schema-qualify every table, function and operator the body uses (<code>shop.refund_staff</code>).</li>
+    <li>Give it a dedicated owner with only the privileges the function needs. Never make a superuser own it.</li>
+    <li>Remember that new functions are executable by <code>PUBLIC</code>. <code>revoke execute on function … from public</code>, then grant it to the roles that need it.</li>
+    <li>Treat the arguments as untrusted input, exactly like application input.</li>
+  </ul>
+</div>
+
+<h2 id="passwords">6. Passwords and pg_hba.conf</h2>
+
+<p>
+  A password is checked only if <code>pg_hba.conf</code> says that method applies to the connection
+  (<a href="03-roles-and-users.html">lesson 3</a> introduced the file). First look at the rules the course container
+  really has. This is worth doing in Docker rather than in the browser, because the browser engine has its own rules:
+</p>
+
+<figure class="code" data-lang="bash">
+  <figcaption><span class="path">terminal</span><span class="grow"></span><span class="lang">bash</span></figcaption>
+<pre><code>./pg sql "select rule_number, type, database, user_name, address, auth_method
+          from pg_hba_file_rules order by rule_number"</code></pre>
+</figure>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>rule_number</th><th>type</th><th>database</th><th>user_name</th><th>address</th><th>auth_method</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td>local</td><td>{all}</td><td>{all}</td><td></td><td><strong>trust</strong></td></tr>
+    <tr><td>2</td><td>host</td><td>{all}</td><td>{all}</td><td>127.0.0.1</td><td><strong>trust</strong></td></tr>
+    <tr><td>3</td><td>host</td><td>{all}</td><td>{all}</td><td>::1</td><td><strong>trust</strong></td></tr>
+    <tr><td>4-6</td><td colspan="5" class="wrap">the same three, for the <code>replication</code> pseudo-database</td></tr>
+    <tr><td>7</td><td>host</td><td>{all}</td><td>{all}</td><td>all</td><td><strong>scram-sha-256</strong></td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>
+  The first matching line wins. A connection through the local socket or the loopback addresses
+  (<code>127.0.0.1</code>, <code>::1</code>) matches a <code>trust</code> line, so no password is asked. Anything else
+  (rule 7, for example another container, or the container's own network address) must give a valid
+  <code>scram-sha-256</code> password. Create a role with a password and a role without one, and try both ways:
+</p>
+
+<figure class="code" data-lang="bash">
+  <figcaption><span class="path">terminal</span><span class="grow"></span><span class="lang">bash</span></figcaption>
+<pre><code>./pg sql "create role lab_05_pw login password 'lab-only' valid until '2030-01-01'" postgres
+./pg sql "create role lab_05_nopw login" postgres
+
+# over the container's network address: rule 7, password required
+./pg exec bash -c 'IP=$(hostname -i | cut -d" " -f1)
+  PGPASSWORD=wrong    psql -h $IP -U lab_05_pw   -d shop -Atc "select current_user"
+  PGPASSWORD=lab-only psql -h $IP -U lab_05_pw   -d shop -Atc "select current_user"
+  PGPASSWORD=x        psql -h $IP -U lab_05_nopw -d shop -Atc "select current_user"
+  # over loopback: rule 2, trust, no password asked
+  psql -h 127.0.0.1 -U lab_05_nopw -d shop -Atc "select current_user"'</code></pre>
+</figure>
+
+<p>This is what we saw:</p>
+<ul>
+  <li>Wrong password for <code>lab_05_pw</code>: <code>FATAL: password authentication failed for user "lab_05_pw"</code>.</li>
+  <li>Right password: it prints <code>lab_05_pw</code>.</li>
+  <li><code>lab_05_nopw</code> over the network address (any password): <em>password authentication failed</em>, because the role has no stored password to match.</li>
+  <li><code>lab_05_nopw</code> over loopback: it prints <code>lab_05_nopw</code>. <code>trust</code> never looked at a password at all.</li>
+</ul>
+
+<p>
+  Passwords are never stored in readable form. With the default <code>password_encryption = scram-sha-256</code>, the
+  server stores a salted <em>verifier</em>, not the password:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">what is stored (superuser only)</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select rolname, left(rolpassword, 19) as stored, rolvaliduntil
+from pg_authid where rolname = 'lab_05_pw';
+select rolname, rolpassword from pg_roles where rolname = 'lab_05_pw';</code></pre>
+</figure>
+
+<p>
+  The first query returns a value starting with <code>SCRAM-SHA-256$4096:</code> (the number is the iteration count),
+  followed by random-looking salt and keys, and the expiry <code>2030-01-01</code>. The second shows
+  <code>********</code>: the view <code>pg_roles</code> hides the verifier from everyone. Clean up with
+  <code>./pg sql "drop role lab_05_pw" postgres</code> and the same for <code>lab_05_nopw</code>.
+</p>
+
+<div class="note danger">
+  <span class="note-title">No secrets in SQL files</span>
+  <p>
+    The password <code>lab-only</code> in this course is acceptable because the container exists only on your machine.
+    A real password in a <code>.sql</code> file ends up in Git history, in the server log (when statement logging is on) and in <code>psql</code>'s history. In real systems, set passwords with the
+    <code>\password rolename</code> command in <code>psql</code>, which hashes the password on your side and sends only the verifier,
+    or take them from a secrets manager at deploy time. And rotate them: <code>VALID UNTIL</code> is the database's half of
+    that story.
+  </p>
+</div>
+
+<div class="note warn">
+  <span class="note-title">trust on the network</span>
+  <p>
+    The image's <code>trust</code> lines are limited to the machine itself, which is why they are acceptable here. A
+    <code>trust</code> line for an address range that other machines can reach means anyone who can reach the port can
+    become any role, including <code>postgres</code>. A real server needs <code>scram-sha-256</code> (or a certificate
+    method) on every line that matches network connections, plus a firewall.
+  </p>
+</div>
+
+<div class="note info">
+  <span class="note-title">Superusers and the other bypasses</span>
+  <p>
+    A superuser ignores grants and row-level security, and <code>BYPASSRLS</code> skips policies only. Keep both rare, and
+    know who has them. The first query under “Inspect it” lists them.
+  </p>
+</div>
+
+<h2 id="when">When to use, when not to</h2>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Situation</th><th class="wrap">✅ Do this</th><th class="wrap">❌ Not this</th></tr></thead>
+  <tbody>
+    <tr><td class="wrap">An application needs read and write access</td><td class="wrap">A login role with DML grants on tables owned by a separate <code>nologin</code> owner</td><td class="wrap">Connect as the owner, or as <code>postgres</code>, so migrations and the app share one account</td></tr>
+    <tr><td class="wrap">New tables must be usable after each migration</td><td class="wrap"><code>ALTER DEFAULT PRIVILEGES FOR ROLE owner</code>, and migrations run as the owner</td><td class="wrap">Re-run <code>GRANT ALL</code> by hand after each deploy</td></tr>
+    <tr><td class="wrap">Each user (or agent) may see only their own rows</td><td class="wrap">RLS with a <code>current_user</code> policy, tested with <code>SET ROLE</code></td><td class="wrap">Trust every query in the application to remember <code>WHERE owner = …</code></td></tr>
+    <tr><td class="wrap">A web app with one shared connection role and many tenants</td><td class="wrap">RLS with <code>set_config(…, true)</code> as defence in depth against forgotten filters</td><td class="wrap">Treat the setting as protection against an attacker with SQL access</td></tr>
+    <tr><td class="wrap">A role must get one narrow fact from a table it cannot read</td><td class="wrap">A <code>SECURITY DEFINER</code> function with a pinned <code>search_path</code>, qualified names and restricted <code>EXECUTE</code></td><td class="wrap">A definer function with no <code>SET search_path</code>, executable by everyone</td></tr>
+    <tr><td class="wrap">A reporting tool needs every row of an RLS table</td><td class="wrap">A dedicated role with <code>BYPASSRLS</code>, or a separate policy for it</td><td class="wrap">Make it a superuser</td></tr>
+    <tr><td class="wrap">Some columns (not rows) must stay hidden from a role</td><td class="wrap">Column privileges or a view (<a href="04-privileges-and-grants.html">lesson 4</a>)</td><td class="wrap">RLS: it filters rows, not columns</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="inspect">Inspect it</h2>
+
+<p>
+  Three queries, each worth running on any database you are responsible for. They are safe to run in
+  <code>shop</code>. First: which roles ignore all or some protections?
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">superusers and roles that bypass row-level security</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select rolname, rolsuper, rolbypassrls
+from pg_roles
+where (rolsuper or rolbypassrls) and rolname not like 'pg\_%'
+order by rolname;</code></pre>
+</figure>
+
+<p>In the course container this returns one row: <code>postgres</code>, with both columns true. Second: where is RLS on, and how many policies guard each table?</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">RLS status per table</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select c.relname as table_name, c.relrowsecurity as rls_on, c.relforcerowsecurity as forced,
+       count(p.polname) as policies
+from pg_class c
+left join pg_policy p on p.polrelid = c.oid
+where c.relnamespace = 'shop'::regnamespace and c.relkind = 'r'
+group by c.relname, c.relrowsecurity, c.relforcerowsecurity
+order by c.relname;</code></pre>
+</figure>
+
+<p>
+  In an untouched <code>shop</code> there are five tables, each with <code>rls_on</code> false and 0 policies. Third:
+  which functions run as their owner, and have they pinned a <code>search_path</code>?
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">SECURITY DEFINER functions and their settings</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select n.nspname as schema, p.proname as function, pg_get_userbyid(p.proowner) as owner,
+       p.proconfig as settings
+from pg_proc p
+join pg_namespace n on n.oid = p.pronamespace
+where p.prosecdef and n.nspname not in ('pg_catalog', 'information_schema')
+order by 1, 2;</code></pre>
+</figure>
+
+<p>
+  In an untouched <code>shop</code> it returns no rows. Any row you add with an empty or missing
+  <code>search_path=…</code> in <code>settings</code> is a function to fix. To read the policies themselves, query
+  <code>pg_policies</code> (the <code>qual</code> column is the <code>USING</code> expression).
+</p>
+
+<h2 id="exercises">Your turn</h2>
+
+<p>
+  Run these against the Docker database. Each check works in a fresh copy of the shop, so you can try, fail and
+  retry freely.
+</p>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 1</span><span class="grow"></span><span class="lvl">basic</span></div>
+  <div class="ex-body">
+    <p>
+      Build the owner and read-only part of the layout: <code>lab_05_owner</code> owns schema <code>shop</code>, and
+      <code>lab_05_ro</code> can read every table in it but nothing else. Neither role may log in.
+    </p>
+    <p>Open <code>exercises/05/1.sql</code>, write your answer, then run <code>./pg check 05 1</code>.</p>
+  </div>
+  <figure class="code" data-lang="sql">
+  <figcaption><span class="path">exercises/05/1.sql</span><span class="grow"></span><span class="lang">your starting file</span></figcaption>
+<pre><code>-- Set up a least-privilege layout for schema shop:
+--   * lab_05_owner: a role that cannot log in, and owns the schema shop.
+--   * lab_05_ro: a role that cannot log in, may use schema shop and read
+--     every table that is in it today, and can change nothing.
+-- It must have no access at all to schema analytics.
+-- Then run ./pg check 05 1.</code></pre>
+</figure>
+  <details><summary>Hint</summary><p>Reading a table also needs <code>USAGE</code> on its schema. <code>grant select on all tables in schema …</code> covers the existing tables. Do not touch <code>analytics</code>.</p></details>
+  <details class="solution"><summary>Show a model solution for exercise 1 (try first!)</summary>
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">solutions/05/1.sql</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create role lab_05_owner nologin;
+create role lab_05_ro nologin;
+alter schema shop owner to lab_05_owner;
+grant usage on schema shop to lab_05_ro;
+grant select on all tables in schema shop to lab_05_ro;</code></pre>
+</figure>
+</details>
+</section>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 2</span><span class="grow"></span><span class="lvl">intermediate</span></div>
+  <div class="ex-body">
+    <p>
+      Create <code>lab_05_agent</code> (login) and the table <code>shop.tickets</code>. Make each agent see only the
+      rows whose <code>owner_name</code> is their own role name.
+    </p>
+    <p>Open <code>exercises/05/2.sql</code>, write your answer, then run <code>./pg check 05 2</code>.</p>
+  </div>
+  <figure class="code" data-lang="sql">
+  <figcaption><span class="path">exercises/05/2.sql</span><span class="grow"></span><span class="lang">your starting file</span></figcaption>
+<pre><code>-- Create a login role lab_05_agent. Create the table
+--   shop.tickets (id integer, owner_name text, subject text).
+-- Let lab_05_agent use schema shop and SELECT from the table.
+-- Turn on row-level security for the table and add a policy so that an
+-- agent only sees the rows whose owner_name equals their own role name.
+-- Then run ./pg check 05 2.</code></pre>
+</figure>
+  <details><summary>Hint</summary><p>Enable row-level security, then add <code>create policy … on shop.tickets for select using (owner_name = current_user)</code>. The check inserts test rows itself and reads them back as <code>lab_05_agent</code>.</p></details>
+  <details class="solution"><summary>Show a model solution for exercise 2 (try first!)</summary>
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">solutions/05/2.sql</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create role lab_05_agent login password 'lab-only';
+create table shop.tickets (id integer, owner_name text, subject text);
+grant usage on schema shop to lab_05_agent;
+grant select on shop.tickets to lab_05_agent;
+alter table shop.tickets enable row level security;
+create policy own_rows on shop.tickets for select using (owner_name = current_user);</code></pre>
+</figure>
+</details>
+</section>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 3</span><span class="grow"></span><span class="lvl">challenge</span></div>
+  <div class="ex-body">
+    <p>
+      Let <code>lab_05_clerk</code> learn one customer's total spend without being allowed to read
+      <code>shop.orders</code>: a hardened <code>SECURITY DEFINER</code> function, owned by a role that can read the table.
+      The exact requirements are in the starting file.
+    </p>
+    <p>Open <code>exercises/05/3.sql</code>, write your answer, then run <code>./pg check 05 3</code>.</p>
+  </div>
+  <figure class="code" data-lang="sql">
+  <figcaption><span class="path">exercises/05/3.sql</span><span class="grow"></span><span class="lang">your starting file</span></figcaption>
+<pre><code>-- lab_05_clerk (a login role you create) must be able to learn the total spend of a
+-- customer, but must NOT be able to read shop.orders directly.
+-- Create:
+--   * lab_05_fn_owner: a role that cannot log in, can use schema shop and
+--     SELECT from shop.orders, and owns the function below.
+--   * function shop.customer_spend(p_customer integer) returns numeric:
+--     the sum of shop.orders.total for that customer, or 0 if there are none.
+--     It runs with its owner's rights (SECURITY DEFINER) and has a pinned
+--     search_path that cannot be hijacked.
+--   * execute rights: lab_05_clerk may call it; PUBLIC may not.
+-- lab_05_clerk needs USAGE on schema shop. Then run ./pg check 05 3.</code></pre>
+</figure>
+  <details><summary>Hint</summary><p>Create the function, then <code>alter function … owner to …</code>. Pin <code>search_path = pg_catalog, pg_temp</code>, write <code>shop.orders</code> with its schema, and remember that functions are executable by <code>PUBLIC</code> until you revoke it.</p></details>
+  <details class="solution"><summary>Show a model solution for exercise 3 (try first!)</summary>
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">solutions/05/3.sql</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create role lab_05_fn_owner nologin;
+create role lab_05_clerk login password 'lab-only';
+grant usage on schema shop to lab_05_fn_owner, lab_05_clerk;
+grant select on shop.orders to lab_05_fn_owner;
+
+create function shop.customer_spend(p_customer integer) returns numeric
+  language sql stable security definer
+  set search_path = pg_catalog, pg_temp
+  as $$ select coalesce(sum(o.total), 0) from shop.orders o where o.customer_id = p_customer $$;
+
+alter function shop.customer_spend(integer) owner to lab_05_fn_owner;
+revoke execute on function shop.customer_spend(integer) from public;
+grant execute on function shop.customer_spend(integer) to lab_05_clerk;</code></pre>
+</figure>
+</details>
+</section>
+
+<h2 id="summary">Summary</h2>
+<ul>
+  <li>Split ownership from use: a <code>nologin</code> owner for the tables, a login role for the app with DML only, a read-only group for reporting.</li>
+  <li>An owner can always alter or drop its tables. An app that owns them can destroy them.</li>
+  <li><code>ALTER DEFAULT PRIVILEGES FOR ROLE owner</code> makes future tables usable, but only for objects that owner creates.</li>
+  <li>On PostgreSQL 15 and later <code>public</code> no longer lets everyone create objects. Check old and restored databases, and keep <code>CREATE</code> away from application roles.</li>
+  <li>With RLS on and no policy nobody sees any rows. <code>USING</code> filters, <code>WITH CHECK</code> guards writes. Owners, <code>BYPASSRLS</code> roles and superusers are exempt, and <code>FORCE</code> removes the owner exemption.</li>
+  <li>A <code>SECURITY DEFINER</code> function needs a pinned <code>search_path</code>, qualified names, a dedicated owner and an <code>EXECUTE</code> grant that excludes <code>PUBLIC</code>.</li>
+  <li>Passwords are stored as SCRAM verifiers. In the course container the loopback and socket lines are <code>trust</code>, everything else is <code>scram-sha-256</code>. Keep secrets out of SQL files.</li>
+</ul>
+
+<h2 id="next">Looking ahead</h2>
+<p>
+  You now have the vocabulary and the habits to run a database safely: clusters, schemas, roles, grants and row-level
+  rules. If a detail of grants is still fuzzy, revisit <a href="04-privileges-and-grants.html">lesson 4</a>; for who
+  owns what, <a href="03-roles-and-users.html">lesson 3</a>. The next part of the course turns to modelling: data types
+  first, then constraints and schema design.
+</p>
+<div class="lesson-done" data-lesson="05-security-and-rls"></div>
+<nav class="pager"><a class="prev" href="../lessons/04-privileges-and-grants.html"><span class="dir">Previous</span><span class="lbl">04 · Privileges and grants</span></a><a class="next" href="../lessons/06-data-types.html"><span class="dir">Next</span><span class="lbl">06 · Data types</span></a></nav>
+</main>
+<aside class="toc" aria-label="On this page"></aside>
+</div>
+</div>
+<script src="../assets/js/search-index.js"></script>
+<script src="../assets/js/mini-seed.js"></script>
+<script src="../assets/js/course.js"></script>
+</body>
+</html>

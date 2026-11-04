@@ -1,0 +1,661 @@
+<p class="lede">
+  A column's type decides what it can store, how much space it takes, how it sorts, and which mistakes the
+  database stops for you. This lesson walks through the types you will choose between every week (numbers,
+  text, time, <code>uuid</code>, enums and ranges), shows the trap each one hides, and gives you a default
+  for each situation.
+</p>
+
+<h2 id="goals">Learning goals</h2>
+<ul>
+  <li>Choose between <code>integer</code>, <code>bigint</code>, <code>numeric</code> and <code>double precision</code>, and explain why money never goes in a float.</li>
+  <li>Explain why <code>text</code> is the default string type, what <code>varchar(n)</code> adds, and why <code>char(n)</code> is almost never right.</li>
+  <li>Say what <code>timestamptz</code> really stores, and how <code>timestamp</code> loses information.</li>
+  <li>Generate <code>uuid</code> keys with <code>gen_random_uuid()</code> and <code>uuidv7()</code>, and say when each is the better choice.</li>
+  <li>Make text unique and searchable without regard to case, using only built-in features.</li>
+  <li>Pick between an enum, a check constraint and a lookup table, and use <code>daterange</code> and <code>tstzrange</code> instead of two date columns.</li>
+</ul>
+
+<h2 id="lab">Set up for this lesson</h2>
+<p>
+  Use the <code>shop</code> database and <code>./pg psql</code>. Everything in sections 1 to 7 only reads data or
+  works on temporary values or temporary tables, so you can run it as it is. Exercise 2 creates a new table, <code>shop.coupons</code>, in a throwaway copy of the
+  database; your own <code>shop</code> stays untouched.
+</p>
+
+<figure class="code" data-lang="bash">
+  <figcaption><span class="path">terminal</span><span class="grow"></span><span class="lang">bash</span></figcaption>
+<pre><code>./pg psql
+\d shop.products</code></pre>
+</figure>
+
+<p>
+  <code>\d</code> prints the columns of <code>shop.products</code> with their types: <code>integer</code>,
+  <code>text</code>, <code>numeric(10,2)</code>, <code>text[]</code>, <code>jsonb</code>, <code>boolean</code>,
+  <code>timestamptz</code>. You will understand every one of them by the end of this page.
+</p>
+
+<div class="note info">
+  <span class="note-title">Docker versus the playground</span>
+  <p>
+    The playgrounds on this page run in your browser against a small copy of the shop, with 8 customers and 12
+    orders. Counts and results from the Docker database (20 000 customers, 200 000 orders) differ, and the page
+    says which one a result came from. The playground has no <code>citext</code> extension, so this lesson
+    shows case handling with built-in tools only.
+  </p>
+</div>
+
+<h2 id="numbers">1. Numbers: exact, approximate, and out of range</h2>
+
+<p>PostgreSQL has three families of number types. They are not interchangeable.</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Type</th><th>Storage</th><th>Kind</th><th>Use it for</th></tr></thead>
+  <tbody>
+    <tr><td><code>smallint</code></td><td>2 bytes</td><td class="wrap">exact integer, −32 768 to 32 767</td><td class="wrap">Small, bounded values (quantity of an item)</td></tr>
+    <tr><td><code>integer</code></td><td>4 bytes</td><td class="wrap">exact integer, about ±2.1 billion</td><td class="wrap">The default whole number</td></tr>
+    <tr><td><code>bigint</code></td><td>8 bytes</td><td class="wrap">exact integer, about ±9.2 × 10<sup>18</sup></td><td class="wrap">Counters and keys that may grow past 2 billion (<code>analytics.events.id</code>)</td></tr>
+    <tr><td><code>numeric(p,s)</code></td><td class="wrap">variable</td><td class="wrap">exact decimal with up to <em>p</em> digits, <em>s</em> after the point</td><td class="wrap">Money, quantities, anything people add up and compare</td></tr>
+    <tr><td><code>real</code>, <code>double precision</code></td><td>4, 8 bytes</td><td class="wrap">approximate binary floating point</td><td class="wrap">Measurements, scientific values, where a tiny error is fine</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>
+  <em>Floating point</em> means the database stores a binary fraction close to your number. Many decimals, such
+  as 0.1, have no exact binary form, so the stored value is slightly off. <code>numeric</code> stores decimal
+  digits, so it is exact. Run both and compare:
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">0.1 + 0.2, in two types</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select 0.1::float8 + 0.2::float8                  as float_sum,
+       0.1::float8 + 0.2::float8 = 0.3::float8      as float_equal,
+       0.1::numeric + 0.2::numeric                  as numeric_sum,
+       0.1::numeric + 0.2::numeric = 0.3::numeric   as numeric_equal;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  The float sum prints as <code>0.30000000000000004</code> and is <em>not</em> equal to 0.3. The
+  <code>numeric</code> sum is exactly <code>0.3</code>. Adding ten times 0.1 shows the same drift on a larger
+  scale: in Docker, <code>sum(0.1::float8)</code> over ten rows gives <code>0.9999999999999999</code>, and the
+  <code>numeric</code> version gives exactly 1.0.
+</p>
+
+<div class="note danger">
+  <span class="note-title">Never store money in a float</span>
+  <p>
+    Prices, totals and balances go in <code>numeric</code>, as the shop does:
+    <code>shop.products.price</code> is <code>numeric(10,2)</code> and <code>shop.orders.total</code> is
+    <code>numeric(12,2)</code>. The built-in <code>money</code> type exists, but it formats using the server's
+    <code>lc_monetary</code> setting (the Docker server prints <code>$12.50</code>) and has a fixed currency
+    symbol and scale. Most teams use <code>numeric</code> plus a separate currency-code column instead.
+  </p>
+</div>
+
+<h3>numeric(p,s), rounding and overflow</h3>
+
+<p>
+  In <code>numeric(5,2)</code> the precision <em>p</em> (5) is the total number of digits and the scale
+  <em>s</em> (2) is how many come after the decimal point. A value with too many decimals is
+  <em>rounded</em>; a value with too many whole digits is <em>rejected</em>:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">rounding versus overflow (Docker)</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select 123.456::numeric(5,2);     -- 123.46   (rounded to 2 decimals)
+select 1234.5::numeric(5,2);      -- ERROR:  numeric field overflow
+                                  -- DETAIL:  A field with precision 5, scale 2 must round
+                                  --          to an absolute value less than 10^3.
+select 2147483647::int + 1;       -- ERROR:  integer out of range
+select 2147483647::bigint + 1;    -- 2147483648</code></pre>
+</figure>
+
+<p>Two more rules catch people out. Run this and read each column:</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">rounding and integer division</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select round(2.5::numeric)  as numeric_round,   -- rounds half away from zero
+       round(2.5::float8)   as float_round,     -- rounds half to even
+       10 / 4               as int_division,    -- both sides are integers
+       10 / 4.0             as numeric_division,
+       123.456::numeric(5,2) as fits;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<ul>
+  <li><code>round(2.5)</code> is 3 for <code>numeric</code> but 2 for <code>double precision</code>. Floats round halves to the nearest even number, so reports computed in two types can disagree by a cent.</li>
+  <li><code>10 / 4</code> is 2. Dividing two integers gives an integer. Cast one side (<code>10 / 4.0</code>, or <code>10::numeric / 4</code>) when you want the fraction.</li>
+</ul>
+
+<div class="note warn">
+  <span class="note-title">Sums of integers change type</span>
+  <p>
+    <code>sum(quantity)</code> over a <code>smallint</code> column returns <code>bigint</code>, and
+    <code>sum(unit_price)</code> over <code>numeric(10,2)</code> returns plain <code>numeric</code>. Use
+    <code>pg_typeof(expression)</code> to see what a query really returns. Drivers map <code>bigint</code> and
+    <code>numeric</code> to different types in your language, and some of them turn <code>numeric</code> into a
+    float, which silently undoes everything above.
+  </p>
+</div>
+
+<h2 id="text">2. Text: text, varchar(n) and char(n)</h2>
+
+<p>PostgreSQL has three character types, and one of them is the answer almost every time.</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Type</th><th>What it does</th><th>Verdict</th></tr></thead>
+  <tbody>
+    <tr><td><code>text</code></td><td class="wrap">Any length, up to about 1 GB per value</td><td class="wrap">The default</td></tr>
+    <tr><td><code>varchar(n)</code></td><td class="wrap">Same storage as <code>text</code>, but rejects values longer than <em>n</em> characters</td><td class="wrap">Fine when the limit is a real rule (a 2-letter code); otherwise just a constraint in disguise</td></tr>
+    <tr><td><code>char(n)</code></td><td class="wrap">Fixed width: pads shorter values with spaces</td><td class="wrap">Avoid</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>
+  Unlike some other databases, <code>varchar(n)</code> is <em>not</em> faster or smaller than <code>text</code>.
+  The difference is only the length check. That check is easier to change as a named constraint than as a type:
+  making a <code>varchar(5)</code> column <code>varchar(50)</code> does not rewrite the table, and a
+  <code>check (length(code) &lt;= 5)</code> is just as easy to replace and gives you a constraint name in error
+  messages. Neither is a reason to guess a limit you do not need.
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">the length check (Docker)</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create table t_varchar (code varchar(3));
+insert into t_varchar values ('abcd');
+-- ERROR:  value too long for type character varying(3)
+
+select cast('abcdef' as varchar(3));   -- abc   (an explicit cast silently truncates!)</code></pre>
+</figure>
+
+<div class="note warn">
+  <span class="note-title">Casting truncates, inserting rejects</span>
+  <p>
+    An <code>INSERT</code> of a too-long value fails. An explicit cast (<code>::varchar(3)</code> or
+    <code>cast(... as varchar(3))</code>) cuts the value to <code>abc</code> and says nothing. If you validate
+    with a cast, you will lose data without an error.
+  </p>
+</div>
+
+<h3>The padding trap in char(n)</h3>
+
+<p>
+  <code>shop.customers.country</code> is <code>char(2)</code>, and two-letter codes never need padding, so the
+  shop gets away with it. Try a longer width to see what <code>char(n)</code> does:
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">char(n) pads, text does not</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select pg_typeof(country)                  as country_type,
+       'ab'::char(5)                       as padded,
+       length('ab'::char(5))               as length_ignores_padding,
+       octet_length('ab'::char(5))         as bytes_stored,
+       'ab'::char(5) || '|'                as after_concat,
+       'ab'::char(5) = 'ab'::text          as char_equals_text,
+       'ab '::text = 'ab'::text            as text_ignores_trailing_space
+from shop.customers
+order by id
+limit 1;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  Read the columns left to right. The value is stored padded to five bytes, <code>length()</code> pretends the
+  padding is not there, and concatenation (<code>||</code>) strips it, because that casts the value to
+  <code>text</code> first. Comparing a <code>char(5)</code> with <code>text</code> ignores the padding, but
+  comparing two <code>text</code> values does not: <code>'ab '</code> and <code>'ab'</code> are different. Rules
+  that change depending on which side of an operator you look at are how bugs get in. If you need a fixed-width
+  code, use <code>text</code> with a check constraint on its length.
+</p>
+
+<h2 id="time">3. Time: timestamp, timestamptz, date and interval</h2>
+
+<p>
+  This is the type decision with the largest consequences. The names suggest a difference that is not there:
+  <code>timestamptz</code> does <strong>not</strong> store a time zone.
+</p>
+
+<ul>
+  <li><code>timestamptz</code> (<code>timestamp with time zone</code>) stores one <em>instant</em>: a point on the timeline, as UTC. When you insert a value with an offset, PostgreSQL converts it to UTC and forgets the offset. When you read it, PostgreSQL shows it in the <em>session's</em> time zone (the <code>TimeZone</code> setting).</li>
+  <li><code>timestamp</code> (<code>timestamp without time zone</code>) stores a wall-clock reading such as “12:00” with no instant behind it. An offset in the input is silently dropped.</li>
+</ul>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">one instant, three readings</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">begin;
+set local timezone = 'America/New_York';
+select timestamptz '2025-03-30 12:00:00+00'                       ::text as timestamptz_in_new_york,
+       timestamp   '2025-03-30 12:00:00+02'                       ::text as timestamp_drops_the_offset,
+       (timestamptz '2025-03-30 12:00:00+00' at time zone 'Asia/Tokyo')::text as wall_clock_in_tokyo;
+commit;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  The first column shows 12:00 UTC as <code>2025-03-30 08:00:00-04</code>, which is New York's local time. The
+  second column keeps <code>12:00:00</code> and throws away the <code>+02</code>. The third uses
+  <code>AT TIME ZONE</code>, which converts in <em>both</em> directions. Applied to a <code>timestamptz</code>,
+  it returns a plain <code>timestamp</code> showing the wall clock in that zone (<code>2025-03-30 21:00:00</code>
+  in Tokyo). Applied to a plain <code>timestamp</code>, it does the reverse and returns a <code>timestamptz</code>.
+</p>
+
+<div class="note danger">
+  <span class="note-title">Use timestamptz for anything that happened</span>
+  <p>
+    Order times, log lines and signup dates are instants, so use <code>timestamptz</code>
+    (<code>shop.orders.ordered_at</code> does). Use plain <code>timestamp</code> only for a wall-clock reading
+    that is meant to float, such as “the shop opens at 09:00 wherever it is”. A <code>timestamp</code> column
+    holding UTC by convention works until one developer inserts local time, and nothing in the database can tell
+    the difference.
+  </p>
+</div>
+
+<h3>Days are not always 24 hours</h3>
+
+<p>
+  Grouping by day depends on <em>whose</em> day. <code>ordered_at::date</code> uses the session's time zone, so
+  two sessions can give different answers. Convert explicitly before you truncate, and choose the zone on purpose:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">orders per local day (Docker)</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select (ordered_at at time zone 'UTC')::date as utc_day, count(*) as orders
+from shop.orders
+where ordered_at &gt;= '2025-03-01' and ordered_at &lt; '2025-03-04'
+group by 1 order by 1;
+--   utc_day   | orders
+--  2025-03-01 |    232
+--  2025-03-02 |    243
+--  2025-03-03 |    235</code></pre>
+</figure>
+
+<p>
+  Grouping the same orders by Amsterdam days gives 232, 246 and 233, because an order at 23:30 UTC belongs to
+  the next day in Amsterdam. Daylight-saving time adds a second trap. In the Amsterdam zone, 30 March 2025 only
+  lasted 23 hours, so “one day later” and “24 hours later” are different instants:
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">interval '1 day' is not interval '24 hours'</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">begin;
+set local timezone = 'Europe/Amsterdam';
+select (timestamptz '2025-03-30 00:00' + interval '1 day')::text    as plus_one_day,
+       (timestamptz '2025-03-30 00:00' + interval '24 hours')::text as plus_24_hours;
+commit;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  <code>plus_one_day</code> is midnight on the 31st (<code>2025-03-31 00:00:00+02</code>), the next calendar
+  day. <code>plus_24_hours</code> is 01:00 (<code>2025-03-31 01:00:00+02</code>), because the clocks skipped an
+  hour. Neither is a bug: pick the one that matches your intent. For ranges of dates, prefer a half-open
+  comparison (<code>&gt;= start and &lt; end</code>) over <code>between</code>, which includes both ends.
+</p>
+
+<h2 id="uuid">4. uuid: keys that can be made anywhere</h2>
+
+<p>
+  A <code>uuid</code> is a 128-bit identifier, written as 36 characters like
+  <code>550e8400-e29b-41d4-a716-446655440000</code>. PostgreSQL stores it in 16 bytes. Because any client or
+  server can generate one without asking a sequence, uuids suit distributed systems and public identifiers
+  that must not reveal how many rows exist. PostgreSQL 18 has two built-in generators:
+</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Function</th><th>Version</th><th>What it is</th><th>Effect on a B-tree primary key</th></tr></thead>
+  <tbody>
+    <tr><td><code>gen_random_uuid()</code></td><td>4</td><td class="wrap">122 random bits</td><td class="wrap">New rows land at random places in the index, which scatters writes and cache use</td></tr>
+    <tr><td><code>uuidv7()</code></td><td>7</td><td class="wrap">A millisecond timestamp first, then random bits</td><td class="wrap">New rows land near the end of the index, like a sequence</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">version numbers, size and ordering</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select uuid_extract_version(gen_random_uuid()) as random_version,
+       uuid_extract_version(uuidv7())          as v7_version,
+       pg_column_size(gen_random_uuid())       as uuid_bytes,
+       pg_column_size(gen_random_uuid()::text) as as_text_bytes,
+       (select bool_and(id &gt; prev)
+        from (select id, lag(id) over (order by n) as prev
+              from (select n, uuidv7() as id from generate_series(1, 1000) n) s) t) as v7_increasing;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  The version digits are 4 and 7. A <code>uuid</code> takes 16 bytes; the same value as text takes 40 (36
+  characters plus a 4-byte header), which is why you should never store a uuid in a <code>text</code> column.
+  The last column checks 1000 values from <code>uuidv7()</code> generated in one query: each is larger than the
+  one before, so <code>v7_increasing</code> is true. That ordering is the reason to prefer v7 for primary keys.
+  The values themselves change on every run, so the course never prints them.
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">a uuid key (Docker, temporary table)</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create temp table t_uuid (
+  id    uuid primary key default uuidv7(),
+  label text
+);
+select uuid_extract_timestamp(uuidv7()) between now() - interval '1 minute'
+                                            and now() + interval '1 minute';   -- true</code></pre>
+</figure>
+
+<div class="note warn">
+  <span class="note-title">A v7 uuid leaks its creation time</span>
+  <p>
+    <code>uuid_extract_timestamp(id)</code> recovers the millisecond a v7 value was made. That is harmless for an
+    order id and wrong for a value that must be unguessable or must hide when something happened (password-reset
+    tokens, for example). Use <code>gen_random_uuid()</code> for those, or better a dedicated random token.
+  </p>
+</div>
+
+<div class="note info">
+  <span class="note-title">uuid or identity?</span>
+  <p>
+    A 4-byte <code>integer</code> or 8-byte <code>bigint</code> identity column is smaller, faster to join, and
+    easy to read in logs. Choose <code>uuid</code> when ids must be created outside the database, merged from
+    several systems, or shown to the public. <a href="07-constraints-and-design.html">Lesson 7</a> covers identity
+    columns.
+  </p>
+</div>
+
+<h2 id="case">5. Case-insensitive text without an extension</h2>
+
+<p>
+  <code>'Anna' = 'anna'</code> is false: text comparison is case-sensitive. People type email addresses in any
+  case, so you need a rule. The extension <code>citext</code> exists (it is available in the Docker image, and
+  <code>create extension citext</code> adds a case-insensitive text type), but it ties comparison to a special
+  type and needs the extension installed on every database. The built-in approach is simple and just as fast:
+  compare <code>lower(email)</code> and put a <em>unique expression index</em> (an index on a computed value) on
+  the same expression.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">a unique index on lower(email), and a lookup that uses it</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">drop table if exists app_user;
+create table app_user (id int generated always as identity primary key, email text not null);
+create unique index app_user_email_lower on app_user (lower(email));
+insert into app_user (email) values ('Anna@Example.com');
+
+select id, email,
+       'Anna' = 'anna'                    as plain_equal,
+       lower('Anna') = lower('anna')      as lower_equal
+from app_user
+where lower(email) = lower('ANNA@example.COM');</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  The row is found even though the case differs, and the original spelling (<code>Anna@Example.com</code>) is
+  kept for display. Now try to add the same address in another case. <strong>This statement fails on
+  purpose:</strong>
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">expected error: duplicate key</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">insert into app_user (email) values ('anna@example.com');</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  The error is <code>duplicate key value violates unique constraint "app_user_email_lower"</code> with the detail
+  <code>Key (lower(email))=(anna@example.com) already exists.</code> The index rejects the duplicate while the
+  column keeps the user's own spelling. In Docker, <code>explain</code> on <code>where lower(email) = 'x'</code>
+  uses an index scan on this index. The query must contain the exact expression
+  <code>lower(email)</code>; a plain <code>where email = ...</code> cannot use it.
+</p>
+
+<div class="note tip">
+  <span class="note-title">Put the rule in one place</span>
+  <p>
+    Every query that looks up by email must write <code>lower(email)</code> on the column side. Hide that in a
+    view or a function, or normalise the value in the application and store it lowercased with a check
+    constraint (<code>check (email = lower(email))</code>), so a forgotten <code>lower()</code> cannot
+    produce a duplicate.
+  </p>
+</div>
+
+<h2 id="enums">6. Enum, check constraint or lookup table?</h2>
+
+<p>
+  Many columns hold one of a small set of values: an order's status, a customer's tier. PostgreSQL gives you
+  three ways to enforce that set. <code>shop.orders.status</code> uses an enum and
+  <code>shop.customers.status</code> uses a check constraint, so you can see both in the shop.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">the enum behind shop.orders.status</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select enum_range(null::shop.order_status)                         as all_values,
+       'delivered'::shop.order_status &gt; 'paid'::shop.order_status     as sorts_by_position,
+       pg_column_size('delivered'::shop.order_status)                 as enum_bytes,
+       pg_column_size('delivered'::text)                              as text_bytes;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  An <em>enum</em> is a type with a fixed, ordered list of labels. The values sort in declaration order
+  (<code>delivered</code> is greater than <code>paid</code> because it comes later in the list, although
+  alphabetically it would come first), and each value takes 4 bytes, against 13 for the text <code>delivered</code> (the playground prints the
+  same numbers). An unknown label is rejected. <strong>This statement fails on purpose:</strong>
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">expected error: invalid enum value</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select 'lost'::shop.order_status;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>The error is <code>invalid input value for enum shop.order_status: "lost"</code>. Here is how the three options compare:</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th></th><th>Enum</th><th>Check constraint on text</th><th>Lookup table + foreign key</th></tr></thead>
+  <tbody>
+    <tr><td>Add a value</td><td class="wrap"><code>alter type ... add value</code> (cheap, but the new value cannot be used in the same transaction)</td><td class="wrap">Drop and re-add the constraint (rechecks every row unless added <code>not valid</code>)</td><td class="wrap">An <code>insert</code></td></tr>
+    <tr><td>Remove a value</td><td class="wrap">Not possible (<code>dropping an enum value is not implemented</code>)</td><td class="wrap">Edit the constraint</td><td class="wrap">A <code>delete</code>, blocked while rows use it</td></tr>
+    <tr><td>Rename a value</td><td class="wrap"><code>alter type ... rename value</code></td><td class="wrap">Update rows and the constraint</td><td class="wrap">One <code>update</code> with <code>on update cascade</code></td></tr>
+    <tr><td>Extra data per value (label, sort order, flags)</td><td class="wrap">No</td><td class="wrap">No</td><td class="wrap">Yes: extra columns</td></tr>
+    <tr><td>Natural sort order</td><td class="wrap">Yes</td><td class="wrap">No (alphabetical)</td><td class="wrap">Add a column</td></tr>
+    <tr><td>Readable in a plain <code>select</code></td><td class="wrap">Yes</td><td class="wrap">Yes</td><td class="wrap">Yes if the key is the text</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="note warn">
+  <span class="note-title">Enums are easy to add to, hard to take away from</span>
+  <p>
+    The set of values of an enum can only grow. If you may ever need to retire or merge values, or attach a
+    label or a flag to each one, use a lookup table: a small table with a primary key and a foreign key from the
+    column. A check constraint on <code>text</code> is the lightest choice for a short list that rarely changes
+    and needs no extra data, like <code>shop.customers.status</code>.
+  </p>
+</div>
+
+<h2 id="ranges">7. Ranges: one value for “from … to …”</h2>
+
+<p>
+  Two columns called <code>starts_on</code> and <code>ends_on</code> cannot say “these two periods overlap” in
+  one operator, and nothing stops <code>ends_on</code> being before <code>starts_on</code>. A <em>range type</em>
+  stores both ends in one value. The built-in ones are <code>int4range</code>, <code>int8range</code>,
+  <code>numrange</code>, <code>daterange</code>, <code>tsrange</code> and <code>tstzrange</code>.
+</p>
+
+<p>
+  Ranges are written with brackets: <code>[</code> includes an end, <code>(</code> excludes it. For discrete
+  types such as <code>daterange</code>, PostgreSQL always normalises to <code>[start, end)</code>: the start is
+  included, the end is not. That half-open form makes neighbouring periods fit together without overlap.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">contains, overlaps, adjacent</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select daterange('2025-01-01', '2025-02-01')                                           as january,
+       daterange('2025-01-01', '2025-02-01') @&gt; date '2025-01-31'                           as has_jan_31,
+       daterange('2025-01-01', '2025-02-01') @&gt; date '2025-02-01'                           as has_feb_1,
+       daterange('2025-01-01', '2025-02-01') &amp;&amp; daterange('2025-02-01', '2025-03-01')     as january_overlaps_february,
+       daterange('2025-01-01', '2025-02-01') &amp;&amp; daterange('2025-01-31', '2025-03-01')     as overlaps_when_sharing_a_day,
+       daterange('2025-01-01', '2025-01-31', '[]')                                       as closed_input_normalised;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  <code>@&gt;</code> means “contains” and <code>&amp;&amp;</code> means “overlaps”. January and February do not
+  overlap, because January's end (the first of February) is excluded. The last column shows the normalisation:
+  passing <code>'[]'</code> as the third argument says both ends are included, and PostgreSQL stores it as
+  <code>[2025-01-01,2025-02-01)</code>. A range also gives you <code>lower(r)</code>, <code>upper(r)</code>,
+  <code>isempty(r)</code>, the intersection operator <code>*</code>, and <code>-|-</code> for “adjacent”.
+</p>
+
+<p>
+  Use <code>tstzrange</code> for periods of time and <code>daterange</code> for calendar days. The next lesson
+  shows the feature that makes ranges worth the trouble: an <em>exclusion constraint</em>, which makes the
+  database refuse overlapping periods, something no combination of two date columns and a unique index can do
+  (<a href="07-constraints-and-design.html">lesson 7</a>).
+</p>
+
+<h3>Arrays, in one paragraph</h3>
+
+<p>
+  Any type can be an array: <code>text[]</code>, <code>integer[]</code>. <code>shop.products.tags</code> is a
+  <code>text[]</code>. You index with <code>[n]</code> starting from 1, test membership with
+  <code>'sale' = any(tags)</code>, and count with <code>cardinality(tags)</code>. In Docker,
+  <code>select id, name from shop.products where 'sale' = any(tags) order by id limit 3</code> returns products 3,
+  6 and 9. Arrays are a good fit for a small, always-read-together list with no structure of its own. Once you
+  need to join, count or constrain the elements, they belong in a table.
+  <a href="10-json-and-arrays.html">Lesson 10</a> goes deeper.
+</p>
+
+<h2 id="when">When to use, when not to</h2>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Situation</th><th class="wrap">✅ Do this</th><th class="wrap">❌ Not this</th></tr></thead>
+  <tbody>
+    <tr><td class="wrap">A price, balance or any amount people add up</td><td class="wrap"><code>numeric(p,s)</code></td><td class="wrap"><code>real</code> or <code>double precision</code>; the <code>money</code> type</td></tr>
+    <tr><td class="wrap">A counter that may pass 2 billion</td><td class="wrap"><code>bigint</code></td><td class="wrap"><code>integer</code>, then a painful rewrite</td></tr>
+    <tr><td class="wrap">A name, description or free text</td><td class="wrap"><code>text</code></td><td class="wrap"><code>varchar(255)</code> from habit; <code>char(n)</code></td></tr>
+    <tr><td class="wrap">A moment something happened</td><td class="wrap"><code>timestamptz</code></td><td class="wrap"><code>timestamp</code> with UTC “by convention”</td></tr>
+    <tr><td class="wrap">An id created by clients or exposed in URLs</td><td class="wrap"><code>uuid</code> with <code>uuidv7()</code> as key, <code>gen_random_uuid()</code> for secrets</td><td class="wrap">A uuid stored as <code>text</code></td></tr>
+    <tr><td class="wrap">Email addresses compared without case</td><td class="wrap">Unique index on <code>lower(email)</code></td><td class="wrap">A unique index on <code>email</code> and hoping users type consistently</td></tr>
+    <tr><td class="wrap">A short, stable set of values with no extra data</td><td class="wrap">Check constraint or enum</td><td class="wrap">Free text with no constraint</td></tr>
+    <tr><td class="wrap">A set of values that changes or carries data</td><td class="wrap">Lookup table with a foreign key</td><td class="wrap">An enum you will want to shrink later</td></tr>
+    <tr><td class="wrap">A period with a start and an end</td><td class="wrap"><code>daterange</code> / <code>tstzrange</code></td><td class="wrap">Two loose date columns with no constraint</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="inspect">Inspect it</h2>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">the type and storage size of every column of shop.products</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select attname as column,
+       format_type(atttypid, atttypmod) as type,
+       attlen as bytes   -- -1 means variable length
+from pg_attribute
+where attrelid = 'shop.products'::regclass
+  and attnum &gt; 0 and not attisdropped
+order by attnum;</code></pre>
+</figure>
+
+<p>
+  <code>format_type</code> shows the parameters (<code>numeric(10,2)</code>), and <code>attlen</code> shows
+  fixed-width columns (<code>integer</code> is 4, <code>timestamptz</code> is 8, <code>boolean</code> is 1) and
+  <code>-1</code> for variable-width ones (<code>text</code>, <code>numeric</code>, arrays, <code>jsonb</code>).
+  To see what an expression returns, use <code>select pg_typeof(your_expression)</code>.
+</p>
+
+<h2 id="exercises">Your turn</h2>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 1</span><span class="grow"></span><span class="lvl">basic</span></div>
+  <div class="ex-body">
+    <p>
+      For each calendar day in Amsterdam from 2025-03-01 up to and including 2025-03-07, count the orders in
+      <code>shop.orders</code>. Return the columns <code>day</code> (a date) and <code>orders</code>, oldest day
+      first. A day runs from midnight to midnight in <code>Europe/Amsterdam</code>, not in UTC.
+    </p>
+    <p>Open <code>exercises/06/1.sql</code>, write your answer, then run <code>./pg check 06 1</code>.</p>
+  </div>
+  {{stub 06 1}}
+  <details><summary>Hint</summary><p>Convert <code>ordered_at</code> with <code>at time zone 'Europe/Amsterdam'</code> before casting to <code>date</code>. For the filter, compare against <code>timestamptz</code> literals that name the zone, such as <code>timestamptz '2025-03-08 00:00 Europe/Amsterdam'</code>, and use a half-open interval.</p></details>
+  {{solution 06 1}}
+</section>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 2</span><span class="grow"></span><span class="lvl">intermediate</span></div>
+  <div class="ex-body">
+    <p>
+      Create the table <code>shop.coupons</code> with a self-filling <code>uuid</code> primary key
+      <code>id</code>, a required <code>text</code> column <code>code</code> of 4 to 20 characters, a required
+      <code>numeric(5,2)</code> column <code>discount</code> that must be more than 0 and at most 100, and a
+      required <code>daterange</code> column <code>valid_during</code>. Two codes that differ only in case must
+      count as duplicates.
+    </p>
+    <p>Open <code>exercises/06/2.sql</code>, write your answer, then run <code>./pg check 06 2</code>.</p>
+  </div>
+  {{stub 06 2}}
+  <details><summary>Hint</summary><p>Use <code>default gen_random_uuid()</code> on the key, a <code>check</code> on <code>length(code)</code>, a check on <code>discount</code>, and a separate <code>create unique index</code> on <code>lower(code)</code>.</p></details>
+  {{solution 06 2}}
+</section>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 3</span><span class="grow"></span><span class="lvl">challenge</span></div>
+  <div class="ex-body">
+    <p>
+      Three promotions run on half-open date ranges: <code>spring</code> from 2025-03-01 up to 2025-03-15,
+      <code>mid_spring</code> from 2025-03-10 up to 2025-04-01, and <code>april</code> from 2025-04-01 up to
+      2025-05-01. For each promotion count the orders placed during it and add up their <code>total</code>.
+      Take each order's date in UTC. An order that falls in two promotions counts in both. Return the columns
+      <code>promo</code>, <code>orders</code> and <code>revenue</code>, ordered by <code>promo</code>.
+    </p>
+    <p>Open <code>exercises/06/3.sql</code>, write your answer, then run <code>./pg check 06 3</code>.</p>
+  </div>
+  {{stub 06 3}}
+  <details><summary>Hint</summary><p>Write the promotions as a <code>values</code> list in a CTE, with a <code>daterange(...)</code> per row. Join them to the orders with <code>period @&gt; (ordered_at at time zone 'UTC')::date</code>, using a <code>left join</code> so empty promotions would still appear.</p></details>
+  {{solution 06 3}}
+</section>
+
+<h2 id="summary">Summary</h2>
+<ul>
+  <li>Exact numbers (<code>integer</code>, <code>bigint</code>, <code>numeric</code>) for anything you add up or compare; floats only for measurements. Integer division truncates.</li>
+  <li><code>text</code> is the default string. <code>varchar(n)</code> is only a length check, and <code>char(n)</code> pads in ways that change between operators.</li>
+  <li><code>timestamptz</code> stores an instant in UTC and displays it in the session's zone. Say which zone you mean whenever you cut a timestamp into days.</li>
+  <li><code>gen_random_uuid()</code> is random (version 4). <code>uuidv7()</code> is time-ordered and kind to B-tree indexes, but reveals when a row was made.</li>
+  <li>Case-insensitive uniqueness needs no extension: a unique index on <code>lower(column)</code>, and queries that use the same expression.</li>
+  <li>Enums can grow but not shrink; check constraints are light; lookup tables carry data and change freely.</li>
+  <li>Range types hold a period in one value, use half-open <code>[start, end)</code> bounds, and answer “contains” and “overlaps” with <code>@&gt;</code> and <code>&amp;&amp;</code>.</li>
+</ul>
+
+<h2 id="next">Looking ahead</h2>
+<p>
+  Types limit what a single value may be; constraints limit what rows and tables may hold together.
+  <a href="07-constraints-and-design.html">Lesson 7</a> covers primary and foreign keys with their actions,
+  check and exclusion constraints (where the ranges from this lesson earn their keep), identity columns and
+  generated columns.
+</p>

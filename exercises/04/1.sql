@@ -1,0 +1,4 @@
+-- Create a login role lab_04_report that can read shop.products and
+-- shop.categories, and nothing else: no writes, and no access to the other
+-- tables. Remember what a role needs on the schema before it can reach a table.
+-- Then run ./pg check 04 1.

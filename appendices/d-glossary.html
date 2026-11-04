@@ -1,0 +1,386 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>D. Glossary &mdash; Learning PostgreSQL</title>
+<meta name="description" content="Every PostgreSQL term used in the course, defined in one or two sentences.">
+<link rel="stylesheet" href="../assets/css/course.css">
+</head>
+<body data-root="../" data-page="d-glossary">
+<a class="skip-link" href="#content">Skip to content</a>
+<header class="topbar">
+  <button class="icon-btn menu-btn" type="button" aria-label="Toggle navigation" aria-expanded="false" aria-controls="sidebar">&#9776;</button>
+  <a class="brand" href="../index.html"><span class="mark pgm">PG</span> Learning PostgreSQL <span class="sub">PostgreSQL 18</span></a>
+  <span class="spacer"></span>
+  <div class="search" role="search">
+    <span class="glyph" aria-hidden="true">&#9906;</span>
+    <input type="search" placeholder="Search the course&#8230;" aria-label="Search the course" autocomplete="off" spellcheck="false">
+    <kbd>/</kbd>
+    <div class="search-results" role="listbox"></div>
+  </div>
+  <nav class="topbar-links">
+    <a class="hide-sm" href="../appendices/d-glossary.html">Glossary</a>
+    <a class="hide-sm" href="../appendices/b-psql.html">psql</a>
+  </nav>
+  <button class="icon-btn theme-btn" type="button" aria-label="Toggle theme">&#9790;</button>
+</header>
+<div class="scrim"></div>
+<div class="shell">
+<nav class="sidebar" id="sidebar" aria-label="Course contents">
+  <h4>Start here</h4>
+  <ol>
+    <li><a href="../start/setup.html" data-page="setup"><span class="n">00</span><span>Set up your lab</span></a></li>
+  </ol>
+  <h4>Part 1 — Foundations: the server, databases, schemas and roles</h4>
+  <ol>
+    <li><a href="../lessons/01-architecture.html" data-page="01-architecture"><span class="n">01</span><span>How PostgreSQL is built</span></a></li>
+    <li><a href="../lessons/02-databases-and-schemas.html" data-page="02-databases-and-schemas"><span class="n">02</span><span>Databases and schemas</span></a></li>
+    <li><a href="../lessons/03-roles-and-users.html" data-page="03-roles-and-users"><span class="n">03</span><span>Roles and users</span></a></li>
+    <li><a href="../lessons/04-privileges-and-grants.html" data-page="04-privileges-and-grants"><span class="n">04</span><span>Privileges and grants</span></a></li>
+    <li><a href="../lessons/05-security-and-rls.html" data-page="05-security-and-rls"><span class="n">05</span><span>Hardening and row-level security</span></a></li>
+  </ol>
+  <h4>Part 2 — Modelling and SQL in depth</h4>
+  <ol>
+    <li><a href="../lessons/06-data-types.html" data-page="06-data-types"><span class="n">06</span><span>Data types</span></a></li>
+    <li><a href="../lessons/07-constraints-and-design.html" data-page="07-constraints-and-design"><span class="n">07</span><span>Constraints and schema design</span></a></li>
+    <li><a href="../lessons/08-advanced-queries.html" data-page="08-advanced-queries"><span class="n">08</span><span>Advanced queries</span></a></li>
+    <li><a href="../lessons/09-changing-data.html" data-page="09-changing-data"><span class="n">09</span><span>Changing data safely</span></a></li>
+    <li><a href="../lessons/10-json-and-arrays.html" data-page="10-json-and-arrays"><span class="n">10</span><span>JSONB and arrays</span></a></li>
+    <li><a href="../lessons/11-text-search.html" data-page="11-text-search"><span class="n">11</span><span>Text search and pattern matching</span></a></li>
+  </ol>
+  <h4>Part 3 — Performance</h4>
+  <ol>
+    <li><a href="../lessons/12-indexes.html" data-page="12-indexes"><span class="n">12</span><span>Indexes</span></a></li>
+    <li><a href="../lessons/13-explain-and-planner.html" data-page="13-explain-and-planner"><span class="n">13</span><span>EXPLAIN and the planner</span></a></li>
+    <li><a href="../lessons/14-query-tuning.html" data-page="14-query-tuning"><span class="n">14</span><span>A query-tuning workflow</span></a></li>
+  </ol>
+  <h4>Part 4 — Transactions and concurrency</h4>
+  <ol>
+    <li><a href="../lessons/15-transactions-and-mvcc.html" data-page="15-transactions-and-mvcc"><span class="n">15</span><span>Transactions and MVCC</span></a></li>
+    <li><a href="../lessons/16-locking.html" data-page="16-locking"><span class="n">16</span><span>Locking and concurrency</span></a></li>
+    <li><a href="../lessons/17-vacuum-and-bloat.html" data-page="17-vacuum-and-bloat"><span class="n">17</span><span>Vacuum, bloat and autovacuum</span></a></li>
+  </ol>
+  <h4>Part 5 — Programming the database</h4>
+  <ol>
+    <li><a href="../lessons/18-views-and-functions.html" data-page="18-views-and-functions"><span class="n">18</span><span>Views, functions and procedures</span></a></li>
+    <li><a href="../lessons/19-triggers-and-events.html" data-page="19-triggers-and-events"><span class="n">19</span><span>Triggers, LISTEN/NOTIFY and audit</span></a></li>
+    <li><a href="../lessons/20-partitioning.html" data-page="20-partitioning"><span class="n">20</span><span>Partitioning</span></a></li>
+  </ol>
+  <h4>Part 6 — Operating PostgreSQL</h4>
+  <ol>
+    <li><a href="../lessons/21-configuration.html" data-page="21-configuration"><span class="n">21</span><span>Configuration and tuning</span></a></li>
+    <li><a href="../lessons/22-wal-and-durability.html" data-page="22-wal-and-durability"><span class="n">22</span><span>WAL, checkpoints and durability</span></a></li>
+    <li><a href="../lessons/23-backup-and-recovery.html" data-page="23-backup-and-recovery"><span class="n">23</span><span>Backup, restore and PITR</span></a></li>
+    <li><a href="../lessons/24-replication.html" data-page="24-replication"><span class="n">24</span><span>Replication and high availability</span></a></li>
+    <li><a href="../lessons/25-monitoring.html" data-page="25-monitoring"><span class="n">25</span><span>Monitoring and diagnostics</span></a></li>
+    <li><a href="../lessons/26-connections-and-upgrades.html" data-page="26-connections-and-upgrades"><span class="n">26</span><span>Connections, pooling, extensions and upgrades</span></a></li>
+  </ol>
+  <h4>Part 7 — Putting it together</h4>
+  <ol>
+    <li><a href="../lessons/27-capstone.html" data-page="27-capstone"><span class="n">27</span><span>Capstone project</span></a></li>
+  </ol>
+  <h4>Annexes</h4>
+  <ol>
+    <li><a href="../appendices/a1-select-basics.html" data-page="a1-select-basics"><span class="n">A1</span><span>SELECT, filtering and sorting</span></a></li>
+    <li><a href="../appendices/a2-joins.html" data-page="a2-joins"><span class="n">A2</span><span>Joins and combining tables</span></a></li>
+    <li><a href="../appendices/a3-aggregation.html" data-page="a3-aggregation"><span class="n">A3</span><span>Aggregation and grouping</span></a></li>
+    <li><a href="../appendices/a4-subqueries-and-ctes.html" data-page="a4-subqueries-and-ctes"><span class="n">A4</span><span>Subqueries and CTEs</span></a></li>
+    <li><a href="../appendices/a5-ddl-and-dml.html" data-page="a5-ddl-and-dml"><span class="n">A5</span><span>Creating and changing things</span></a></li>
+    <li><a href="../appendices/b-psql.html" data-page="b-psql"><span class="n">B</span><span>psql cheat sheet</span></a></li>
+    <li><a href="../appendices/c-catalog-queries.html" data-page="c-catalog-queries"><span class="n">C</span><span>Catalog and diagnostic queries</span></a></li>
+    <li><a href="../appendices/d-glossary.html" data-page="d-glossary"><span class="n">D</span><span>Glossary</span></a></li>
+    <li><a href="../appendices/e-troubleshooting.html" data-page="e-troubleshooting"><span class="n">E</span><span>Troubleshooting</span></a></li>
+    <li><a href="../appendices/f-whats-next.html" data-page="f-whats-next"><span class="n">F</span><span>What to learn next</span></a></li>
+  </ol>
+</nav>
+<div class="main">
+<main class="content" id="content">
+<p class="eyebrow">Annex</p>
+<h1>D. Glossary</h1>
+<p class="lede">
+  Every PostgreSQL term this course uses, in alphabetical order, each in one or two sentences, with the lessons
+  where it is explained. Ordinary SQL words (<code>SELECT</code>, <code>JOIN</code>) are in annexes A1 to A5 rather than here.
+</p>
+
+<p><a href="#letter-a">A</a> · <a href="#letter-b">B</a> · <a href="#letter-c">C</a> · <a href="#letter-d">D</a> · <a href="#letter-e">E</a> · <a href="#letter-f">F</a> · <a href="#letter-g">G</a> · <a href="#letter-h">H</a> · <a href="#letter-i">I</a> · <a href="#letter-j">J</a> · <a href="#letter-l">L</a> · <a href="#letter-m">M</a> · <a href="#letter-o">O</a> · <a href="#letter-p">P</a> · <a href="#letter-r">R</a> · <a href="#letter-s">S</a> · <a href="#letter-t">T</a> · <a href="#letter-u">U</a> · <a href="#letter-v">V</a> · <a href="#letter-w">W</a> · <a href="#letter-x">X</a></p>
+
+<h2 id="letter-a">A</h2>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Term</th><th class="wrap">Meaning</th><th>Lessons</th></tr></thead>
+  <tbody>
+    <tr id="acl"><td><strong>ACL</strong></td><td class="wrap">Access control list: the array of privileges stored on an object, written like <code>role=arwd/grantor</code>. <code>aclexplode</code> turns it into rows.</td><td><a href="../lessons/04-privileges-and-grants.html">4</a>, <a href="c-catalog-queries.html">C</a></td></tr>
+    <tr id="advisory-lock"><td><strong>Advisory lock</strong></td><td class="wrap">A lock on a number that your application chooses, not on a row or table. PostgreSQL only tracks it; what it protects is up to you (for example, “only one worker runs this job”). Taken with <code>pg_advisory_lock</code> or <code>pg_try_advisory_lock</code>.</td><td><a href="../lessons/16-locking.html">16</a></td></tr>
+    <tr id="autovacuum"><td><strong>Autovacuum</strong></td><td class="wrap">A background process that runs <code>VACUUM</code> and <code>ANALYZE</code> on tables automatically when enough rows have changed. It removes dead tuples, keeps statistics fresh and prevents transaction ID wraparound.</td><td><a href="../lessons/17-vacuum-and-bloat.html">17</a></td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="letter-b">B</h2>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Term</th><th class="wrap">Meaning</th><th>Lessons</th></tr></thead>
+  <tbody>
+    <tr id="backend"><td><strong>Backend</strong></td><td class="wrap">The server process that serves one client connection. Every connection gets its own backend, which is why connections are expensive.</td><td><a href="../lessons/01-architecture.html">1</a>, <a href="../lessons/26-connections-and-upgrades.html">26</a></td></tr>
+    <tr id="bloat"><td><strong>Bloat</strong></td><td class="wrap">Space in a table or index that holds dead or empty row slots instead of live data, so the object is larger than its data needs. Caused by updates and deletes that vacuum has not yet cleaned up or cannot reuse.</td><td><a href="../lessons/17-vacuum-and-bloat.html">17</a></td></tr>
+    <tr id="brin"><td><strong>BRIN</strong></td><td class="wrap">Block Range INdex: a tiny index that stores the minimum and maximum value for each range of table pages. Useful for huge tables whose values follow the physical order, such as an append-only timestamp column.</td><td><a href="../lessons/12-indexes.html">12</a></td></tr>
+    <tr id="b-tree"><td><strong>B-tree</strong></td><td class="wrap">The default index type. A sorted tree that answers equality, range, sorting and prefix queries.</td><td><a href="../lessons/12-indexes.html">12</a></td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="letter-c">C</h2>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Term</th><th class="wrap">Meaning</th><th>Lessons</th></tr></thead>
+  <tbody>
+    <tr id="checkpoint"><td><strong>Checkpoint</strong></td><td class="wrap">The moment when the server writes all changed pages from memory to the data files, so that crash recovery only has to replay WAL from that point on. Too-frequent checkpoints cost I/O; too-rare ones make recovery longer.</td><td><a href="../lessons/22-wal-and-durability.html">22</a></td></tr>
+    <tr id="cluster"><td><strong>Cluster</strong></td><td class="wrap">One PostgreSQL server instance and its data directory: a set of databases served by one postmaster on one port. Not a group of machines; roles and tablespaces are shared across the whole cluster.</td><td><a href="../lessons/01-architecture.html">1</a>, <a href="../lessons/02-databases-and-schemas.html">2</a></td></tr>
+    <tr id="constraint"><td><strong>Constraint</strong></td><td class="wrap">A rule the database enforces on every write: <code>NOT NULL</code>, <code>CHECK</code>, <code>UNIQUE</code>, <code>PRIMARY KEY</code>, <code>FOREIGN KEY</code> or <code>EXCLUDE</code>.</td><td><a href="../lessons/07-constraints-and-design.html">7</a>, <a href="a5-ddl-and-dml.html">A5</a></td></tr>
+    <tr id="cte"><td><strong>CTE</strong></td><td class="wrap">Common table expression: a named subquery written with <code>WITH name AS (…)</code> before the main query.</td><td><a href="../lessons/08-advanced-queries.html">8</a>, <a href="a4-subqueries-and-ctes.html">A4</a></td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="letter-d">D</h2>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Term</th><th class="wrap">Meaning</th><th>Lessons</th></tr></thead>
+  <tbody>
+    <tr id="database"><td><strong>Database</strong></td><td class="wrap">A named collection of schemas inside a cluster. A connection is always to exactly one database, and a query cannot read tables from another database directly.</td><td><a href="../lessons/02-databases-and-schemas.html">2</a></td></tr>
+    <tr id="deadlock"><td><strong>Deadlock</strong></td><td class="wrap">Two or more transactions each waiting for a lock the other holds, so none can continue. PostgreSQL detects it after <code>deadlock_timeout</code> (1 s by default) and cancels one of them with <em>deadlock detected</em>.</td><td><a href="../lessons/16-locking.html">16</a>, <a href="e-troubleshooting.html">E</a></td></tr>
+    <tr id="dead-tuple"><td><strong>Dead tuple</strong></td><td class="wrap">An old row version that no running transaction can see any more, left behind by an <code>UPDATE</code> or <code>DELETE</code>. It takes space until vacuum removes it.</td><td><a href="../lessons/15-transactions-and-mvcc.html">15</a>, <a href="../lessons/17-vacuum-and-bloat.html">17</a></td></tr>
+    <tr id="default-privileges"><td><strong>Default privileges</strong></td><td class="wrap">Privileges that will be granted automatically on objects a role creates <em>in the future</em>, set with <code>ALTER DEFAULT PRIVILEGES</code>. They do not change existing objects.</td><td><a href="../lessons/04-privileges-and-grants.html">4</a></td></tr>
+    <tr id="domain"><td><strong>Domain</strong></td><td class="wrap">A named data type built on an existing one, with optional constraints, such as <code>create domain email as text check (value like '%@%')</code>. Every column of that domain gets the same rule.</td><td><a href="../lessons/06-data-types.html">6</a></td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="letter-e">E</h2>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Term</th><th class="wrap">Meaning</th><th>Lessons</th></tr></thead>
+  <tbody>
+    <tr id="enum"><td><strong>Enum</strong></td><td class="wrap">A data type with a fixed, ordered list of allowed values, such as <code>shop.order_status</code>. Adding a value is easy; removing or renaming one is not.</td><td><a href="../lessons/06-data-types.html">6</a></td></tr>
+    <tr id="explain"><td><strong>EXPLAIN</strong></td><td class="wrap">The command that shows the plan the planner chose for a statement. <code>EXPLAIN ANALYZE</code> also runs it and reports real row counts and times.</td><td><a href="../lessons/13-explain-and-planner.html">13</a></td></tr>
+    <tr id="expression-index"><td><strong>Expression index</strong></td><td class="wrap">An index on the result of an expression rather than a plain column, such as <code>lower(email)</code>. A query uses it only when it contains the same expression.</td><td><a href="../lessons/12-indexes.html">12</a></td></tr>
+    <tr id="extension"><td><strong>Extension</strong></td><td class="wrap">A packaged set of SQL objects (types, functions, operators, index methods) installed into a database with <code>CREATE EXTENSION</code>, such as <code>pg_stat_statements</code> or <code>pg_trgm</code>.</td><td><a href="../lessons/26-connections-and-upgrades.html">26</a></td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="letter-f">F</h2>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Term</th><th class="wrap">Meaning</th><th>Lessons</th></tr></thead>
+  <tbody>
+    <tr id="foreign-key"><td><strong>Foreign key</strong></td><td class="wrap">A constraint saying that a column's value must exist as a key in another table (or the same one). It can also say what happens when the referenced row is deleted or updated.</td><td><a href="../lessons/07-constraints-and-design.html">7</a>, <a href="a2-joins.html">A2</a></td></tr>
+    <tr id="function"><td><strong>Function</strong></td><td class="wrap">A named piece of code stored in the database, written in SQL, PL/pgSQL or another language, that takes arguments and returns a value or a set of rows. It runs inside the calling statement's transaction.</td><td><a href="../lessons/18-views-and-functions.html">18</a></td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="letter-g">G</h2>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Term</th><th class="wrap">Meaning</th><th>Lessons</th></tr></thead>
+  <tbody>
+    <tr id="generated-column"><td><strong>Generated column</strong></td><td class="wrap">A column whose value is always computed from other columns of the same row, such as <code>total numeric generated always as (qty * price) stored</code>. You cannot write to it.</td><td><a href="../lessons/07-constraints-and-design.html">7</a></td></tr>
+    <tr id="gin"><td><strong>GIN</strong></td><td class="wrap">Generalized Inverted iNdex: an index that maps each element inside a value (each array element, JSONB key, or word) to the rows that contain it. Used for arrays, JSONB and full-text search.</td><td><a href="../lessons/10-json-and-arrays.html">10</a>, <a href="../lessons/11-text-search.html">11</a>, <a href="../lessons/12-indexes.html">12</a></td></tr>
+    <tr id="gist"><td><strong>GiST</strong></td><td class="wrap">Generalized Search Tree: an index framework for data that overlaps or nests, such as ranges, geometric shapes and nearest-neighbour searches. It backs exclusion constraints.</td><td><a href="../lessons/12-indexes.html">12</a></td></tr>
+    <tr id="grant"><td><strong>Grant</strong></td><td class="wrap">The <code>GRANT</code> command, which gives a privilege on an object to a role, or makes one role a member of another. <code>REVOKE</code> takes it back.</td><td><a href="../lessons/04-privileges-and-grants.html">4</a></td></tr>
+    <tr id="group-role"><td><strong>Group role</strong></td><td class="wrap">A role that does not log in (<code>NOLOGIN</code>) and exists to hold privileges for its members. Not a separate kind of object, just a role used that way.</td><td><a href="../lessons/03-roles-and-users.html">3</a></td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="letter-h">H</h2>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Term</th><th class="wrap">Meaning</th><th>Lessons</th></tr></thead>
+  <tbody>
+    <tr id="hot-update"><td><strong>HOT update</strong></td><td class="wrap">Heap-Only Tuple update: an update that puts the new row version on the same page and changes no indexed column, so no index needs a new entry. Much cheaper than a normal update.</td><td><a href="../lessons/17-vacuum-and-bloat.html">17</a></td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="letter-i">I</h2>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Term</th><th class="wrap">Meaning</th><th>Lessons</th></tr></thead>
+  <tbody>
+    <tr id="identity-column"><td><strong>Identity column</strong></td><td class="wrap">A column that takes its value from an automatic sequence, declared <code>generated always as identity</code> (or <code>by default</code>). The standard replacement for <code>serial</code>.</td><td><a href="../lessons/07-constraints-and-design.html">7</a>, <a href="a5-ddl-and-dml.html">A5</a></td></tr>
+    <tr id="index"><td><strong>Index</strong></td><td class="wrap">A separate structure that lets PostgreSQL find rows by a value without reading the whole table. It speeds up reads and costs space and time on every write.</td><td><a href="../lessons/12-indexes.html">12</a></td></tr>
+    <tr id="isolation-level"><td><strong>Isolation level</strong></td><td class="wrap">How much a transaction is protected from changes made by concurrent transactions: <code>READ COMMITTED</code> (the default), <code>REPEATABLE READ</code> or <code>SERIALIZABLE</code>.</td><td><a href="../lessons/15-transactions-and-mvcc.html">15</a></td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="letter-j">J</h2>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Term</th><th class="wrap">Meaning</th><th>Lessons</th></tr></thead>
+  <tbody>
+    <tr id="jsonb"><td><strong>JSONB</strong></td><td class="wrap">A binary JSON data type that stores parsed JSON, supports indexing with GIN and has operators for containment and paths. Prefer it to the text-based <code>json</code> type.</td><td><a href="../lessons/10-json-and-arrays.html">10</a></td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="letter-l">L</h2>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Term</th><th class="wrap">Meaning</th><th>Lessons</th></tr></thead>
+  <tbody>
+    <tr id="listen-notify"><td><strong>LISTEN / NOTIFY</strong></td><td class="wrap">A simple message channel inside PostgreSQL. A session runs <code>LISTEN channel</code>; another runs <code>NOTIFY channel, 'payload'</code>, and listeners receive it when the sender's transaction commits.</td><td><a href="../lessons/19-triggers-and-events.html">19</a></td></tr>
+    <tr id="lock"><td><strong>Lock</strong></td><td class="wrap">A claim a transaction holds on a table, row or other object to stop conflicting operations. Most locks are taken and released automatically.</td><td><a href="../lessons/16-locking.html">16</a></td></tr>
+    <tr id="login-role"><td><strong>Login role</strong></td><td class="wrap">A role with the <code>LOGIN</code> attribute, which may open a connection. What other systems call a user.</td><td><a href="../lessons/03-roles-and-users.html">3</a></td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="letter-m">M</h2>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Term</th><th class="wrap">Meaning</th><th>Lessons</th></tr></thead>
+  <tbody>
+    <tr id="materialized-view"><td><strong>Materialized view</strong></td><td class="wrap">A view whose result is stored like a table and only updated when you run <code>REFRESH MATERIALIZED VIEW</code>. Fast to read, stale between refreshes.</td><td><a href="../lessons/18-views-and-functions.html">18</a></td></tr>
+    <tr id="mvcc"><td><strong>MVCC</strong></td><td class="wrap">Multi-Version Concurrency Control: instead of overwriting a row, an update writes a new version, and each transaction sees the versions that were committed when its snapshot was taken. That is why readers do not block writers.</td><td><a href="../lessons/15-transactions-and-mvcc.html">15</a></td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="letter-o">O</h2>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Term</th><th class="wrap">Meaning</th><th>Lessons</th></tr></thead>
+  <tbody>
+    <tr id="owner"><td><strong>Owner</strong></td><td class="wrap">The role that owns an object, usually the role that created it. The owner may alter or drop it and grant privileges on it, regardless of grants.</td><td><a href="../lessons/03-roles-and-users.html">3</a>, <a href="../lessons/04-privileges-and-grants.html">4</a></td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="letter-p">P</h2>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Term</th><th class="wrap">Meaning</th><th>Lessons</th></tr></thead>
+  <tbody>
+    <tr id="partial-index"><td><strong>Partial index</strong></td><td class="wrap">An index with a <code>WHERE</code> clause that covers only some rows, such as <code>where status = 'pending'</code>. Smaller, and used only by queries whose condition implies it.</td><td><a href="../lessons/12-indexes.html">12</a></td></tr>
+    <tr id="partition"><td><strong>Partition</strong></td><td class="wrap">One piece of a partitioned table. Rows are routed to partitions by a key (by range, list or hash), and queries that filter on the key skip the partitions they do not need.</td><td><a href="../lessons/20-partitioning.html">20</a></td></tr>
+    <tr id="pg-hba"><td><strong>pg_hba.conf</strong></td><td class="wrap">The host-based authentication file. Each line says, for a connection type, database, role and client address, which authentication method to use. The first matching line wins.</td><td><a href="../lessons/03-roles-and-users.html">3</a>, <a href="../lessons/05-security-and-rls.html">5</a></td></tr>
+    <tr id="pitr"><td><strong>PITR</strong></td><td class="wrap">Point-in-time recovery: restoring a base backup and replaying archived WAL up to a chosen moment, such as just before a mistaken <code>DELETE</code>.</td><td><a href="../lessons/23-backup-and-recovery.html">23</a></td></tr>
+    <tr id="planner"><td><strong>Planner</strong></td><td class="wrap">The part of PostgreSQL that chooses how to run a query, by estimating the cost of possible plans from table statistics. Also called the optimizer.</td><td><a href="../lessons/13-explain-and-planner.html">13</a></td></tr>
+    <tr id="plan-node"><td><strong>Plan node</strong></td><td class="wrap">One step in an execution plan, such as Seq Scan, Index Scan, Hash Join or Sort. Nodes form a tree; each one feeds rows to its parent.</td><td><a href="../lessons/13-explain-and-planner.html">13</a></td></tr>
+    <tr id="policy"><td><strong>Policy</strong></td><td class="wrap">A row-level security rule on a table: a condition that decides which rows a role may see (<code>USING</code>) or write (<code>WITH CHECK</code>). Created with <code>CREATE POLICY</code>.</td><td><a href="../lessons/05-security-and-rls.html">5</a></td></tr>
+    <tr id="postmaster"><td><strong>Postmaster</strong></td><td class="wrap">The main server process. It listens for connections and starts a backend for each one, plus the background processes.</td><td><a href="../lessons/01-architecture.html">1</a></td></tr>
+    <tr id="privilege"><td><strong>Privilege</strong></td><td class="wrap">A right to do one thing to one object, such as <code>SELECT</code> on a table or <code>USAGE</code> on a schema. Granted to roles.</td><td><a href="../lessons/04-privileges-and-grants.html">4</a></td></tr>
+    <tr id="procedure"><td><strong>Procedure</strong></td><td class="wrap">Like a function, but called with <code>CALL</code>, returns no value, and may <code>COMMIT</code> or <code>ROLLBACK</code> inside its body.</td><td><a href="../lessons/18-views-and-functions.html">18</a></td></tr>
+    <tr id="publication"><td><strong>Publication</strong></td><td class="wrap">In logical replication, the set of tables (and kinds of change) that a server offers to send, created with <code>CREATE PUBLICATION</code>.</td><td><a href="../lessons/24-replication.html">24</a></td></tr>
+    <tr id="public-schema"><td><strong>public schema</strong></td><td class="wrap">The schema every new database has, first or second on the default <code>search_path</code>. Since PostgreSQL 15, ordinary roles can no longer create objects in it by default.</td><td><a href="../lessons/02-databases-and-schemas.html">2</a>, <a href="../lessons/05-security-and-rls.html">5</a></td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="letter-r">R</h2>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Term</th><th class="wrap">Meaning</th><th>Lessons</th></tr></thead>
+  <tbody>
+    <tr id="replication-slot"><td><strong>Replication slot</strong></td><td class="wrap">A server-side record of how far a replica or subscriber has consumed the WAL, so the primary keeps the WAL it still needs. An abandoned slot keeps WAL forever and can fill the disk.</td><td><a href="../lessons/24-replication.html">24</a></td></tr>
+    <tr id="role"><td><strong>Role</strong></td><td class="wrap">The only kind of account in PostgreSQL. A role can log in, own objects, hold privileges and be a member of other roles. Roles are cluster-wide.</td><td><a href="../lessons/03-roles-and-users.html">3</a></td></tr>
+    <tr id="rls"><td><strong>Row-level security</strong></td><td class="wrap">A table feature that filters which rows each role can see and change, using policies. Enabled with <code>ALTER TABLE … ENABLE ROW LEVEL SECURITY</code>; abbreviated RLS.</td><td><a href="../lessons/05-security-and-rls.html">5</a></td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="letter-s">S</h2>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Term</th><th class="wrap">Meaning</th><th>Lessons</th></tr></thead>
+  <tbody>
+    <tr id="schema"><td><strong>Schema</strong></td><td class="wrap">A namespace inside a database that holds tables, views, functions and types. Two schemas can each have a table with the same name; you tell them apart as <code>schema.table</code>.</td><td><a href="../lessons/02-databases-and-schemas.html">2</a></td></tr>
+    <tr id="scram"><td><strong>SCRAM</strong></td><td class="wrap">SCRAM-SHA-256, the password authentication method PostgreSQL uses by default. The server stores a salted verifier, never the password, and the password is never sent over the connection.</td><td><a href="../lessons/03-roles-and-users.html">3</a>, <a href="../lessons/05-security-and-rls.html">5</a></td></tr>
+    <tr id="search-path"><td><strong>search_path</strong></td><td class="wrap">The list of schemas PostgreSQL searches, in order, for a name written without a schema. The default is <code>"$user", public</code>.</td><td><a href="../lessons/02-databases-and-schemas.html">2</a>, <a href="e-troubleshooting.html">E</a></td></tr>
+    <tr id="seq-scan"><td><strong>Sequential scan</strong></td><td class="wrap">Reading a table from start to end, page by page. The fastest way to read most of a table, and the slowest way to find a few rows in a big one.</td><td><a href="../lessons/13-explain-and-planner.html">13</a></td></tr>
+    <tr id="serialization-failure"><td><strong>Serialization failure</strong></td><td class="wrap">An error (<code>SQLSTATE 40001</code>) raised when, under <code>REPEATABLE READ</code> or <code>SERIALIZABLE</code>, a transaction cannot be completed without breaking the isolation guarantee. The correct response is to retry the whole transaction.</td><td><a href="../lessons/15-transactions-and-mvcc.html">15</a>, <a href="e-troubleshooting.html">E</a></td></tr>
+    <tr id="shared-buffers"><td><strong>Shared buffers</strong></td><td class="wrap">The server's own cache of table and index pages in memory, sized by <code>shared_buffers</code>.</td><td><a href="../lessons/01-architecture.html">1</a>, <a href="../lessons/21-configuration.html">21</a></td></tr>
+    <tr id="snapshot"><td><strong>Snapshot</strong></td><td class="wrap">The set of transactions whose effects a statement or transaction can see. It decides which row versions are visible under MVCC.</td><td><a href="../lessons/15-transactions-and-mvcc.html">15</a></td></tr>
+    <tr id="statistics"><td><strong>Statistics</strong></td><td class="wrap">Planner statistics: a summary of each column's values (most common values, histogram, null fraction) gathered by <code>ANALYZE</code> and stored in <code>pg_statistic</code>. Not to be confused with the activity counters in <code>pg_stat_*</code>.</td><td><a href="../lessons/13-explain-and-planner.html">13</a></td></tr>
+    <tr id="subscription"><td><strong>Subscription</strong></td><td class="wrap">In logical replication, the receiving side: a connection to a publication on another server that copies its changes into local tables. Created with <code>CREATE SUBSCRIPTION</code>.</td><td><a href="../lessons/24-replication.html">24</a></td></tr>
+    <tr id="superuser"><td><strong>Superuser</strong></td><td class="wrap">A role with the <code>SUPERUSER</code> attribute. It bypasses every privilege check, including row-level security, and can run operating-system commands through <code>COPY … PROGRAM</code>. The course container's <code>postgres</code> role is one.</td><td><a href="../lessons/03-roles-and-users.html">3</a></td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="letter-t">T</h2>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Term</th><th class="wrap">Meaning</th><th>Lessons</th></tr></thead>
+  <tbody>
+    <tr id="tablespace"><td><strong>Tablespace</strong></td><td class="wrap">A directory on disk where PostgreSQL may store tables and indexes, letting you put some data on a different disk. Rarely needed on modern storage or in the cloud.</td><td><a href="../lessons/02-databases-and-schemas.html">2</a></td></tr>
+    <tr id="template-database"><td><strong>Template database</strong></td><td class="wrap">The database copied to make a new one. <code>CREATE DATABASE</code> copies <code>template1</code> by default; <code>template0</code> is the pristine fallback. The course keeps <code>shop_template</code> for the checker.</td><td><a href="../lessons/02-databases-and-schemas.html">2</a></td></tr>
+    <tr id="toast"><td><strong>TOAST</strong></td><td class="wrap">The Oversized-Attribute Storage Technique: values larger than about 2 kB are compressed and/or moved to a side table automatically, so a row stays small. It is why a wide <code>text</code> or <code>jsonb</code> column works without you doing anything.</td><td><a href="../lessons/06-data-types.html">6</a></td></tr>
+    <tr id="transaction"><td><strong>Transaction</strong></td><td class="wrap">A group of statements that succeed or fail as a unit, between <code>BEGIN</code> and <code>COMMIT</code> (or <code>ROLLBACK</code>). Without <code>BEGIN</code>, each statement is its own transaction.</td><td><a href="../lessons/15-transactions-and-mvcc.html">15</a>, <a href="a5-ddl-and-dml.html">A5</a></td></tr>
+    <tr id="trigger"><td><strong>Trigger</strong></td><td class="wrap">A function the database runs automatically before or after an <code>INSERT</code>, <code>UPDATE</code>, <code>DELETE</code> or <code>TRUNCATE</code>, for each row or once per statement.</td><td><a href="../lessons/19-triggers-and-events.html">19</a></td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="letter-u">U</h2>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Term</th><th class="wrap">Meaning</th><th>Lessons</th></tr></thead>
+  <tbody>
+    <tr id="user"><td><strong>User</strong></td><td class="wrap">In PostgreSQL, a role that can log in. <code>CREATE USER</code> is exactly <code>CREATE ROLE … LOGIN</code>; there is no separate user object.</td><td><a href="../lessons/03-roles-and-users.html">3</a></td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="letter-v">V</h2>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Term</th><th class="wrap">Meaning</th><th>Lessons</th></tr></thead>
+  <tbody>
+    <tr id="vacuum"><td><strong>VACUUM</strong></td><td class="wrap">The command that removes dead tuples so their space can be reused, updates the visibility map and freezes old rows. Plain <code>VACUUM</code> runs alongside normal traffic; <code>VACUUM FULL</code> rewrites the table under an exclusive lock.</td><td><a href="../lessons/17-vacuum-and-bloat.html">17</a></td></tr>
+    <tr id="view"><td><strong>View</strong></td><td class="wrap">A stored query that you can select from like a table. It holds no data of its own; each query against it runs the stored query.</td><td><a href="../lessons/18-views-and-functions.html">18</a></td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="letter-w">W</h2>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Term</th><th class="wrap">Meaning</th><th>Lessons</th></tr></thead>
+  <tbody>
+    <tr id="wal"><td><strong>WAL</strong></td><td class="wrap">Write-Ahead Log: the journal in which every change is recorded before the data files are changed. It makes commits durable, drives crash recovery and is what replication and PITR replay.</td><td><a href="../lessons/22-wal-and-durability.html">22</a>, <a href="../lessons/23-backup-and-recovery.html">23</a>, <a href="../lessons/24-replication.html">24</a></td></tr>
+    <tr id="wraparound"><td><strong>Wraparound</strong></td><td class="wrap">Transaction IDs are 32-bit and reused in a circle. Old rows must be <em>frozen</em> by vacuum before the counter comes round, or PostgreSQL stops accepting writes to protect the data.</td><td><a href="../lessons/17-vacuum-and-bloat.html">17</a></td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="letter-x">X</h2>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Term</th><th class="wrap">Meaning</th><th>Lessons</th></tr></thead>
+  <tbody>
+    <tr id="xmax"><td><strong>xmax</strong></td><td class="wrap">A hidden system column holding the ID of the transaction that deleted, updated or locked this row version; 0 when nothing ever did. A non-zero <code>xmax</code> on a live row usually means a lock or an update that was rolled back. Together with <code>xmin</code> it decides which snapshots see the row.</td><td><a href="../lessons/15-transactions-and-mvcc.html">15</a></td></tr>
+    <tr id="xmin"><td><strong>xmin</strong></td><td class="wrap">A hidden system column holding the ID of the transaction that created this row version. You can select it: <code>select xmin, * from shop.products</code>.</td><td><a href="../lessons/15-transactions-and-mvcc.html">15</a></td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="next">Where to next</h2>
+<p>
+  For the catalog views behind many of these terms, see <a href="c-catalog-queries.html">annex C</a>. For the error
+  messages that mention them, see <a href="e-troubleshooting.html">annex E</a>.
+</p>
+<nav class="pager"><a class="prev" href="../appendices/c-catalog-queries.html"><span class="dir">Previous</span><span class="lbl">C. Catalog and diagnostic queries</span></a><a class="next" href="../appendices/e-troubleshooting.html"><span class="dir">Next</span><span class="lbl">E. Troubleshooting</span></a></nav>
+</main>
+<aside class="toc" aria-label="On this page"></aside>
+</div>
+</div>
+<script src="../assets/js/search-index.js"></script>
+<script src="../assets/js/mini-seed.js"></script>
+<script src="../assets/js/course.js"></script>
+</body>
+</html>

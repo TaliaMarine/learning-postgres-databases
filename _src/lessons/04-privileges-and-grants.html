@@ -1,0 +1,812 @@
+<p class="lede">
+  A <em>privilege</em> is a permission to do one specific thing to one specific object: read this table, create
+  things in that schema, connect to that database. <code>GRANT</code> gives a privilege and <code>REVOKE</code>
+  takes it back. This lesson covers every level where privileges exist, who holds them by default, how to make
+  new tables pick them up automatically, and how to audit what any role can really do.
+</p>
+
+<h2 id="goals">Learning goals</h2>
+<ul>
+  <li>Say which privileges exist on a database, a schema, a table, a column, a sequence and a function.</li>
+  <li>Explain the difference between an <em>owner</em> and a <em>grantee</em>, and what <code>PUBLIC</code> means.</li>
+  <li>Give a role exactly the access it needs, and see why a table grant alone is not enough without schema <code>USAGE</code>.</li>
+  <li>Use <code>ALTER DEFAULT PRIVILEGES</code> so tables created later are readable without another <code>GRANT</code>.</li>
+  <li>Hand privileges on with <code>WITH GRANT OPTION</code>, and remove a whole chain with <code>REVOKE ... CASCADE</code>.</li>
+  <li>Remove a role cleanly with <code>REASSIGN OWNED</code> and <code>DROP OWNED</code>.</li>
+  <li>Read <code>\dp</code>, <code>\dn+</code> and <code>\l</code>, and audit with the <code>has_*_privilege</code> functions and <code>aclexplode</code>.</li>
+</ul>
+
+<h2 id="lab">Set up for this lesson</h2>
+<p>
+  Use the <code>shop</code> database. The exercises create roles whose names start with <code>lab_04_</code>; the
+  checker removes them for you. If you experiment in <code>shop</code> yourself, create a scratch copy first so you
+  can throw it away:
+</p>
+
+<figure class="code" data-lang="bash">
+  <figcaption><span class="path">terminal</span><span class="grow"></span><span class="lang">bash</span></figcaption>
+<pre><code>./pg sql "create database lab_scratch template shop_template"
+./pg psql lab_scratch</code></pre>
+</figure>
+
+<p>
+  Drop it when you are done: <code>./pg sql "drop database lab_scratch with (force)"</code>. Roles are
+  cluster-wide (<a href="03-roles-and-users.html">lesson 3</a>), so drop the roles you made as well. This lesson
+  builds on <a href="02-databases-and-schemas.html">lesson 2</a> (what a database and a schema are, and
+  <code>search_path</code>) and on <a href="03-roles-and-users.html">lesson 3</a> (roles and membership).
+</p>
+
+<h2 id="three-questions">1. Three questions behind every privilege</h2>
+
+<p>
+  When a statement fails with <em>permission denied</em>, ask three questions. They keep the whole lesson
+  organised.
+</p>
+
+<ol>
+  <li><strong>Which object?</strong> Privileges are attached to objects, and objects sit in a hierarchy.</li>
+  <li><strong>Who owns it?</strong> The owner can do everything to the object and can grant to others.</li>
+  <li><strong>Who has been granted what?</strong> Everyone else needs an explicit grant, directly or through a group role they belong to.</li>
+</ol>
+
+<p>
+  The hierarchy matters because to reach a column you must pass every level above it. Each level has its own
+  check.
+</p>
+
+<figure class="dia">
+  <div class="dia-hold">
+    <svg class="d" viewBox="0 0 860 330" role="img" aria-labelledby="hier-t hier-d">
+      <title id="hier-t">The object hierarchy and the privilege checked at each level</title>
+      <desc id="hier-d">A cluster holds databases; a database holds schemas; a schema holds tables, sequences and functions; a table holds columns. CONNECT is checked at the database, USAGE at the schema, SELECT at the table or column.</desc>
+      <defs>
+        <marker id="hh" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z"/></marker>
+      </defs>
+      <rect class="box" x="30" y="20" width="260" height="46" rx="8"/>
+      <text class="hd ctr" x="160" y="48">cluster (roles live here)</text>
+      <rect class="box accent" x="30" y="92" width="260" height="46" rx="8"/>
+      <text class="hd ctr" x="160" y="120">database</text>
+      <rect class="box accent" x="30" y="164" width="260" height="46" rx="8"/>
+      <text class="hd ctr" x="160" y="192">schema</text>
+      <rect class="box teal" x="30" y="236" width="260" height="46" rx="8"/>
+      <text class="hd ctr" x="160" y="264">table · sequence · function</text>
+      <path class="line" d="M160 66 L160 90" marker-end="url(#hh)"/>
+      <path class="line" d="M160 138 L160 162" marker-end="url(#hh)"/>
+      <path class="line" d="M160 210 L160 234" marker-end="url(#hh)"/>
+      <text class="lbl" x="330" y="120">CONNECT · CREATE · TEMPORARY</text>
+      <text class="lbl" x="330" y="192">USAGE · CREATE</text>
+      <text class="lbl" x="330" y="256">SELECT · INSERT · UPDATE · DELETE · TRUNCATE ·</text>
+      <text class="lbl" x="330" y="276">REFERENCES · TRIGGER · MAINTAIN  /  USAGE · SELECT · UPDATE  /  EXECUTE</text>
+      <text class="mut tiny" x="330" y="308">column privileges (SELECT, INSERT, UPDATE, REFERENCES) are a finer cut of the table</text>
+    </svg>
+  </div>
+  <figcaption>A role needs the right privilege at every level on the way down. Having <code>SELECT</code> on a table is not enough if it cannot use the schema.</figcaption>
+</figure>
+
+<h2 id="owners">2. Owners and grantees</h2>
+
+<p>
+  Every object has exactly one <em>owner</em>: the role that created it, unless someone changed that. The owner
+  is not listed in the privilege list, because the owner holds every privilege on the object implicitly. That is
+  why <code>shop.orders</code> shows an empty access list (<code>relacl</code> is <code>NULL</code>): only its
+  owner, <code>postgres</code>, has rights, and the owner's rights are the default.
+</p>
+
+<p>
+  A <em>grantee</em> is any other role that has been given a privilege. A privilege list entry records three
+  things: who received it, which privileges, and who granted it. The owner's own privileges can be revoked from
+  itself, but the owner can always grant them back, and only the owner (or a superuser) can drop or alter the
+  object.
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">who owns what</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select datname,  pg_get_userbyid(datdba)    as owner from pg_database where datname = 'shop';
+select nspname,  pg_get_userbyid(nspowner)   as owner from pg_namespace where nspname in ('shop', 'public');
+select relname,  pg_get_userbyid(relowner)   as owner from pg_class where relname = 'orders';
+
+alter table shop.orders owner to some_role;      -- change an owner</code></pre>
+</figure>
+
+<p>
+  The columns are <code>pg_database.datdba</code>, <code>pg_namespace.nspowner</code> and
+  <code>pg_class.relowner</code>. The function <code>pg_get_userbyid</code> turns the role number into a name. In
+  the course database, <code>shop</code> and its tables are owned by <code>postgres</code>. The <code>public</code>
+  schema is owned by a special built-in role, <code>pg_database_owner</code>, which always means "whoever owns the
+  current database".
+</p>
+
+<div class="note info">
+  <span class="note-title">Superusers skip the list</span>
+  <p>
+    A superuser passes every privilege check, so <code>GRANT</code> and <code>REVOKE</code> change nothing for it
+    (<a href="03-roles-and-users.html#attributes">lesson 3</a>). When you test a grant, test it as an ordinary
+    role, or ask <code>has_table_privilege('role', 'table', 'select')</code>, which answers for any role.
+  </p>
+</div>
+
+<h2 id="grant-revoke">3. GRANT and REVOKE</h2>
+
+<p>The shape is always the same:</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">the two statements</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>grant  privilege [, ...] on object_type object_name to   role [, ...];
+revoke privilege [, ...] on object_type object_name from role [, ...];</code></pre>
+</figure>
+
+<p>Which privileges exist depends on the object type:</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Object</th><th>Privileges</th><th>Short letters in <code>\dp</code></th></tr></thead>
+  <tbody>
+    <tr><td>Database</td><td class="wrap"><code>CONNECT</code>, <code>CREATE</code> (new schemas), <code>TEMPORARY</code></td><td><code>c C T</code></td></tr>
+    <tr><td>Schema</td><td class="wrap"><code>USAGE</code> (look up objects in it), <code>CREATE</code> (make objects in it)</td><td><code>U C</code></td></tr>
+    <tr><td>Table</td><td class="wrap"><code>SELECT</code>, <code>INSERT</code>, <code>UPDATE</code>, <code>DELETE</code>, <code>TRUNCATE</code>, <code>REFERENCES</code>, <code>TRIGGER</code>, <code>MAINTAIN</code></td><td><code>r a w d D x t m</code></td></tr>
+    <tr><td>Column</td><td class="wrap"><code>SELECT</code>, <code>INSERT</code>, <code>UPDATE</code>, <code>REFERENCES</code></td><td><code>r a w x</code></td></tr>
+    <tr><td>Sequence</td><td class="wrap"><code>USAGE</code> (<code>nextval</code>, <code>currval</code>), <code>SELECT</code> (<code>currval</code>, read it), <code>UPDATE</code> (<code>setval</code>)</td><td><code>U r w</code></td></tr>
+    <tr><td>Function, procedure</td><td class="wrap"><code>EXECUTE</code></td><td><code>X</code></td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>
+  <code>MAINTAIN</code> lets a role run <code>VACUUM</code>, <code>ANALYZE</code>, <code>REINDEX</code>,
+  <code>CLUSTER</code>, <code>REFRESH MATERIALIZED VIEW</code> and <code>LOCK</code> on the table, which is how you
+  let a maintenance role do housekeeping without owning the data. <code>TRUNCATE</code> is separate from
+  <code>DELETE</code>: a role that may delete rows may not necessarily empty the table. <code>ALL</code> is a
+  shorthand for every privilege that applies to the object type.
+</p>
+
+<h3 id="ladder">The ladder: schema first, then table</h3>
+
+<p>
+  Run the playground below. It first defines a small helper, <code>try_as</code>, that runs one statement as
+  another role and reports <em>allowed</em> or the permission error. (The helper exists only in the playground. It
+  keeps the script from stopping at the first error, so you see every step.) Then it gives a new role,
+  <code>viewer</code>, one privilege at a time.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">the ladder: nothing, then schema USAGE, then table SELECT · run once, then “Reset data” to run again</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">-- A tiny test helper: run one statement as another role and report what happened.
+create function public.try_as(who text, q text) returns text language plpgsql as $$
+begin
+  execute format('set local role %I', who);
+  execute q;
+  reset role;
+  return 'allowed';
+exception when others then
+  reset role;
+  return 'denied: ' || sqlerrm;
+end $$;
+
+create role viewer login;
+create temp table ladder (step text, result text);
+
+insert into ladder select '0. no grants at all', try_as('viewer', 'select count(*) from shop.products');
+
+grant usage on schema shop to viewer;
+insert into ladder select '1. + USAGE on schema shop', try_as('viewer', 'select count(*) from shop.products');
+
+grant select on shop.products to viewer;
+insert into ladder select '2. + SELECT on shop.products', try_as('viewer', 'select count(*) from shop.products');
+
+insert into ladder select '3. try to DELETE', try_as('viewer', 'delete from shop.products');
+insert into ladder select '4. try another table', try_as('viewer', 'select count(*) from shop.customers');
+
+select * from ladder;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>You should see five rows:</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>step</th><th>result</th></tr></thead>
+  <tbody>
+    <tr><td>0. no grants at all</td><td class="wrap">denied: permission denied for schema shop</td></tr>
+    <tr><td>1. + USAGE on schema shop</td><td class="wrap">denied: permission denied for table products</td></tr>
+    <tr><td>2. + SELECT on shop.products</td><td>allowed</td></tr>
+    <tr><td>3. try to DELETE</td><td class="wrap">denied: permission denied for table products</td></tr>
+    <tr><td>4. try another table</td><td class="wrap">denied: permission denied for table customers</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>
+  Read the error text. <em>permission denied for schema</em> means a level above the table is missing;
+  <em>permission denied for table</em> means the schema was fine and the table privilege is the gap. That one
+  sentence solves most permission puzzles.
+</p>
+
+<div class="note warn">
+  <span class="note-title">The schema is the gate</span>
+  <p>
+    <code>USAGE</code> on a schema does not let a role read anything by itself. It only lets the role <em>look
+    names up</em> inside the schema. <code>SELECT</code> on a table without <code>USAGE</code> on its schema is just
+    as useless. You need both.
+  </p>
+</div>
+
+<h2 id="db-schema">4. Database and schema privileges</h2>
+
+<p>
+  <strong>Database.</strong> <code>CONNECT</code> lets a role open a session in the database.
+  <code>TEMPORARY</code> lets it create temporary tables. <code>CREATE</code> lets it create new <em>schemas</em>
+  there (not tables: tables belong in a schema). A new database grants <code>CONNECT</code> and
+  <code>TEMPORARY</code> to <code>PUBLIC</code> (section 7), so every role may connect until you say otherwise:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">database privileges</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select has_database_privilege('some_role', 'shop', 'connect') as can_connect,
+       has_database_privilege('some_role', 'shop', 'create')  as can_create_schema,
+       has_database_privilege('some_role', 'shop', 'temp')    as can_temp;
+-- true, false, true for a role with no grants
+
+revoke connect on database shop from public;     -- now only roles with their own CONNECT get in
+grant  connect on database shop to app_role;</code></pre>
+</figure>
+
+<p>
+  Revoking <code>CONNECT</code> from <code>PUBLIC</code> is the way to lock a database to a known list of roles.
+  <code>\l</code> then shows <code>=T/postgres</code> (PUBLIC keeps only <code>TEMPORARY</code>) next to
+  <code>postgres=CTc/postgres</code> (the owner) plus one line for every role you granted <code>CONNECT</code>.
+  Superusers still get in, whatever the list says.
+</p>
+
+<p>
+  <strong>Schema.</strong> <code>USAGE</code> and <code>CREATE</code>, as above. The built-in
+  <code>public</code> schema deserves a moment, because older tutorials describe it wrongly. Since PostgreSQL 15
+  its access list is:
+</p>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">\dn+ public</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code>pg_database_owner=UC/pg_database_owner
+=U/pg_database_owner</code></pre>
+</figure>
+
+<p>
+  The second line has an empty name before the <code>=</code>, which is <code>PUBLIC</code> (everyone). So every
+  role has <code>USAGE</code> on <code>public</code> but only the database owner has <code>CREATE</code>. Before
+  version 15, everyone could create tables in <code>public</code>, and that was the root of the "public schema
+  trap" covered in <a href="05-security-and-rls.html">lesson 5</a>. The schema <code>shop</code> in the course
+  database has no <code>PUBLIC</code> entry at all, which is why a new role cannot even look inside it.
+</p>
+
+<h2 id="tables-columns">5. Tables and columns</h2>
+
+<p>
+  Table privileges are the ones you use daily. A <em>column privilege</em> is a finer cut: the role may read or
+  write only the columns you list. Use it to expose most of a table while hiding a few columns, such as
+  <code>email</code>, <code>phone</code> and <code>profile</code> in <code>shop.customers</code>.
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">column privileges</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>grant select (id, full_name, country, status) on shop.customers to clerk;
+grant update (status)                         on shop.customers to clerk;
+
+-- the clerk can run:      select id, full_name from shop.customers;
+-- the clerk cannot run:   select email from shop.customers;
+-- ... and not even:       select * from shop.customers;   -- touches columns it may not read</code></pre>
+</figure>
+
+<p>
+  In the Docker database, an ordinary role with this kind of grant (on <code>id</code>, <code>full_name</code> and <code>country</code>) behaved like this. The first query worked; the other two failed
+  with <code>permission denied for table customers</code>. Notice that <code>select *</code> fails, because it
+  expands to include the forbidden columns. The role must name its columns.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">column privileges, audited with has_column_privilege</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">create role clerk login;
+grant usage on schema shop to clerk;
+grant select (id, full_name, country, status) on shop.customers to clerk;
+grant update (status) on shop.customers to clerk;
+
+select column_name,
+       has_column_privilege('clerk', 'shop.customers', column_name, 'select') as can_select,
+       has_column_privilege('clerk', 'shop.customers', column_name, 'update') as can_update,
+       has_table_privilege('clerk', 'shop.customers', 'select')              as table_level_select
+from information_schema.columns
+where table_schema = 'shop' and table_name = 'customers'
+order by ordinal_position;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  Four columns are readable (<code>id</code>, <code>full_name</code>, <code>country</code>, <code>status</code>),
+  only <code>status</code> is updatable, and <code>table_level_select</code> is false on every row. That last
+  column is the one to remember: a column grant never turns into a table grant.
+</p>
+
+<div class="note warn">
+  <span class="note-title">Column REVOKE does not undo a table GRANT</span>
+  <p>
+    If a role has <code>SELECT</code> on the whole table, <code>revoke select (email) on shop.customers from
+    that_role</code> removes nothing. In the Docker database <code>has_column_privilege</code> still answered <code>true</code> afterwards.
+    Table-level and column-level grants are tracked separately, and a role gets the union of both. To hide a
+    column, revoke the table-level <code>SELECT</code> first and grant the allowed columns one by one.
+  </p>
+</div>
+
+<h2 id="seq-func">6. Sequences and functions</h2>
+
+<p>
+  <strong>Sequences</strong> hand out numbers. A role that inserts into a table whose default calls
+  <code>nextval</code> needs <code>USAGE</code> on the sequence behind it. The tables in the shop dataset use
+  <code>GENERATED ... AS IDENTITY</code> columns, which is the exception: an <code>INSERT</code> into an identity
+  column does <em>not</em> check privileges on the hidden sequence, so only the table privilege matters. Test
+  results from the Docker database:
+</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Column definition</th><th>Role has <code>INSERT</code> on the table, no sequence privilege</th></tr></thead>
+  <tbody>
+    <tr><td class="wrap"><code>id integer generated always as identity</code></td><td class="wrap">insert works</td></tr>
+    <tr><td class="wrap"><code>id serial</code> (default <code>nextval(...)</code>)</td><td class="wrap">fails with <code>permission denied for sequence</code> until you <code>grant usage on sequence</code></td></tr>
+    <tr><td class="wrap">Calling <code>nextval('shop.categories_id_seq')</code> yourself</td><td class="wrap">needs <code>USAGE</code> on the sequence, even for an identity one</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>
+  <code>GRANT USAGE ON SEQUENCE</code> is therefore the usual partner of <code>GRANT INSERT</code> for older
+  <code>serial</code> tables. In <code>\dp</code>, a sequence shows letters <code>rwU</code> for its owner:
+  <code>SELECT</code> (<code>r</code>), <code>UPDATE</code> (<code>w</code>) and <code>USAGE</code> (<code>U</code>).
+</p>
+
+<p>
+  <strong>Functions</strong> have one privilege, <code>EXECUTE</code>, and one surprise: when a function is
+  created, <code>EXECUTE</code> is granted to <code>PUBLIC</code> automatically. Every role can call it as soon
+  as it can reach the schema. To restrict a function, revoke from <code>PUBLIC</code> and grant to the roles you
+  trust:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">restrict a function</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create function shop.order_count() returns bigint language sql stable
+  as 'select count(*) from shop.orders';
+
+select has_function_privilege('some_role', 'shop.order_count()', 'execute');   -- true (PUBLIC)
+revoke execute on function shop.order_count() from public;
+select has_function_privilege('some_role', 'shop.order_count()', 'execute');   -- false
+grant  execute on function shop.order_count() to some_role;
+select has_function_privilege('some_role', 'shop.order_count()', 'execute');   -- true</code></pre>
+</figure>
+
+<p>
+  Before the revoke, <code>\df+ shop.order_count</code> shows an empty access column, which means "the default":
+  owner and <code>PUBLIC</code> both have <code>EXECUTE</code>. After the revoke and the grant it shows
+  <code>postgres=X/postgres</code> and one entry for the role you granted. (This default is also why a
+  <code>SECURITY DEFINER</code> function needs an explicit revoke; see <a href="05-security-and-rls.html">lesson 5</a>.)
+</p>
+
+<h2 id="public">7. PUBLIC: the grantee that is everyone</h2>
+
+<p>
+  <code>PUBLIC</code> is not a role you can log in as or find in <code>pg_roles</code>. It is a keyword meaning
+  "every role, including ones created later". Privileges granted to <code>PUBLIC</code> apply to everyone, and are
+  the source of the most common surprise in permission audits: you revoked from a role, but the role still has
+  access because <code>PUBLIC</code> allows it.
+</p>
+
+<p>The defaults in a freshly created database are small and worth knowing by heart:</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Object</th><th>What <code>PUBLIC</code> gets by default</th></tr></thead>
+  <tbody>
+    <tr><td>Database</td><td class="wrap"><code>CONNECT</code> and <code>TEMPORARY</code></td></tr>
+    <tr><td>Schema <code>public</code></td><td class="wrap"><code>USAGE</code> only (PostgreSQL 15 and later)</td></tr>
+    <tr><td>Schemas you create</td><td class="wrap">nothing</td></tr>
+    <tr><td>Tables and sequences</td><td class="wrap">nothing</td></tr>
+    <tr><td>Functions and procedures</td><td class="wrap"><code>EXECUTE</code></td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>
+  In an access list, <code>PUBLIC</code> is the entry with an empty grantee name: <code>=U/pg_database_owner</code>.
+  In <code>aclexplode</code> output it appears as grantee <code>0</code>. Revoke from it with
+  <code>revoke ... from public</code>.
+</p>
+
+<h2 id="default-privileges">8. Tables created later: ALTER DEFAULT PRIVILEGES</h2>
+
+<p>
+  <code>GRANT SELECT ON ALL TABLES IN SCHEMA shop TO role</code> is handy, but it grants on the tables that exist
+  <em>right now</em>. A table created tomorrow gets no entry, and the role cannot read it. In the Docker database, after the
+  grant, <code>has_table_privilege</code> was true for <code>shop.orders</code> and false for a table created
+  afterwards.
+</p>
+
+<p>
+  <code>ALTER DEFAULT PRIVILEGES</code> fixes that. It stores a rule: "when role X creates a table (or sequence, or
+  function) in schema S, apply these grants to it". The two parts that people forget:
+</p>
+
+<ul>
+  <li><strong><code>FOR ROLE x</code></strong> names the creator the rule applies to. Without it, the rule applies to objects the <em>current</em> role creates. Tables created by anybody else are not affected.</li>
+  <li><strong><code>IN SCHEMA s</code></strong> limits it to one schema. Without it, the rule is database-wide.</li>
+</ul>
+
+<p>It never changes tables that already exist.</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">an old table and a new table, same owner role · run once, “Reset data” to re-run</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">create role builder login;
+create role reader nologin;
+grant usage, create on schema shop to builder;
+grant usage on schema shop to reader;
+
+-- an existing table, created before the default privilege exists
+create table shop.notes_old (id int, body text);
+
+alter default privileges for role builder in schema shop
+  grant select on tables to reader;
+
+-- the same kind of statement, run as builder, now creates a readable table
+set role builder;
+create table shop.notes_new (id int, body text);
+reset role;
+
+select c.relname,
+       pg_get_userbyid(c.relowner) as owner,
+       coalesce(c.relacl::text, '(null: owner only)') as acl,
+       has_table_privilege('reader', c.oid, 'select') as reader_can_select
+from pg_class c
+where c.relnamespace = 'shop'::regnamespace and c.relname like 'notes\_%'
+order by c.relname;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  <code>notes_new</code> is owned by <code>builder</code>, has the access list
+  <code>{builder=arwdDxtm/builder,reader=r/builder}</code> and <code>reader_can_select</code> is true.
+  <code>notes_old</code> is owned by <code>postgres</code>, has no access list and <code>reader_can_select</code> is
+  false. In the Docker database, <code>\ddp</code> lists the stored rules, and the catalog is
+  <code>pg_default_acl</code>.
+</p>
+
+<div class="note warn">
+  <span class="note-title">The rule belongs to the creator</span>
+  <p>
+    A default privilege set <code>FOR ROLE builder</code> does nothing for tables created by <code>postgres</code>.
+    If your migrations run as one role and an engineer sometimes creates tables as another, you need a rule for
+    each creator, or you need to make sure all objects are created by the same owner role
+    (<a href="05-security-and-rls.html">lesson 5</a> sets up that layout).
+  </p>
+</div>
+
+<h2 id="grant-option">9. Passing privileges on: WITH GRANT OPTION and CASCADE</h2>
+
+<p>
+  Normally only the owner can grant privileges on an object. <code>WITH GRANT OPTION</code> lets a grantee pass
+  that privilege on to others. In an access list a grantable privilege shows a star: <code>r*</code>.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">a grant chain: postgres → mgr → helper · run once, “Reset data” to re-run</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">create role mgr login;
+create role helper login;
+grant usage on schema shop to mgr, helper;
+
+grant select on shop.orders to mgr with grant option;   -- mgr may pass SELECT on
+set role mgr;
+grant select on shop.orders to helper;                  -- mgr hands it on
+reset role;
+
+select relacl::text as acl_after_chain
+from pg_class where oid = 'shop.orders'::regclass;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  The result is <code>{postgres=arwdDxtm/postgres,mgr=r*/postgres,helper=r/mgr}</code>. Read each entry as
+  <code>grantee=privileges/grantor</code>. <code>helper</code> holds <code>SELECT</code> <em>because of</em>
+  <code>mgr</code>, not because of the owner. That dependency matters when you revoke:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">revoking a chain</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>revoke select on shop.orders from mgr;           -- ERROR:  dependent privileges exist
+                                                  -- HINT:  Use CASCADE to revoke them too.
+revoke select on shop.orders from mgr cascade;    -- removes mgr's and helper's privilege
+
+revoke grant option for select on shop.orders from mgr cascade;
+-- keeps mgr's SELECT, removes only the right to pass it on (and what mgr already passed)</code></pre>
+</figure>
+
+<p>
+  <code>CASCADE</code> is the safe-by-default design: PostgreSQL refuses to leave a grant hanging without its
+  source. The grantor recorded in the list is the role that ran the statement. You can write
+  <code>GRANTED BY role</code> to say so explicitly, but it must name the current user: running
+  <code>grant select on shop.orders to helper granted by mgr</code> as <code>postgres</code> fails with
+  <em>grantor must be current user</em>.
+</p>
+
+<h2 id="dropping">10. Removing a role: REASSIGN OWNED and DROP OWNED</h2>
+
+<p>
+  <code>DROP ROLE</code> refuses to run while the role still owns objects or appears in any access list. The error
+  lists what is left, for example <code>owner of table shop.t_new</code> or <code>privileges for schema shop</code>.
+  Two commands clear the way, and they do different things:
+</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Command</th><th>What it does</th><th>Risk</th></tr></thead>
+  <tbody>
+    <tr><td class="wrap"><code>REASSIGN OWNED BY old TO new</code></td><td class="wrap">Hands every object <code>old</code> owns to <code>new</code>. Data stays.</td><td class="wrap">None for the data; check that <code>new</code> is the right owner.</td></tr>
+    <tr><td class="wrap"><code>DROP OWNED BY old</code> [<code>CASCADE</code>]</td><td class="wrap">Drops every object <code>old</code> owns <em>and</em> removes its privileges everywhere in the current database.</td><td class="wrap">Deletes tables. Run <code>REASSIGN</code> first if you want to keep the data.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">retire a role without losing its tables</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>reassign owned by old_owner to new_owner;   -- keep the tables
+drop owned by old_owner;                    -- strip the leftover privileges
+drop role old_owner;</code></pre>
+</figure>
+
+<p>
+  Both commands act only on the <em>current database</em>. Roles are cluster-wide, so if the role has objects or
+  grants in three databases you must run the first two statements in each of them before <code>DROP ROLE</code>
+  works. That is exactly what the course checker does when it removes your <code>lab_</code> roles.
+</p>
+
+<div class="note danger">
+  <span class="note-title">DROP OWNED really drops</span>
+  <p>
+    <code>drop owned by some_role</code> deletes tables, views and functions that role owns, and with
+    <code>CASCADE</code> everything that depends on them. It is the right tool for a role that only held
+    privileges, and a data-loss command for a role that owns your tables. Run <code>reassign owned</code> first
+    whenever the data matters.
+  </p>
+</div>
+
+<h2 id="read-acl">11. Reading the access list: \dp, \dn+ and \l</h2>
+
+<p>
+  Every access list is a set of entries in one format: <code>grantee=privileges/grantor</code>. An empty grantee
+  is <code>PUBLIC</code>. A star after a letter means "with grant option". An empty list means "defaults only".
+</p>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">\dp shop.products   (after: grant select on shop.products to reporting)</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code> Schema |   Name   | Type  |     Access privileges      | Column privileges | Policies
+--------+----------+-------+----------------------------+-------------------+----------
+ shop   | products | table | postgres=arwdDxtm/postgres+|                   |
+        |          |       | reporting=r/postgres       |                   |</code></pre>
+</figure>
+
+<p>
+  The first entry says that <code>postgres</code> holds <code>arwdDxtm</code>, which is <code>INSERT</code>,
+  <code>SELECT</code> (<code>r</code> for "read"), <code>UPDATE</code> (<code>w</code> for "write"),
+  <code>DELETE</code>, <code>TRUNCATE</code> (<code>D</code>), <code>REFERENCES</code> (<code>x</code>),
+  <code>TRIGGER</code> and <code>MAINTAIN</code>, granted by <code>postgres</code> to itself. Once any grant exists,
+  PostgreSQL writes the owner's entry out, so you see it. The second entry says that <code>reporting</code> has
+  only <code>SELECT</code>. The same list in full:
+</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Letter</th><th>Privilege</th><th>Letter</th><th>Privilege</th></tr></thead>
+  <tbody>
+    <tr><td><code>r</code></td><td>SELECT (read)</td><td><code>D</code></td><td>TRUNCATE</td></tr>
+    <tr><td><code>a</code></td><td>INSERT (append)</td><td><code>x</code></td><td>REFERENCES</td></tr>
+    <tr><td><code>w</code></td><td>UPDATE (write)</td><td><code>t</code></td><td>TRIGGER</td></tr>
+    <tr><td><code>d</code></td><td>DELETE</td><td><code>m</code></td><td>MAINTAIN</td></tr>
+    <tr><td><code>U</code></td><td>USAGE (schema, sequence)</td><td><code>C</code></td><td>CREATE (database, schema)</td></tr>
+    <tr><td><code>c</code></td><td>CONNECT</td><td><code>T</code></td><td>TEMPORARY</td></tr>
+    <tr><td><code>X</code></td><td>EXECUTE</td><td><code>*</code></td><td>with grant option</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>
+  Three psql commands show the lists. <code>\dp [pattern]</code> (also <code>\z</code>) for tables, views and
+  sequences, including a <em>Column privileges</em> column that lists column grants per column;
+  <code>\dn+</code> for schemas; <code>\l</code> for databases; <code>\df+</code> for functions;
+  <code>\ddp</code> for the stored default privileges. In the course database, before you change anything,
+  <code>\dp shop.orders</code> shows empty access columns, <code>\dn+ public</code> shows
+  <code>pg_database_owner=UC/pg_database_owner</code> and <code>=U/pg_database_owner</code>, and
+  <code>\l shop</code> shows an empty <em>Access privileges</em> column (database defaults).
+</p>
+
+<h2 id="audit">12. Auditing: asking the server what a role can do</h2>
+
+<p>
+  Do not decode lists by eye when the question is "can role X do Y?". The server answers directly, and the answer
+  includes inheritance through groups, <code>PUBLIC</code>, ownership and superuser status. Each function takes the
+  role, the object and a privilege name:
+</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Function</th><th>Example</th></tr></thead>
+  <tbody>
+    <tr><td class="wrap"><code>has_database_privilege</code></td><td class="wrap"><code>has_database_privilege('app', 'shop', 'connect')</code></td></tr>
+    <tr><td class="wrap"><code>has_schema_privilege</code></td><td class="wrap"><code>has_schema_privilege('app', 'shop', 'usage')</code></td></tr>
+    <tr><td class="wrap"><code>has_table_privilege</code></td><td class="wrap"><code>has_table_privilege('app', 'shop.orders', 'select')</code></td></tr>
+    <tr><td class="wrap"><code>has_column_privilege</code></td><td class="wrap"><code>has_column_privilege('app', 'shop.customers', 'email', 'select')</code></td></tr>
+    <tr><td class="wrap"><code>has_sequence_privilege</code></td><td class="wrap"><code>has_sequence_privilege('app', 'shop.orders_id_seq', 'usage')</code></td></tr>
+    <tr><td class="wrap"><code>has_function_privilege</code></td><td class="wrap"><code>has_function_privilege('app', 'shop.order_count()', 'execute')</code></td></tr>
+    <tr><td class="wrap"><code>pg_has_role</code></td><td class="wrap"><code>pg_has_role('maria', 'analysts', 'member')</code></td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>
+  You can add <code>with grant option</code> to a privilege name, as in
+  <code>'select with grant option'</code>. For <code>pg_has_role</code> the last argument is
+  <code>member</code> (is a member, directly or indirectly) or <code>usage</code> (is a member <em>and</em> inherits
+  its privileges, <a href="03-roles-and-users.html#inherit">lesson 3</a>). A role is always a member of itself.
+</p>
+
+<h3 id="acl-views">aclexplode versus information_schema</h3>
+
+<p>
+  Two catalog routes list <em>all</em> grants. They look similar and are not the same:
+</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th></th><th class="wrap"><code>aclexplode(pg_class.relacl)</code></th><th class="wrap"><code>information_schema.role_table_grants</code></th></tr></thead>
+  <tbody>
+    <tr><td>Whose grants</td><td class="wrap">Everyone's, for any user who can read the catalog</td><td class="wrap">Only grants where the grantor or the grantee is a role you currently have (or one of its enabled roles). An ordinary role with one grant saw a single row, while the catalog held dozens for the same schema.</td></tr>
+    <tr><td>Owner's rights</td><td class="wrap">Missing when <code>relacl</code> is NULL (the owner's defaults). Wrap it: <code>aclexplode(coalesce(relacl, acldefault('r', relowner)))</code></td><td class="wrap">Shows the owner's rights always, with <code>is_grantable = YES</code></td></tr>
+    <tr><td>Newer privileges</td><td class="wrap">All, including <code>MAINTAIN</code></td><td class="wrap">Follows the SQL standard: <code>MAINTAIN</code> does not appear</td></tr>
+    <tr><td>Grantee</td><td class="wrap">Role number (use <code>pg_get_userbyid</code>); <code>0</code> means <code>PUBLIC</code></td><td class="wrap">Role name, <code>PUBLIC</code> as text</td></tr>
+    <tr><td>Column grants</td><td class="wrap"><code>pg_attribute.attacl</code></td><td class="wrap">A separate view, <code>column_privileges</code></td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>
+  Use <code>information_schema</code> when you want portable SQL that works on other databases, and the
+  <code>pg_catalog</code> columns when you need the whole truth about this server.
+</p>
+
+<div class="note tip">
+  <span class="note-title">ALTER OWNER rewrites the list</span>
+  <p>
+    When you change an object's owner, the old owner's entry is replaced by the new owner's, and the
+    <em>grantor</em> of existing grants becomes the new owner. Changing the owner of <code>shop.customers</code>
+    to <code>lab_04_y</code> gave <code>{lab_04_y=arwdDxtm/lab_04_y,lab_04_x=r/lab_04_y}</code>: the earlier grant to
+    <code>lab_04_x</code> is now "granted by" the new owner. Check lists again after any ownership change.
+  </p>
+</div>
+
+<h2 id="when">When to use, when not to</h2>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Situation</th><th class="wrap">✅ Do this</th><th class="wrap">❌ Not this</th></tr></thead>
+  <tbody>
+    <tr><td class="wrap">A role must read some tables</td><td class="wrap"><code>GRANT USAGE</code> on the schema and <code>GRANT SELECT</code> on the tables, to a group role</td><td class="wrap">Make the role the owner, or a superuser, "to make the error go away"</td></tr>
+    <tr><td class="wrap">Show most columns of a table</td><td class="wrap">Column-level <code>SELECT</code>, or a view that exposes the safe columns</td><td class="wrap"><code>REVOKE</code> one column from a role that has table-level <code>SELECT</code></td></tr>
+    <tr><td class="wrap">New tables must be readable automatically</td><td class="wrap"><code>ALTER DEFAULT PRIVILEGES FOR ROLE creator IN SCHEMA s</code></td><td class="wrap">Re-running <code>GRANT ... ON ALL TABLES</code> after every deploy</td></tr>
+    <tr><td class="wrap">Only certain roles may call a function</td><td class="wrap"><code>REVOKE EXECUTE ... FROM PUBLIC</code>, then grant to named roles</td><td class="wrap">Assuming "no grant" means "no access" for functions</td></tr>
+    <tr><td class="wrap">Delegate granting to a team lead</td><td class="wrap"><code>WITH GRANT OPTION</code> on a group role, and review it</td><td class="wrap">Giving the lead ownership of the table</td></tr>
+    <tr><td class="wrap">A developer leaves</td><td class="wrap"><code>REASSIGN OWNED</code>, <code>DROP OWNED</code>, <code>DROP ROLE</code>, in every database</td><td class="wrap"><code>DROP OWNED</code> on a role that owns live tables</td></tr>
+    <tr><td class="wrap">"Can this role do X?"</td><td class="wrap">The <code>has_*_privilege</code> functions</td><td class="wrap">Reading <code>\dp</code> output by eye and forgetting <code>PUBLIC</code> and group membership</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="inspect">Inspect it</h2>
+
+<p>
+  Run these two read-only queries in <code>shop</code> before the exercises. The first lists the effective table
+  privileges per grantee in the <code>shop</code> schema, owner included; the second lists who owns the schemas.
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">who holds what on the shop tables</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select c.relname,
+       case when a.grantee = 0 then 'PUBLIC' else pg_get_userbyid(a.grantee) end as grantee,
+       string_agg(a.privilege_type, ', ' order by a.privilege_type) as privileges
+from pg_class c
+cross join lateral aclexplode(coalesce(c.relacl, acldefault('r', c.relowner))) a
+where c.relnamespace = 'shop'::regnamespace and c.relkind = 'r'
+group by 1, 2
+order by 1, 2;</code></pre>
+</figure>
+
+<p>
+  Before you grant anything, every row shows <code>postgres</code> with
+  <code>DELETE, INSERT, MAINTAIN, REFERENCES, SELECT, TRIGGER, TRUNCATE, UPDATE</code> and nobody else. After the
+  exercises (in your scratch database) you will see your roles appear.
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">schemas and their owners</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select nspname, pg_get_userbyid(nspowner) as owner, nspacl
+from pg_namespace
+where nspname !~ '^pg_|^information_schema'
+order by 1;</code></pre>
+</figure>
+
+<h2 id="exercises">Your turn</h2>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 1</span><span class="grow"></span><span class="lvl">basic</span></div>
+  <div class="ex-body">
+    <p>
+      Create a login role <code>lab_04_report</code> that can read <code>shop.products</code> and
+      <code>shop.categories</code>, and nothing else. Check it with <code>./pg check 04 1</code>.
+    </p>
+    <p>Open <code>exercises/04/1.sql</code>, write your answer, then run the check.</p>
+  </div>
+  {{stub 04 1}}
+  <details><summary>Hint</summary><p>Two levels are involved: the schema and the tables. One <code>GRANT SELECT</code> can name several tables.</p></details>
+  {{solution 04 1}}
+</section>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 2</span><span class="grow"></span><span class="lvl">intermediate</span></div>
+  <div class="ex-body">
+    <p>
+      Create the group <code>lab_04_support</code> and the member <code>lab_04_agent</code>. Through the group, the
+      agent may read all of <code>shop.orders</code>, read only the columns <code>id</code>,
+      <code>full_name</code>, <code>country</code> and <code>status</code> of <code>shop.customers</code>, and change
+      only <code>customers.status</code>. Check it with <code>./pg check 04 2</code>.
+    </p>
+    <p>Open <code>exercises/04/2.sql</code>, write your answer, then run the check.</p>
+  </div>
+  {{stub 04 2}}
+  <details><summary>Hint</summary><p>Grant to the group, not to the agent. Put the column list in parentheses after the privilege name: <code>grant select (a, b) on ...</code>. Do not give any table-level <code>SELECT</code> on <code>customers</code>.</p></details>
+  {{solution 04 2}}
+</section>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 3</span><span class="grow"></span><span class="lvl">challenge</span></div>
+  <div class="ex-body">
+    <p>
+      Create three roles. <code>lab_04_owner</code> (login) may create tables in schema <code>shop</code>.
+      <code>lab_04_viewer</code> (no login) may use the schema and must be able to read every table that
+      <code>lab_04_owner</code> creates there <em>later</em>, but not the tables that exist now.
+      <code>lab_04_lead</code> (login) may use the schema, read <code>shop.orders</code> and pass that privilege on.
+      Check it with <code>./pg check 04 3</code>.
+    </p>
+    <p>Open <code>exercises/04/3.sql</code>, write your answer, then run the check.</p>
+  </div>
+  {{stub 04 3}}
+  <details><summary>Hint</summary><p>"Later" and "created by lab_04_owner" are the signs of <code>alter default privileges for role ... in schema ...</code>. "Pass on" is <code>with grant option</code>.</p></details>
+  {{solution 04 3}}
+</section>
+
+<h2 id="summary">Summary</h2>
+<ul>
+  <li>Ask three questions about any permission error: which object, who owns it, who was granted what. <em>permission denied for schema</em> versus <em>for table</em> tells you which level is missing.</li>
+  <li>Owners hold all privileges implicitly. Everyone else needs a grant, directly or through a group role.</li>
+  <li>Privileges exist on databases (<code>CONNECT</code>, <code>CREATE</code>, <code>TEMPORARY</code>), schemas (<code>USAGE</code>, <code>CREATE</code>), tables, columns, sequences and functions (<code>EXECUTE</code>).</li>
+  <li><code>PUBLIC</code> means everyone. Know its defaults: database <code>CONNECT</code> and <code>TEMPORARY</code>, schema <code>public</code> <code>USAGE</code> (since PostgreSQL 15), function <code>EXECUTE</code>.</li>
+  <li><code>GRANT ... ON ALL TABLES</code> covers existing tables only. <code>ALTER DEFAULT PRIVILEGES FOR ROLE creator IN SCHEMA s</code> covers tables that creator makes later.</li>
+  <li><code>WITH GRANT OPTION</code> creates grant chains; <code>REVOKE ... CASCADE</code> removes a whole chain.</li>
+  <li>Retire a role with <code>REASSIGN OWNED</code>, <code>DROP OWNED</code> and <code>DROP ROLE</code>, in every database it touched.</li>
+  <li>Audit with <code>has_*_privilege</code> and <code>pg_has_role</code>; use <code>aclexplode</code> for the full list, and remember <code>information_schema</code> only shows what concerns you.</li>
+</ul>
+
+<h2 id="next">Looking ahead</h2>
+<p>
+  You can now give a role exactly the access it needs. <a href="05-security-and-rls.html">Lesson 5</a> assembles
+  these pieces into a least-privilege layout for a real application, and adds row-level security for the cases
+  where "which rows" matters as much as "which tables".
+</p>

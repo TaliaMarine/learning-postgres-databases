@@ -1,0 +1,426 @@
+<p class="lede">
+  Every other page in this course assumes you can read a <code>SELECT</code> statement. This annex is the
+  refresher: choosing columns, filtering rows, sorting, limiting, removing duplicates, and the one idea that
+  trips up almost everybody, <code>NULL</code>. Each block runs in the playground on a small copy of the shop
+  database, so you can change it and see what happens.
+</p>
+
+<h2 id="lab">Set up</h2>
+<p>
+  Nothing to install for this page: the playgrounds run a real PostgreSQL 18 in your browser, seeded with a small
+  shop (8 customers, 8 products, 12 orders). To try the same statements against the full Docker database,
+  start it with <code>./pg up</code> and run <code>./pg psql</code>. The table and column names are identical;
+  only the number of rows differs, so the numbers you see in Docker will be larger.
+</p>
+<p>
+  The shop has five tables you will use here: <code>shop.customers</code>, <code>shop.categories</code>,
+  <code>shop.products</code>, <code>shop.orders</code> and <code>shop.order_items</code>. A table name has two
+  parts, <code>schema.table</code>. A <em>schema</em> is a folder for tables; the shop's tables live in the schema
+  called <code>shop</code>.
+</p>
+
+<h2 id="select">1. SELECT and FROM: choose columns</h2>
+<p>
+  <code>SELECT</code> names the columns you want, <code>FROM</code> names the table. <code>*</code> means “every
+  column”. It is handy when you explore, and a bad habit in application code, because a later
+  <code>ALTER TABLE</code> silently changes what your query returns.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">pick columns, then try <code>*</code></span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select id, full_name, country
+from shop.customers;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  A statement ends with a semicolon. Keywords such as <code>select</code> are not case-sensitive. Unquoted names
+  are folded to lower case, so <code>Shop.Customers</code> means <code>shop.customers</code>.
+</p>
+
+<h2 id="expressions">2. Expressions and aliases</h2>
+<p>
+  A select-list item can be any expression: arithmetic, a function call, a string join with <code>||</code>.
+  An <em>alias</em> (<code>AS name</code>) gives the result column a name. Without one, PostgreSQL invents a name
+  such as <code>?column?</code> or the function name.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">arithmetic, functions and aliases</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select name,
+       price,
+       price * 1.21                  as price_with_vat,
+       round(price * 1.21, 2)        as price_rounded,
+       upper(left(name, 3)) || '-' || id as code
+from shop.products
+order by id;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  You can also select with no table at all. That is the quickest calculator you own:
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">SELECT without FROM</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select 7 / 2      as integer_division,
+       7 / 2.0    as decimal_division,
+       7 % 2      as remainder,
+       'post' || 'gres' as joined,
+       current_date - date '2024-01-01' as days_since_2024;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<div class="note warn">
+  <span class="note-title">Integer division truncates</span>
+  <p>
+    <code>7 / 2</code> is <code>3</code>, because both numbers are integers. Make one side a decimal
+    (<code>7 / 2.0</code>) or cast it (<code>7::numeric / 2</code>) when you want the fraction.
+  </p>
+</div>
+
+<p>
+  An alias names an output column, and you can also alias a table to shorten long names:
+  <code>from shop.customers as c</code>, or just <code>from shop.customers c</code>. Aliases matter a lot once you
+  join tables (<a href="a2-joins.html">annex A2</a>).
+</p>
+
+<h2 id="where">3. WHERE: choose rows</h2>
+<p>
+  <code>WHERE</code> keeps the rows for which its condition is true. Combine conditions with
+  <code>AND</code>, <code>OR</code> and <code>NOT</code>. <code>AND</code> binds tighter than <code>OR</code>, so
+  add parentheses whenever you mix them.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">comparison and boolean operators</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select full_name, country, status
+from shop.customers
+where country = 'NL'
+  and (status = 'active' or status = 'suspended');</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  The comparison operators are <code>=</code>, <code>&lt;&gt;</code> (or <code>!=</code>), <code>&lt;</code>,
+  <code>&lt;=</code>, <code>&gt;</code> and <code>&gt;=</code>. Note that “equals” is a single <code>=</code>, and
+  that text values go in single quotes. Double quotes are for names, never for values.
+</p>
+
+<h2 id="null">4. NULL and three-valued logic</h2>
+<p>
+  <code>NULL</code> means “no value / unknown”. It is not zero and not an empty string. In the shop,
+  <code>customers.phone</code> is <code>NULL</code> when we never learned the number, and
+  <code>customers.referred_by</code> is <code>NULL</code> when nobody referred the customer.
+</p>
+<p>
+  Because a <code>NULL</code> is “unknown”, any comparison with it is also unknown. So SQL has three truth
+  values, not two: true, false and <em>null</em> (unknown). <code>WHERE</code> keeps only the rows where the
+  condition is <strong>true</strong>. Unknown rows are dropped, just like false ones.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">a comparison with NULL is never true</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select null = null        as null_equals_null,
+       null &lt;&gt; 1        as null_differs_from_1,
+       null is null       as is_null,
+       1 is not null      as is_not_null,
+       null is distinct from null as distinct_from,
+       coalesce(null, 'fallback') as coalesced;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  Use <code>IS NULL</code> and <code>IS NOT NULL</code> to test for it. <code>IS DISTINCT FROM</code> is a
+  comparison that treats two NULLs as equal and never returns unknown. <code>COALESCE(a, b, …)</code> returns the
+  first argument that is not NULL, which is the usual way to supply a default.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">compare the two queries</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">-- customers with no phone number on file
+select full_name, phone
+from shop.customers
+where phone is null;
+
+-- "phone = null" looks right and returns nothing. Uncomment to see:
+-- select full_name from shop.customers where phone = null;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<h3 id="truth">The truth tables</h3>
+<p>
+  <code>AND</code> is false if either side is false, even when the other side is unknown. <code>OR</code> is true
+  if either side is true, even when the other side is unknown. Otherwise, unknown wins.
+</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>a</th><th>b</th><th><code>a AND b</code></th><th><code>a OR b</code></th><th><code>NOT a</code></th></tr></thead>
+  <tbody>
+    <tr><td>true</td><td>true</td><td>true</td><td>true</td><td>false</td></tr>
+    <tr><td>true</td><td>false</td><td>false</td><td>true</td><td>false</td></tr>
+    <tr><td>true</td><td>null</td><td>null</td><td>true</td><td>false</td></tr>
+    <tr><td>false</td><td>false</td><td>false</td><td>false</td><td>true</td></tr>
+    <tr><td>false</td><td>null</td><td>false</td><td>null</td><td>true</td></tr>
+    <tr><td>null</td><td>null</td><td>null</td><td>null</td><td>null</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="note danger">
+  <span class="note-title">NOT IN and NULL</span>
+  <p>
+    <code>x NOT IN (1, 2, NULL)</code> is never true: for any <code>x</code>, one of the comparisons is unknown, so
+    the whole list is at best unknown. A subquery that can return a NULL does the same thing and makes the query
+    return no rows at all. The safe patterns are <code>NOT EXISTS</code> or a subquery that filters out NULLs
+    (<a href="a4-subqueries-and-ctes.html">annex A4</a>).
+  </p>
+</div>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">the NOT IN trap, with literals</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select 3 not in (1, 2)        as without_null,
+       3 not in (1, 2, null)    as with_null,
+       3 in (1, 2, 3, null)     as in_still_works;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<h2 id="matching">5. LIKE, ILIKE, IN and BETWEEN</h2>
+
+<h3 id="like">LIKE and ILIKE: patterns in text</h3>
+<p>
+  <code>LIKE</code> compares text with a pattern. In a pattern, <code>%</code> matches any run of characters
+  (including none) and <code>_</code> matches exactly one character. <code>LIKE</code> is case-sensitive.
+  <code>ILIKE</code> is the case-insensitive version, and it is a PostgreSQL extension rather than standard SQL.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">starts with, contains, one character</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select name,
+       name like 'S%'         as starts_with_s,      -- case-sensitive
+       name like 's%'         as starts_with_lower_s,
+       name ilike '%KETTLE%'  as contains_kettle,    -- any case
+       name like '_ike%'      as one_char_then_ike   -- _ is exactly one character
+from shop.products
+order by id;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  Each column is a true/false test. Change the patterns and run it again. The playground shows the result of
+  the last statement in a block, so keep one query per block when you want to see its rows.
+</p>
+
+<div class="note info">
+  <span class="note-title">A leading % cannot use a normal index</span>
+  <p>
+    <code>LIKE 'S%'</code> can use a B-tree index in some setups, but <code>LIKE '%kettle%'</code> cannot. If you
+    search inside text on a big table, see <a href="../lessons/11-text-search.html">lesson 11</a>.
+  </p>
+</div>
+
+<h3 id="in">IN: one of a list</h3>
+<p>
+  <code>x IN (a, b, c)</code> is shorthand for <code>x = a OR x = b OR x = c</code>.
+</p>
+
+<h3 id="between">BETWEEN: a range, both ends included</h3>
+<p>
+  <code>x BETWEEN a AND b</code> means <code>x &gt;= a AND x &lt;= b</code>. Both ends are included. That is
+  convenient for numbers and risky for timestamps, where “between the 1st and the 31st” would miss most of the 31st.
+  For dates and timestamps, prefer a half-open range: <code>&gt;= start AND &lt; end</code>.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">IN, BETWEEN and a half-open date range</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select id, customer_id, status, total, ordered_at::date::text as day
+from shop.orders
+where status in ('paid', 'shipped')
+   or total between 20 and 50
+   or (ordered_at &gt;= '2025-01-01' and ordered_at &lt; '2025-04-01')
+order by id;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<h2 id="order">6. ORDER BY, LIMIT and OFFSET</h2>
+<p>
+  A table has no inherent order. Unless you write <code>ORDER BY</code>, PostgreSQL returns rows in whatever
+  order is convenient, and that order can change from one run to the next. Sort explicitly whenever the order
+  matters.
+</p>
+<p>
+  <code>ORDER BY</code> takes one or more expressions. Each can end in <code>ASC</code> (the default) or
+  <code>DESC</code>. Later expressions break ties in earlier ones. You can also say where NULLs go:
+  <code>NULLS FIRST</code> or <code>NULLS LAST</code>. By default, NULL sorts as if it were larger than any value:
+  last in ascending order, first in descending order.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">sort by country, then by newest first</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select full_name, country, phone, created_at::date::text as joined
+from shop.customers
+order by country asc, created_at desc;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">where do the NULL phone numbers go?</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select full_name, phone
+from shop.customers
+order by phone desc nulls last, full_name;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<h3 id="limit">LIMIT and OFFSET</h3>
+<p>
+  <code>LIMIT n</code> returns at most <em>n</em> rows. <code>OFFSET m</code> skips the first <em>m</em> rows
+  first. Together they page through a result. Always combine them with an <code>ORDER BY</code> that gives a
+  unique, repeatable order, or pages can overlap or skip rows. Add a tie-breaker such as the primary key.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">the second page of three rows</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select id, name, price
+from shop.products
+order by price desc, id
+limit 3 offset 3;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<div class="note warn">
+  <span class="note-title">Large OFFSETs get slower</span>
+  <p>
+    <code>OFFSET 100000</code> still reads and throws away 100,000 rows before returning yours. For deep paging, use
+    keyset pagination (<code>where id &gt; last_seen_id order by id limit 20</code>). The query-tuning lesson shows it
+    in detail: <a href="../lessons/14-query-tuning.html">lesson 14</a>.
+  </p>
+</div>
+
+<h2 id="distinct">7. DISTINCT: remove duplicates</h2>
+<p>
+  <code>SELECT DISTINCT</code> removes duplicate result rows. It compares the whole row, not just the first
+  column. PostgreSQL also has <code>DISTINCT ON (expr)</code>, which keeps the first row for each value of
+  <code>expr</code> in the order you give. It is the quickest way to say “the latest order per customer”.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">distinct values, then one row per group</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">-- every country that has at least one customer, once
+select distinct country from shop.customers order by country;
+
+-- the latest order of each customer
+select distinct on (customer_id) customer_id, id as order_id, ordered_at::date::text as day
+from shop.orders
+order by customer_id, ordered_at desc;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<div class="note tip">
+  <span class="note-title">Do not use DISTINCT to hide a bad join</span>
+  <p>
+    If a join returns duplicate rows you did not expect, adding <code>DISTINCT</code> makes them disappear and
+    leaves the real problem (a join that multiplies rows) in place. Find out why they are there first
+    (<a href="a2-joins.html">annex A2</a>).
+  </p>
+</div>
+
+<h2 id="case">8. CASE: if-then-else in a query</h2>
+<p>
+  <code>CASE</code> returns a value depending on conditions. It works anywhere an expression works: in the
+  select list, in <code>ORDER BY</code>, inside an aggregate. The first matching <code>WHEN</code> wins; with no
+  <code>ELSE</code>, an unmatched row gives NULL.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">label rows with CASE</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select name,
+       price,
+       case
+         when price &lt; 20  then 'cheap'
+         when price &lt; 100 then 'mid-range'
+         else                'premium'
+       end as price_band,
+       case stock when 0 then 'sold out' else stock::text || ' left' end as availability
+from shop.products
+order by price;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  The first form (<code>CASE WHEN condition</code>) tests any condition. The second (<code>CASE expr WHEN value</code>)
+  compares one expression with values and is shorter for equality. The branches must produce compatible types.
+</p>
+
+<h2 id="order-of-clauses">9. The order a query is read in</h2>
+<p>
+  You write <code>SELECT</code> first, but PostgreSQL logically processes the clauses in a different order:
+</p>
+<ol>
+  <li><code>FROM</code> (and joins): decide which rows exist.</li>
+  <li><code>WHERE</code>: keep the rows that pass.</li>
+  <li><code>GROUP BY</code> and <code>HAVING</code>: group the rows and filter the groups (<a href="a3-aggregation.html">annex A3</a>).</li>
+  <li><code>SELECT</code>: compute the output expressions and aliases.</li>
+  <li><code>DISTINCT</code>, then <code>ORDER BY</code>, then <code>LIMIT</code> / <code>OFFSET</code>.</li>
+</ol>
+<p>
+  That is why you can use a select-list alias in <code>ORDER BY</code> but not in <code>WHERE</code>: the alias
+  does not exist yet when <code>WHERE</code> runs.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">an alias works in ORDER BY, not in WHERE</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select name, price * stock as stock_value
+from shop.products
+where price * stock &gt; 1000     -- repeat the expression here; "stock_value" would be an error
+order by stock_value desc;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<h2 id="summary">Summary</h2>
+<ul>
+  <li><code>SELECT</code> picks columns and expressions, <code>FROM</code> picks the table, <code>WHERE</code> picks rows.</li>
+  <li>Give computed columns an alias with <code>AS</code>.</li>
+  <li><code>NULL</code> means unknown. Compare with <code>IS NULL</code>, never with <code>=</code>. <code>WHERE</code> keeps only rows that are true, not unknown.</li>
+  <li><code>LIKE</code> is case-sensitive, <code>ILIKE</code> is not; <code>%</code> is any run, <code>_</code> is one character.</li>
+  <li><code>BETWEEN</code> includes both ends. Use half-open ranges for timestamps.</li>
+  <li>Without <code>ORDER BY</code> the row order is not defined. Pair <code>LIMIT</code> with a unique ordering.</li>
+  <li><code>DISTINCT</code> removes duplicate rows; <code>DISTINCT ON</code> keeps one row per key.</li>
+  <li><code>CASE</code> is the in-query if-then-else.</li>
+</ul>
+
+<h2 id="next">Where to next</h2>
+<p>
+  Combine tables in <a href="a2-joins.html">annex A2</a>, then summarise them in <a href="a3-aggregation.html">annex A3</a>.
+  If you are comfortable with all of this, go straight to <a href="../lessons/01-architecture.html">lesson 1</a>.
+</p>

@@ -1,0 +1,138 @@
+<p class="lede">
+  The course teaches how PostgreSQL itself works, and stops there on purpose. A lot of useful PostgreSQL work
+  happens in extensions and external tools, or goes deeper than a lesson can. This page lists what we left out, why,
+  and where to continue. Everything under <em>Official documentation</em> links to the PostgreSQL 18 manual.
+</p>
+
+<h2 id="principle">How we chose what to leave out</h2>
+<p>
+  A topic is out of the course when it needs software the course container does not have, when it belongs to a
+  specific kind of workload, or when the right answer depends on a choice you have to make for your own system.
+  The foundations you did learn (roles, the planner, MVCC, WAL) are what make every item below easier to learn.
+</p>
+
+<h2 id="left-out">Topics left out, and where to go</h2>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Topic</th><th class="wrap">What it is</th><th class="wrap">Why it is not here</th><th class="wrap">Where to go</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>PL/pgSQL in depth</strong></td>
+      <td class="wrap">PostgreSQL's procedural language: variables, loops, cursors, exceptions, dynamic SQL.</td>
+      <td class="wrap"><a href="../lessons/18-views-and-functions.html">Lesson 18</a> and <a href="../lessons/19-triggers-and-events.html">lesson 19</a> use it, but only enough to write functions and triggers.</td>
+      <td class="wrap">The <a href="https://www.postgresql.org/docs/18/plpgsql.html">PL/pgSQL chapter</a> and <a href="https://www.postgresql.org/docs/18/server-programming.html">Server Programming</a>.</td>
+    </tr>
+    <tr>
+      <td><strong>PostGIS</strong></td>
+      <td class="wrap">An extension for geographic data: points, lines, polygons, distance and containment queries with GiST indexes.</td>
+      <td class="wrap">Not in the standard image; it is a large subject of its own.</td>
+      <td class="wrap">The PostGIS project's own documentation. Start with the GiST section of <a href="https://www.postgresql.org/docs/18/indexes.html">Indexes</a>, which is what it builds on.</td>
+    </tr>
+    <tr>
+      <td><strong>pgvector</strong></td>
+      <td class="wrap">An extension that stores embeddings in a <code>vector</code> column and finds nearest neighbours with specialised indexes.</td>
+      <td class="wrap">Not in the standard image; the techniques change fast.</td>
+      <td class="wrap">The pgvector project page. The extension mechanics (<code>CREATE EXTENSION</code>) are in <a href="../lessons/26-connections-and-upgrades.html">lesson 26</a>.</td>
+    </tr>
+    <tr>
+      <td><strong>Citus</strong></td>
+      <td class="wrap">An extension that shards tables across several PostgreSQL servers so one logical database can scale out.</td>
+      <td class="wrap">Needs a multi-node setup and a distribution-key design.</td>
+      <td class="wrap">The Citus documentation. First get comfortable with <a href="../lessons/20-partitioning.html">partitioning</a>, its single-server relative.</td>
+    </tr>
+    <tr>
+      <td><strong>Foreign data wrappers (FDWs)</strong></td>
+      <td class="wrap">Query another PostgreSQL server, or a different system, as if its tables were local.</td>
+      <td class="wrap">Needs a second server and careful privilege design.</td>
+      <td class="wrap"><a href="https://www.postgresql.org/docs/18/postgres-fdw.html">postgres_fdw</a>, and the <a href="https://www.postgresql.org/docs/18/contrib.html">list of additional modules</a>.</td>
+    </tr>
+    <tr>
+      <td><strong>TimescaleDB</strong></td>
+      <td class="wrap">An extension for time-series data: automatic time partitioning, compression and continuous aggregates.</td>
+      <td class="wrap">Not in the standard image; it is a product with its own concepts.</td>
+      <td class="wrap">The TimescaleDB documentation. The built-in basis is <a href="../lessons/20-partitioning.html">partitioning</a> and <a href="../lessons/12-indexes.html">BRIN indexes</a>.</td>
+    </tr>
+    <tr>
+      <td><strong>pgBackRest</strong></td>
+      <td class="wrap">A backup tool with parallel, incremental backups, WAL archiving, retention policies and restore verification.</td>
+      <td class="wrap">The course teaches the underlying <code>pg_dump</code>, base backups and WAL archiving, which it automates.</td>
+      <td class="wrap">The pgBackRest user guide, after <a href="../lessons/23-backup-and-recovery.html">lesson 23</a>. Also: <a href="https://www.postgresql.org/docs/18/backup.html">Backup and Restore</a>.</td>
+    </tr>
+    <tr>
+      <td><strong>Patroni and CloudNativePG</strong></td>
+      <td class="wrap">Tools that run a PostgreSQL cluster with automatic failover: Patroni on virtual machines or containers, CloudNativePG on Kubernetes.</td>
+      <td class="wrap">They need a cluster manager and a consensus store; the course covers the replication they automate.</td>
+      <td class="wrap">Their own documentation, after <a href="../lessons/24-replication.html">lesson 24</a>. Also: <a href="https://www.postgresql.org/docs/18/high-availability.html">High Availability, Load Balancing, and Replication</a>.</td>
+    </tr>
+    <tr>
+      <td><strong>pg_partman</strong></td>
+      <td class="wrap">An extension that creates future partitions and drops old ones on a schedule.</td>
+      <td class="wrap">Lesson 20 shows how to do this by hand, which is the part worth understanding first.</td>
+      <td class="wrap">The pg_partman project page, after <a href="../lessons/20-partitioning.html">lesson 20</a>.</td>
+    </tr>
+    <tr>
+      <td><strong>pgTAP</strong></td>
+      <td class="wrap">A unit-testing framework written in SQL: assert that tables, columns, functions and privileges are what you expect.</td>
+      <td class="wrap">Not in the standard image; the course uses its own <code>./pg check</code>.</td>
+      <td class="wrap">The pgTAP project page. The catalog queries in <a href="c-catalog-queries.html">annex C</a> are the raw material of such tests.</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<div class="note info">
+  <span class="note-title">Third-party projects</span>
+  <p>
+    PostGIS, pgvector, Citus, TimescaleDB, pgBackRest, Patroni, CloudNativePG, pg_partman and pgTAP are separate
+    projects with their own sites, versions and release schedules. We do not link to them here because their
+    addresses and supported PostgreSQL versions change; search for the project name and check that it supports
+    PostgreSQL 18 before you install it.
+  </p>
+</div>
+
+<h2 id="docs">Official documentation, by what you want to do</h2>
+<p>
+  The PostgreSQL manual is excellent and worth reading directly. Start from the
+  <a href="https://www.postgresql.org/docs/18/index.html">manual's home page</a>.
+</p>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>I want to…</th><th class="wrap">Read</th></tr></thead>
+  <tbody>
+    <tr><td class="wrap">Learn the basics again, as a tutorial</td><td class="wrap"><a href="https://www.postgresql.org/docs/18/tutorial.html">The SQL language tutorial</a></td></tr>
+    <tr><td class="wrap">Look up what changed in this version</td><td class="wrap"><a href="https://www.postgresql.org/docs/18/release-18.html">Release notes for PostgreSQL 18</a></td></tr>
+    <tr><td class="wrap">Write better queries and read plans</td><td class="wrap"><a href="https://www.postgresql.org/docs/18/queries.html">Queries</a>, <a href="https://www.postgresql.org/docs/18/performance-tips.html">Performance Tips</a> and <a href="https://www.postgresql.org/docs/18/using-explain.html">Using EXPLAIN</a></td></tr>
+    <tr><td class="wrap">Understand how the planner thinks</td><td class="wrap"><a href="https://www.postgresql.org/docs/18/planner-optimizer.html">Planner/Optimizer</a></td></tr>
+    <tr><td class="wrap">Use JSONB and full-text search</td><td class="wrap"><a href="https://www.postgresql.org/docs/18/datatype-json.html">JSON types</a> and <a href="https://www.postgresql.org/docs/18/textsearch.html">Full Text Search</a></td></tr>
+    <tr><td class="wrap">Understand concurrency and locks</td><td class="wrap"><a href="https://www.postgresql.org/docs/18/mvcc.html">Concurrency Control</a> and <a href="https://www.postgresql.org/docs/18/explicit-locking.html">Explicit Locking</a></td></tr>
+    <tr><td class="wrap">Design privileges and row-level security</td><td class="wrap"><a href="https://www.postgresql.org/docs/18/ddl-priv.html">Privileges</a>, <a href="https://www.postgresql.org/docs/18/ddl-rowsecurity.html">Row Security Policies</a> and <a href="https://www.postgresql.org/docs/18/auth-pg-hba-conf.html">pg_hba.conf</a></td></tr>
+    <tr><td class="wrap">Partition a table</td><td class="wrap"><a href="https://www.postgresql.org/docs/18/ddl-partitioning.html">Table Partitioning</a></td></tr>
+    <tr><td class="wrap">Extend the server with functions and triggers</td><td class="wrap"><a href="https://www.postgresql.org/docs/18/xfunc.html">User-Defined Functions</a>, <a href="https://www.postgresql.org/docs/18/event-triggers.html">Event Triggers</a> and <a href="https://www.postgresql.org/docs/18/extend.html">Extending SQL</a></td></tr>
+    <tr><td class="wrap">Tune the settings</td><td class="wrap"><a href="https://www.postgresql.org/docs/18/runtime-config.html">Server Configuration</a></td></tr>
+    <tr><td class="wrap">Monitor the server</td><td class="wrap"><a href="https://www.postgresql.org/docs/18/monitoring-stats.html">The Cumulative Statistics System</a> and <a href="https://www.postgresql.org/docs/18/pgstatstatements.html">pg_stat_statements</a></td></tr>
+    <tr><td class="wrap">Measure table bloat exactly</td><td class="wrap"><a href="https://www.postgresql.org/docs/18/pgstattuple.html">pgstattuple</a></td></tr>
+    <tr><td class="wrap">Search text by similarity</td><td class="wrap"><a href="https://www.postgresql.org/docs/18/pgtrgm.html">pg_trgm</a></td></tr>
+    <tr><td class="wrap">Understand the write-ahead log</td><td class="wrap"><a href="https://www.postgresql.org/docs/18/wal-intro.html">Reliability and the Write-Ahead Log</a></td></tr>
+    <tr><td class="wrap">Back up and restore</td><td class="wrap"><a href="https://www.postgresql.org/docs/18/backup.html">Backup and Restore</a>, <a href="https://www.postgresql.org/docs/18/continuous-archiving.html">Continuous Archiving and PITR</a>, <a href="https://www.postgresql.org/docs/18/app-pgdump.html">pg_dump</a> and <a href="https://www.postgresql.org/docs/18/app-pgbasebackup.html">pg_basebackup</a></td></tr>
+    <tr><td class="wrap">Replicate and fail over</td><td class="wrap"><a href="https://www.postgresql.org/docs/18/high-availability.html">High Availability</a> and <a href="https://www.postgresql.org/docs/18/logical-replication.html">Logical Replication</a></td></tr>
+    <tr><td class="wrap">Upgrade to a new major version</td><td class="wrap"><a href="https://www.postgresql.org/docs/18/upgrading.html">Upgrading a PostgreSQL Cluster</a> and <a href="https://www.postgresql.org/docs/18/pgupgrade.html">pg_upgrade</a></td></tr>
+    <tr><td class="wrap">Learn every psql command</td><td class="wrap"><a href="https://www.postgresql.org/docs/18/app-psql.html">psql</a> (the short version is <a href="b-psql.html">annex B</a>)</td></tr>
+    <tr><td class="wrap">Load and unload data</td><td class="wrap"><a href="https://www.postgresql.org/docs/18/sql-copy.html">COPY</a></td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="habits">Habits worth keeping</h2>
+<ul>
+  <li>Keep a throwaway database for experiments (<a href="a5-ddl-and-dml.html#lab">annex A5</a>) and make breaking things cheap.</li>
+  <li>Read the plan before you add an index, and measure after (<a href="../lessons/13-explain-and-planner.html">lesson 13</a>).</li>
+  <li>Give every application its own role with the smallest privileges that work (<a href="../lessons/05-security-and-rls.html">lesson 5</a>).</li>
+  <li>Test your restore, not only your backup (<a href="../lessons/23-backup-and-recovery.html">lesson 23</a>).</li>
+  <li>Read the release notes before every upgrade, including minor ones.</li>
+</ul>
+
+<h2 id="next">Where to next</h2>
+<p>
+  Return to the <a href="../index.html">course home page</a>, to the <a href="d-glossary.html">glossary</a> if a
+  term has slipped your mind, or to <a href="../lessons/27-capstone.html">the capstone</a> to use everything together.
+</p>

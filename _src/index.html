@@ -1,0 +1,76 @@
+<p class="lede">
+  A hands-on course in PostgreSQL 18 for developers who already write SQL. You will learn what the server
+  actually is — databases, schemas, roles, privileges — then how the planner, transactions and locks behave,
+  and finally how to run it. Every lesson has a live playground in your browser and, where it matters,
+  exercises that run against a PostgreSQL 18 container on your own machine.
+</p>
+
+<div class="meta-row">
+  <span class="tag">27 lessons · 7 parts</span>
+  <span class="tag">annexes A–F</span>
+  <span class="tag">PostgreSQL 18</span>
+  <span class="tag">Docker</span>
+  <span class="tag">English</span>
+</div>
+
+<div class="progress-line" data-progress>
+  <span class="bar"><i></i></span>
+  <span class="count">0 of 27 lessons completed</span>
+</div>
+
+<h2 id="start">Start here</h2>
+
+<p>
+  Do the <a href="start/setup.html">setup</a> once. It takes about ten minutes: install Docker, run
+  <code>./pg up</code>, and the course database is ready. You do not need to install PostgreSQL itself.
+</p>
+
+<div class="cards">
+  <a class="card" href="start/setup.html">
+    <span class="num">00</span>
+    <span class="t">Set up your lab</span>
+    <span class="d">Docker, one command to start PostgreSQL 18, the shop dataset, and the <code>./pg</code> helper.</span>
+  </a>
+  <a class="card" href="lessons/03-roles-and-users.html">
+    <span class="num">03</span>
+    <span class="t">Roles and users</span>
+    <span class="d">There is only one kind of principal in PostgreSQL. This lesson explains what a user is, and what it is not.</span>
+  </a>
+</div>
+
+<h2 id="how">How the course works</h2>
+
+<p>
+  Read a lesson in order; each one builds on the previous. Run the small SQL examples as you read them,
+  either in the playground on the page or in <code>./pg psql</code>. Then do the three exercises at the end.
+  Each exercise is a file in your local copy of the repository. You edit it and run
+  <code>./pg check</code>, and the checker tells you whether your answer does what the task asks.
+</p>
+
+<div class="deck">
+  <div class="fact"><span class="n">27</span><span class="d">lessons, in seven parts, from foundations to operations</span></div>
+  <div class="fact"><span class="n">81</span><span class="d">exercises: three per lesson, basic, intermediate, challenge</span></div>
+  <div class="fact"><span class="n">10</span><span class="d">annexes: SQL refresher, psql, catalog queries, glossary</span></div>
+</div>
+
+<div class="note info">
+  <span class="note-title">Who this is for</span>
+  <p>
+    You can write a <code>SELECT</code> with a <code>JOIN</code> and a <code>GROUP BY</code>, and you know what
+    <code>INSERT</code> and <code>UPDATE</code> do. If not, read the <a href="appendices/a1-select-basics.html">SQL basics
+    annexes</a> first; they are interactive too.
+  </p>
+</div>
+
+<h2 id="parts">The course</h2>
+
+<!--LESSON_LIST-->
+
+<h2 id="reference">Reference</h2>
+
+<div class="cards">
+  <a class="card" href="appendices/b-psql.html"><span class="num">B</span><span class="t">psql cheat sheet</span><span class="d">Meta-commands and settings you will use daily.</span></a>
+  <a class="card" href="appendices/c-catalog-queries.html"><span class="num">C</span><span class="t">Catalog queries</span><span class="d">Copy-paste answers to “what is in this database?”</span></a>
+  <a class="card" href="appendices/d-glossary.html"><span class="num">D</span><span class="t">Glossary</span><span class="d">Every term in the course, in one or two sentences.</span></a>
+  <a class="card" href="appendices/e-troubleshooting.html"><span class="num">E</span><span class="t">Troubleshooting</span><span class="d">The errors you will meet, and what they mean.</span></a>
+</div>

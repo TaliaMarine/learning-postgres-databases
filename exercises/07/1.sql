@@ -1,0 +1,3 @@
+-- Create a table lab_07_coupon with: id (identity primary key), code (text, required, unique)
+-- and pct_off (integer, required, between 1 and 90).
+-- Run ./pg check 07 1 when you are done.

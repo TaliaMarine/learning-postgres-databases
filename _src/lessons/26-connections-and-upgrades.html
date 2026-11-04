@@ -1,0 +1,510 @@
+<p class="lede">
+  Every PostgreSQL connection is a whole operating-system process, so a thousand idle application connections are a real
+  cost. This lesson explains that cost, what a connection pooler such as pgbouncer does about it and what it breaks, how
+  extensions add features to a database, and how you move to a new PostgreSQL version without losing data. The course
+  image runs PostgreSQL 18.6.
+</p>
+
+<h2 id="goals">Learning goals</h2>
+<ul>
+  <li>Explain why a PostgreSQL connection is expensive and what <code>max_connections</code> limits.</li>
+  <li>Describe transaction pooling with pgbouncer, and name what breaks with it: session state, prepared statements and advisory locks.</li>
+  <li>Install, list and update extensions with <code>CREATE EXTENSION</code> and <code>pg_available_extensions</code>.</li>
+  <li>Tell a minor update from a major upgrade, and say what each one involves.</li>
+  <li>Compare the major-upgrade methods: <code>pg_upgrade</code>, dump and restore, and logical replication.</li>
+  <li>Make a pre-upgrade checklist from the server's own catalogs.</li>
+</ul>
+
+<h2 id="lab">Set up for this lesson</h2>
+<p>
+  Use the <code>shop</code> database for read-only queries and a scratch copy for anything that installs or changes
+  objects. The course container does not include pgbouncer, so that part is explained and shown as configuration, not
+  run. Extension commands do run, in the scratch database:
+</p>
+
+<figure class="code" data-lang="bash">
+  <figcaption><span class="path">terminal</span><span class="grow"></span><span class="lang">bash</span></figcaption>
+<pre><code>./pg sql "create database lab_s26_scratch template shop_template" postgres
+./pg psql lab_s26_scratch</code></pre>
+</figure>
+
+<p>
+  The browser playground is a single process with one session and only the <code>plpgsql</code> extension, so the
+  pooling and extension examples there show the idea, not real server behaviour.
+</p>
+
+<h2 id="why">1. Why connections are expensive</h2>
+
+<p>
+  PostgreSQL starts a new <em>backend process</em> for every client connection (<a href="01-architecture.html">lesson 1</a>).
+  Making the connection costs a TCP handshake, authentication and a process start, and with TLS a key exchange too. In a
+  test inside the course container, a new local connection plus <code>select 1</code> took about 1.8 ms on average, while
+  a statement on an already-open connection took 0.035 ms: roughly 50 times longer. That is on a fast loop-back
+  network. Across a real network, the gap is larger.
+</p>
+
+<p>
+  An open connection also costs memory (each backend has its own caches, and its <code>work_mem</code> allowances
+  while it runs queries) and a slot in shared structures such as the lock table and the snapshot list. An idle connection
+  uses little CPU. A connection that is <em>active</em> uses a CPU core while it runs, so having far more active
+  sessions than cores only adds scheduling overhead: throughput stops growing and latency does not.
+</p>
+
+<figure class="dia">
+  <div class="dia-hold">
+    <svg class="d" viewBox="0 0 860 240" role="img" aria-labelledby="pool-t pool-d">
+      <title id="pool-t">Many application connections sharing a few server connections through a pooler</title>
+      <desc id="pool-d">Six application connections on the left connect to a pooler in the middle. The pooler keeps only three connections open to PostgreSQL on the right and hands them out per transaction.</desc>
+      <defs>
+        <marker id="pla" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z"/></marker>
+      </defs>
+      <rect class="box sunken" x="30" y="30" width="190" height="180" rx="10"/>
+      <text class="hd ctr" x="125" y="54">application</text>
+      <text class="lbl ctr" x="125" y="76">6 client connections</text>
+      <rect class="box" x="60" y="92" width="130" height="18" rx="4"/>
+      <rect class="box" x="60" y="116" width="130" height="18" rx="4"/>
+      <rect class="box" x="60" y="140" width="130" height="18" rx="4"/>
+      <rect class="box" x="60" y="164" width="130" height="18" rx="4"/>
+      <rect class="box accent" x="320" y="70" width="220" height="100" rx="10"/>
+      <text class="hd ctr" x="430" y="108">pooler</text>
+      <text class="lbl ctr" x="430" y="130">pgbouncer</text>
+      <text class="lbl ctr" x="430" y="150">hands out per transaction</text>
+      <rect class="box teal" x="640" y="30" width="190" height="180" rx="10"/>
+      <text class="hd ctr" x="735" y="54">PostgreSQL</text>
+      <text class="lbl ctr" x="735" y="76">3 server connections</text>
+      <rect class="box" x="670" y="100" width="130" height="18" rx="4"/>
+      <rect class="box" x="670" y="130" width="130" height="18" rx="4"/>
+      <rect class="box" x="670" y="160" width="130" height="18" rx="4"/>
+      <path class="line" d="M220 120 L320 120" marker-end="url(#pla)"/>
+      <path class="line" d="M540 120 L640 120" marker-end="url(#pla)"/>
+    </svg>
+  </div>
+  <figcaption>Many cheap client connections in, a few expensive server connections out.</figcaption>
+</figure>
+
+<h3>max_connections</h3>
+
+<p>
+  <code>max_connections</code> is the number of client connections the server accepts. It is fixed when the server
+  starts, so changing it needs a restart. A few slots are held back for administrators:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">the limits</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select name, setting, unit, context
+from pg_settings
+where name in ('max_connections', 'superuser_reserved_connections', 'reserved_connections', 'work_mem')
+order by name;</code></pre>
+</figure>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">output in the Docker database</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code>              name              | setting | unit |  context
+--------------------------------+---------+------+------------
+ max_connections                | 100     |      | postmaster
+ reserved_connections           | 0       |      | postmaster
+ superuser_reserved_connections | 3       |      | postmaster
+ work_mem                       | 4096    | kB   | user</code></pre>
+</figure>
+
+<p>
+  With 100 slots and 3 reserved for superusers, ordinary roles can use 97. Beyond that a new connection from an ordinary
+  role fails at once with a <code>FATAL:  remaining connection slots are reserved for …</code> error (when every slot is
+  taken, even a superuser sees <code>FATAL:  sorry, too many clients already</code>). <code>reserved_connections</code>
+  keeps further slots for members of the built-in role <code>pg_use_reserved_connections</code>. Per-role and per-database limits also exist: <code>alter role app connection limit 20</code>
+  (<a href="03-roles-and-users.html">lesson 3</a>).
+</p>
+
+<div class="note warn">
+  <span class="note-title">More connections is not more speed</span>
+  <p>
+    The usual reflex when you see "too many connections" is to raise <code>max_connections</code> to 1000. That treats
+    the symptom: memory grows with it, and the server gets slower because every snapshot has more sessions to look at.
+    A common starting point for the number of <em>active</em> server connections is a small multiple of the CPU core
+    count, and a pooler to queue the rest. Measure with the checklist in
+    <a href="25-monitoring.html">lesson 25</a>.
+  </p>
+</div>
+
+<h2 id="pooling">2. Connection pooling with pgbouncer</h2>
+
+<p>
+  A <em>connection pooler</em> is a small program between the application and PostgreSQL. The application opens many
+  cheap connections to the pooler. The pooler keeps a small set of real connections to the server and lends one out
+  for as long as it needs to. <strong>pgbouncer</strong> is the most widely used one for PostgreSQL. A pooler has three
+  <em>pool modes</em>, which differ in how long a client keeps its server connection:
+</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Mode</th><th class="wrap">Server connection is held for</th><th class="wrap">Sharing</th><th class="wrap">Compatibility</th></tr></thead>
+  <tbody>
+    <tr><td><code>session</code></td><td class="wrap">The whole client connection</td><td class="wrap">Low: saves connect time only</td><td class="wrap">Full</td></tr>
+    <tr><td><code>transaction</code></td><td class="wrap">One transaction</td><td class="wrap">High: this is the mode people mean by "pooling"</td><td class="wrap">Breaks anything that lives in a session</td></tr>
+    <tr><td><code>statement</code></td><td class="wrap">One statement</td><td class="wrap">Highest</td><td class="wrap">No multi-statement transactions</td></tr>
+  </tbody>
+</table>
+</div>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">pgbouncer.ini (a minimal transaction-pooling setup; not part of the course container)</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code>[databases]
+shop = host=127.0.0.1 port=5432 dbname=shop
+
+[pgbouncer]
+listen_port = 6432
+auth_type = scram-sha-256
+auth_file = /etc/pgbouncer/userlist.txt
+pool_mode = transaction
+default_pool_size = 20          ; server connections per database+role pair
+max_client_conn = 1000          ; client connections it accepts</code></pre>
+</figure>
+
+<p>
+  The application then connects to port 6432 instead of 5432, and nothing else changes in its connection string.
+  <code>default_pool_size = 20</code> means at most 20 server connections for each database and role pair, however
+  many clients are connected. When all 20 are busy, further transactions wait in a queue inside pgbouncer.
+</p>
+
+<h3>What breaks with transaction pooling</h3>
+
+<p>
+  In transaction mode, two consecutive transactions from the same client can run on different server connections, and
+  one server connection serves many clients in turn. Everything that PostgreSQL attaches to a <em>session</em> rather
+  than a transaction stops being reliable:
+</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Feature</th><th class="wrap">Why it breaks</th><th class="wrap">What to do</th></tr></thead>
+  <tbody>
+    <tr><td class="wrap"><code>SET</code> (not <code>SET LOCAL</code>), <code>SET ROLE</code></td><td class="wrap">The setting stays on the server connection and leaks to the next client, or is gone for your next transaction</td><td class="wrap">Use <code>SET LOCAL</code> inside a transaction, or set defaults per role (<a href="21-configuration.html">lesson 21</a>)</td></tr>
+    <tr><td class="wrap">Named prepared statements (<code>PREPARE</code>, protocol-level prepare)</td><td class="wrap">The statement was prepared on one server connection; your next transaction may land on another and fail with <code>prepared statement … does not exist</code></td><td class="wrap">Use a pgbouncer version that tracks protocol-level prepared statements (<code>max_prepared_statements</code>), or turn prepared statements off in the driver</td></tr>
+    <tr><td class="wrap">Session-level advisory locks (<code>pg_advisory_lock</code>)</td><td class="wrap">The lock belongs to the server connection, not to your client; it can be held for the wrong client, or never released (<a href="16-locking.html">lesson 16</a>)</td><td class="wrap">Use <code>pg_advisory_xact_lock</code>, which ends with the transaction</td></tr>
+    <tr><td class="wrap">Temporary tables, <code>WITH HOLD</code> cursors</td><td class="wrap">They live as long as the server connection, not the transaction</td><td class="wrap">Use <code>ON COMMIT DROP</code> temp tables inside one transaction</td></tr>
+    <tr><td class="wrap"><code>LISTEN</code> / <code>NOTIFY</code> (<a href="19-triggers-and-events.html">lesson 19</a>)</td><td class="wrap">You listen on one server connection and get handed another</td><td class="wrap">Connect directly to PostgreSQL for the listener</td></tr>
+    <tr><td class="wrap">Session-level settings such as <code>search_path</code> set at connect</td><td class="wrap">Not applied to the connection you are lent</td><td class="wrap">Set them per role or per database</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>
+  The playground below creates all four kinds of session state at once, then reads them back. A pooler that lent this
+  connection to a second client without resetting it would hand over the 64MB setting, the prepared statement, the
+  temporary table and the advisory lock:
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">step 1: state that lives in a session</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">-- Four kinds of state that live in a session, not in a transaction.
+set work_mem = '64MB';
+prepare cheap_products as select id, name from shop.products where price &lt; $1;
+create temp table cart (product_id int);
+select pg_advisory_lock(42);
+
+select current_setting('work_mem') as work_mem,
+       (select count(*) from pg_prepared_statements) as prepared,
+       (select count(*) from pg_class where relpersistence = 't' and relkind = 'r') as temp_tables,
+       (select count(*) from pg_locks where locktype = 'advisory' and pid = pg_backend_pid()) as advisory_locks;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">step 2: what a pooler must undo</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">-- What a pooler must undo before the next client gets this connection.
+-- (A pooler runs DISCARD ALL, which does all four; it cannot run inside a
+--  multi-statement script like this one, so here are the four parts.)
+reset all;
+deallocate all;
+discard temp;
+select pg_advisory_unlock_all();
+
+select current_setting('work_mem') as work_mem,
+       (select count(*) from pg_prepared_statements) as prepared,
+       (select count(*) from pg_class where relpersistence = 't' and relkind = 'r') as temp_tables,
+       (select count(*) from pg_locks where locktype = 'advisory' and pid = pg_backend_pid()) as advisory_locks;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  Step 1 shows <code>64MB</code>, 1, 1 and 1. Step 2 shows <code>4MB</code>, 0, 0 and 0. Session-mode pgbouncer sends
+  <code>DISCARD ALL</code> (its <code>server_reset_query</code>) when a client leaves. Transaction mode does not reset
+  between transactions, because the client is not expected to rely on session state at all. That is why you must remove
+  that reliance from the application before you switch modes.
+</p>
+
+<div class="note danger">
+  <span class="note-title">A pooler can hide a leak and then multiply it</span>
+  <p>
+    An application that never closes connections, or leaves transactions open, will fill the pool just as it filled
+    <code>max_connections</code>. Pooling smooths a spike. It does not repair a connection leak or a
+    <code>idle in transaction</code> session (<a href="25-monitoring.html">lesson 25</a>), and a long transaction now blocks
+    one of only 20 server connections instead of one of hundreds.
+  </p>
+</div>
+
+<h2 id="extensions">3. Extensions</h2>
+
+<p>
+  An <em>extension</em> is a package of objects (types, functions, operators, index methods) that PostgreSQL installs
+  into a database with one command. Many ship with the server in the <code>contrib</code> collection; others you
+  install as operating-system packages first (PostGIS and pgvector are the best known).
+  <code>pg_available_extensions</code> lists the extensions whose files the server can see, and
+  <code>pg_extension</code> lists the ones installed in the current database:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">what is available, what is installed</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select name, default_version, installed_version, left(comment, 50) as comment
+from pg_available_extensions
+where name in ('pg_trgm', 'citext', 'pgcrypto', 'pg_stat_statements', 'postgres_fdw', 'plpgsql')
+order by name;</code></pre>
+</figure>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">output in the Docker database</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code>        name        | default_version | installed_version |                      comment
+--------------------+-----------------+-------------------+----------------------------------------------------
+ citext             | 1.8             |                   | data type for case-insensitive character strings
+ pg_stat_statements | 1.12            | 1.12              | track planning and execution statistics of all SQL
+ pg_trgm            | 1.6             |                   | text similarity measurement and index searching ba
+ pgcrypto           | 1.4             |                   | cryptographic functions
+ plpgsql            | 1.0             | 1.0               | PL/pgSQL procedural language
+ postgres_fdw       | 1.2             |                   | foreign-data wrapper for remote PostgreSQL servers</code></pre>
+</figure>
+
+<p>
+  A blank <code>installed_version</code> means "available, not installed in this database". The course image offers 46
+  extensions in all. Install one in the scratch database, use it, update it and remove it:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">lab_s26_scratch</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create extension pg_trgm;
+select similarity('PostgreSQL', 'Postgres') as sim;            -- 0.6666667
+select extname, extversion, extnamespace::regnamespace as schema from pg_extension order by extname;
+
+alter extension pg_trgm update;                                 -- NOTICE: already installed (nothing to do)
+drop extension pg_trgm;</code></pre>
+</figure>
+
+<ul>
+  <li>An extension is installed <em>per database</em>. Installing <code>pg_trgm</code> in <code>shop</code> does nothing for another database.</li>
+  <li><code>CREATE EXTENSION name SCHEMA s</code> puts its objects in schema <code>s</code>. The default is the first schema of <code>search_path</code>, usually <code>public</code>.</li>
+  <li><code>ALTER EXTENSION name UPDATE</code> moves it to the newest version the server files provide, which is how you pick up changes after a PostgreSQL minor update or a major upgrade.</li>
+  <li>Creating most extensions needs superuser rights. Those marked <em>trusted</em> (<code>citext</code>, <code>pg_trgm</code>, <code>pgcrypto</code>, <code>hstore</code>, <code>uuid-ossp</code>) can be created by a role that has <code>CREATE</code> on the database. <code>pg_available_extension_versions</code> has a <code>trusted</code> column.</li>
+  <li>Some extensions must also be preloaded with <code>shared_preload_libraries</code> and a restart. <code>pg_stat_statements</code> is one (<a href="25-monitoring.html">lesson 25</a>).</li>
+</ul>
+
+<div class="note warn">
+  <span class="note-title">Extensions are a dependency like any other</span>
+  <p>
+    A <code>pg_dump</code> of the database contains <code>CREATE EXTENSION</code>, not the extension's code, so the new
+    server must have the extension's files installed before you restore (<a href="23-backup-and-recovery.html">lesson 23</a>).
+    Managed services allow only the extensions on their own list. Check that every extension you use is supported
+    on the version and the platform you are moving to.
+  </p>
+</div>
+
+<h2 id="minor-major">4. Minor and major versions</h2>
+
+<p>
+  Since PostgreSQL 10 a version number has two parts. The course image reports:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">which version is this?</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select current_setting('server_version') as server_version,
+       current_setting('server_version_num')::int as version_num;</code></pre>
+</figure>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">output</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code>        server_version         | version_num
+-------------------------------+-------------
+ 18.6 (Debian 18.6-1.pgdg13+2) |      180006</code></pre>
+</figure>
+
+<p>
+  <code>18</code> is the <em>major version</em>; <code>6</code> is the <em>minor version</em>. The two are very different
+  events:
+</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th></th><th class="wrap">Minor update (18.5 → 18.6)</th><th class="wrap">Major upgrade (17 → 18)</th></tr></thead>
+  <tbody>
+    <tr><td>What changes</td><td class="wrap">Bug and security fixes only</td><td class="wrap">New features, changed behaviour, possibly changed catalogs and data format</td></tr>
+    <tr><td>Data directory</td><td class="wrap">Same files and format; nothing to convert</td><td class="wrap">Not compatible: you must convert or copy the data</td></tr>
+    <tr><td>How</td><td class="wrap">Install the new binaries, restart the server</td><td class="wrap">One of the three methods in section 5</td></tr>
+    <tr><td>Downtime</td><td class="wrap">A restart, seconds</td><td class="wrap">Minutes to hours, or seconds with logical replication</td></tr>
+    <tr><td>Risk</td><td class="wrap">Low; apply every one promptly</td><td class="wrap">Moderate: test the application first</td></tr>
+    <tr><td>How often</td><td class="wrap">Several times a year</td><td class="wrap">Once a year a new major appears; each is supported for five years</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>
+  Minor releases never need a dump or any conversion. After a minor update, run <code>ALTER EXTENSION … UPDATE</code>
+  for the extensions that ship with a new version, and read the release notes for anything marked as needing action (a
+  rare index rebuild, for example). A server that is several minor versions behind is the one that gets hit by a known,
+  already fixed bug.
+</p>
+
+<div class="note info">
+  <span class="note-title">Data checksums in the course image</span>
+  <p>
+    The course container's <code>docker-compose.yml</code> creates the cluster with <code>--data-checksums</code>, and
+    <code>show data_checksums</code> returns <code>on</code>. Checksums detect a corrupted page when it is read. For
+    <code>pg_upgrade</code>, the old and the new cluster must agree about checksums. Check
+    <code>show data_checksums</code> on both.
+  </p>
+</div>
+
+<h2 id="major">5. Major upgrades: three methods</h2>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Method</th><th class="wrap">How it works</th><th class="wrap">Downtime</th><th class="wrap">Notes</th></tr></thead>
+  <tbody>
+    <tr><td><code>pg_upgrade</code></td><td class="wrap">Dumps only the catalogs, then copies (or hard-links) the data files into a new cluster</td><td class="wrap">Minutes; seconds to minutes with <code>--link</code>, however large the data</td><td class="wrap">Both versions' binaries on one machine. <code>--check</code> does a dry run. Run <code>ANALYZE</code> afterwards unless statistics were carried over. <code>--link</code> makes the old cluster unusable once the new one has started</td></tr>
+    <tr><td>Dump and restore</td><td class="wrap"><code>pg_dumpall --globals-only</code> plus <code>pg_dump -Fc</code> from the old server, <code>pg_restore</code> into the new one (<a href="23-backup-and-recovery.html">lesson 23</a>)</td><td class="wrap">As long as the dump and restore take; proportional to data size</td><td class="wrap">Simplest and safest. Works across platforms. Fine for small databases</td></tr>
+    <tr><td>Logical replication</td><td class="wrap">Subscribe a new-version server to the old one, wait until it has caught up, switch the application over (<a href="24-replication.html">lesson 24</a>)</td><td class="wrap">Seconds</td><td class="wrap">Most work to prepare: tables need a replica identity, sequences must be copied at the end, schema changes are not replicated, and large objects are not</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>
+  <code>pg_upgrade</code> is installed in the course container, so you can read its options with
+  <code>./pg exec pg_upgrade --help</code>. The usual flow, shown as commands (do not run this against the course
+  container, because upgrading in place would destroy the course database):
+</p>
+
+<figure class="code" data-lang="bash">
+  <figcaption><span class="path">a pg_upgrade run from 17 to 18 (outline only)</span><span class="grow"></span><span class="lang">bash</span></figcaption>
+<pre><code># 1. install the PostgreSQL 18 binaries next to 17 and initialise an empty 18 cluster
+initdb -D /var/lib/postgresql/18/main
+
+# 2. stop the old server, then do a dry run: it reads both clusters and reports problems, changes nothing
+pg_upgrade --check \
+  -b /usr/lib/postgresql/17/bin -B /usr/lib/postgresql/18/bin \
+  -d /var/lib/postgresql/17/main -D /var/lib/postgresql/18/main
+
+# 3. the real run (add --link to hard-link files instead of copying them)
+pg_upgrade -b … -B … -d … -D … --jobs 4
+
+# 4. start the new cluster, update extensions, refresh statistics
+vacuumdb --all --analyze-in-stages --missing-stats-only</code></pre>
+</figure>
+
+<p>
+  <code>vacuumdb --analyze-in-stages --missing-stats-only</code> analyzes only the tables that have no statistics. In
+  the course container's 18.6 tools, <code>vacuumdb</code> accepts <code>--missing-stats-only</code> and
+  <code>pg_upgrade</code> accepts <code>--no-statistics</code>, which shows that in 18 the upgrade can carry the old
+  statistics along, so queries do not start with empty ones.
+</p>
+
+<div class="note danger">
+  <span class="note-title">Never upgrade without a rehearsal</span>
+  <p>
+    Take a backup you have restored before (<a href="23-backup-and-recovery.html">lesson 23</a>), restore it to a
+    scratch machine, run the upgrade there, and run your application's tests against the result. Note the time each step
+    took: that is your downtime. Keep the old cluster until you are sure; with <code>--link</code> that is only possible
+    if you have the backup.
+  </p>
+</div>
+
+<h2 id="when">When to use, when not to</h2>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Situation</th><th class="wrap">✅ Do this</th><th class="wrap">❌ Not this</th></tr></thead>
+  <tbody>
+    <tr><td class="wrap">Hundreds of short-lived application connections</td><td class="wrap">A pooler in transaction mode, with the application free of session state</td><td class="wrap">Raising <code>max_connections</code> to 2000</td></tr>
+    <tr><td class="wrap">An app that uses <code>SET</code>, temp tables or session advisory locks</td><td class="wrap">Session pooling, or change the app to <code>SET LOCAL</code> and transaction-level locks first</td><td class="wrap">Switching to transaction mode and hoping</td></tr>
+    <tr><td class="wrap">A long-lived <code>LISTEN</code> connection</td><td class="wrap">A direct connection to PostgreSQL for that one session</td><td class="wrap">Sending it through a transaction pooler</td></tr>
+    <tr><td class="wrap">A new feature that exists as an extension</td><td class="wrap">Check it is supported on the target (including managed services), then <code>CREATE EXTENSION</code> in one database</td><td class="wrap">Installing it everywhere "just in case"</td></tr>
+    <tr><td class="wrap">Security fixes for the current major version</td><td class="wrap">Apply every minor update, with a restart</td><td class="wrap">Staying on the 18.0 you installed</td></tr>
+    <tr><td class="wrap">A small database moving to a new major</td><td class="wrap">Dump and restore</td><td class="wrap">Building a logical replication setup for 2 GB</td></tr>
+    <tr><td class="wrap">A multi-terabyte database moving to a new major</td><td class="wrap"><code>pg_upgrade --link</code> or logical replication, after a rehearsal</td><td class="wrap">A dump and restore that needs a day of downtime</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="inspect">Inspect it</h2>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">connections now, limits, extensions and version</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select count(*) as client_connections,
+       current_setting('max_connections')::int as max_connections,
+       current_setting('server_version') as server_version,
+       (select count(*) from pg_extension) as extensions_here
+from pg_stat_activity
+where backend_type = 'client backend';</code></pre>
+</figure>
+
+<p>When you finish: <code>./pg sql "drop database if exists lab_s26_scratch with (force)" postgres</code>.</p>
+
+<h2 id="exercises">Your turn</h2>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 1</span><span class="grow"></span><span class="lvl">basic</span></div>
+  <div class="ex-body">
+    <p>
+      Report the server's connection room in one row: the limit, the reserved slots, what is left for ordinary roles, how
+      many connections are open to this database, and whether changing the limit needs a restart.
+    </p>
+    <p>Open <code>exercises/26/1.sql</code>, write your answer, then run <code>./pg check 26 1</code>.</p>
+  </div>
+  {{stub 26 1}}
+  <details><summary>Hint</summary><p><code>current_setting()</code> returns text, so cast with <code>::integer</code> before adding. <code>pg_settings.context</code> is <code>postmaster</code> for settings that need a restart.</p></details>
+  {{solution 26 1}}
+</section>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 2</span><span class="grow"></span><span class="lvl">intermediate</span></div>
+  <div class="ex-body">
+    <p>
+      Make customer e-mail addresses unique regardless of case: install <code>citext</code> in the schema
+      <code>public</code> and change the type of <code>shop.customers.email</code>.
+    </p>
+    <p>Open <code>exercises/26/2.sql</code>, write your answer, then run <code>./pg check 26 2</code>.</p>
+  </div>
+  {{stub 26 2}}
+  <details><summary>Hint</summary><p><code>ALTER TABLE … ALTER COLUMN … TYPE …</code> rebuilds the column and its unique index. The type's name is <code>citext</code>, and it is created by the extension of the same name.</p></details>
+  {{solution 26 2}}
+</section>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 3</span><span class="grow"></span><span class="lvl">challenge</span></div>
+  <div class="ex-body">
+    <p>
+      Build the extension part of a pre-upgrade checklist: one row per installed extension, comparing its installed
+      version with the version the server's files provide.
+    </p>
+    <p>Open <code>exercises/26/3.sql</code>, write your answer, then run <code>./pg check 26 3</code>.</p>
+  </div>
+  {{stub 26 3}}
+  <details><summary>Hint</summary><p>Join <code>pg_extension</code> (installed here) to <code>pg_available_extensions</code> (available to the server) on the extension name. Cast the schema with <code>extnamespace::regnamespace::text</code>.</p></details>
+  {{solution 26 3}}
+</section>
+
+<h2 id="summary">Summary</h2>
+<ul>
+  <li>A connection is a backend process: slow to open, memory-hungry to keep, and useful only while it runs queries on a core. Raising <code>max_connections</code> is rarely the fix.</li>
+  <li>A transaction-mode pooler such as pgbouncer shares few server connections between many clients, and breaks session state: <code>SET</code>, named prepared statements, session advisory locks, temp tables, <code>LISTEN</code>.</li>
+  <li>An extension is installed per database with <code>CREATE EXTENSION</code>; <code>pg_available_extensions</code> shows what you can install and <code>ALTER EXTENSION … UPDATE</code> moves it to a newer version.</li>
+  <li>A minor update (18.5 to 18.6) swaps the binaries and restarts. A major upgrade (17 to 18) needs <code>pg_upgrade</code>, a dump and restore, or logical replication.</li>
+  <li>Rehearse a major upgrade on a restored backup and time it. The course image runs PostgreSQL 18.6.</li>
+</ul>
+
+<h2 id="next">Looking ahead</h2>
+<p>
+  You have now seen how to run PostgreSQL: configure it, back it up, replicate it, watch it and keep it current. The
+  last lesson, <a href="27-capstone.html">the capstone</a>, puts the whole course together: you build a small service
+  database from a blank scratch database with roles, a schema, data, indexes and a verified backup.
+</p>

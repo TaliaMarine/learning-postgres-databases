@@ -1,0 +1,731 @@
+<p class="lede">
+  Some data does not fit neatly into columns: product attributes that differ per category, a list of tags, an
+  event payload that changes every month. PostgreSQL stores such data in <code>jsonb</code> and in arrays, and
+  lets you query, change and index both. This lesson shows how to use them without giving up the things a plain
+  column gives you for free: types, constraints and cheap filtering.
+</p>
+
+<h2 id="goals">Learning goals</h2>
+<ul>
+  <li>Decide whether a value belongs in a column, in a <code>jsonb</code> document or in an array.</li>
+  <li>Explain how <code>jsonb</code> differs from <code>json</code>, and read values with <code>-&gt;</code>, <code>-&gt;&gt;</code>, <code>#&gt;</code> and <code>#&gt;&gt;</code> without type surprises.</li>
+  <li>Filter with containment (<code>@&gt;</code>), key tests (<code>?</code>) and jsonpath (<code>jsonb_path_exists</code>, <code>@?</code>).</li>
+  <li>Change a document with <code>||</code>, <code>-</code> and <code>jsonb_set</code>, and know what that costs.</li>
+  <li>Choose between a GIN index, a B-tree on an expression and a generated column for a field you filter on.</li>
+  <li>Use arrays correctly: 1-based subscripts, <code>ANY</code>, <code>@&gt;</code>, <code>&amp;&amp;</code>, <code>unnest</code>, <code>array_agg</code>, and the <code>NULL</code> traps.</li>
+</ul>
+
+<h2 id="lab">Set up for this lesson</h2>
+<p>
+  Use the <code>shop</code> database; it is already seeded. Three columns are used throughout:
+  <code>shop.products.attrs</code> (a <code>jsonb</code> document with <code>color</code>, <code>weight_g</code> and, in the Docker data,
+  <code>warranty_months</code>), <code>shop.customers.profile</code> (<code>tier</code>, <code>locale</code>, <code>newsletter</code>) and
+  <code>shop.products.tags</code> (a <code>text[]</code>). Exercise 2 changes a table; the checker runs it in a throw-away
+  copy, so <code>shop</code> itself stays clean.
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">what the data looks like</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select id, tags, attrs
+from shop.products
+order by id
+limit 3;</code></pre>
+</figure>
+
+<p>In the Docker database the first rows are:</p>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">output (Docker database)</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code> id |      tags      |                           attrs
+----+----------------+------------------------------------------------------------
+  1 | {new}          | {"color": "white", "weight_g": 87, "warranty_months": 24}
+  2 | {}             | {"color": "red", "weight_g": 124, "warranty_months": 36}
+  3 | {sale,popular} | {"color": "blue", "weight_g": 161, "warranty_months": 12}</code></pre>
+</figure>
+
+<p>
+  The browser playground has the same columns but only 8 products and no <code>warranty_months</code> key, so the numbers
+  you see there are smaller. Where this lesson quotes numbers, it says which dataset they come from.
+</p>
+
+<h2 id="why">1. jsonb, json, and when a column is better</h2>
+
+<p>
+  <strong>JSON</strong> is a text format for nested data: objects (<code>{"key": value}</code>), arrays, strings, numbers,
+  booleans and <code>null</code>. PostgreSQL has two types for it. <code>json</code> stores the exact text you sent. <code>jsonb</code>
+  stores it parsed, in a binary form. The difference shows as soon as you read the value back:
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">real PostgreSQL 18 in your browser · seeded with a small shop</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select '{"b": 1,   "a": 2, "a": 3}'::json::text  as as_json,
+       '{"b": 1,   "a": 2, "a": 3}'::jsonb::text as as_jsonb;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  <code>json</code> keeps your spaces, your key order and the duplicate key <code>a</code>. <code>jsonb</code> removes the extra spaces, sorts
+  keys (shorter keys first, then by bytes), and keeps only the last value of a duplicate key, giving
+  <code>{"a": 3, "b": 1}</code>. Because <code>jsonb</code> is already parsed, it is faster to query, supports indexes and has
+  all the operators in this lesson. Use <code>json</code> only when you must preserve the original text byte for byte (an audit copy of
+  a webhook body, for example). For everything else, use <code>jsonb</code>.
+</p>
+
+<h3 id="rule">The rule of thumb</h3>
+<p>
+  A <code>jsonb</code> column is not a way to avoid designing a table. It is the right place for data that is
+  <em>flexible and rarely queried by itself</em>. It is the wrong place for anything you filter on constantly, join on, or want
+  the database to guarantee.
+</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>You need to…</th><th class="wrap">A column gives you</th><th class="wrap">A key inside jsonb gives you</th></tr></thead>
+  <tbody>
+    <tr><td class="wrap">Reject bad values</td><td class="wrap">A type, <code>NOT NULL</code>, <code>CHECK</code>, <code>UNIQUE</code></td><td class="wrap">Nothing, unless you write a <code>CHECK</code> on the expression</td></tr>
+    <tr><td class="wrap">Point a foreign key at it</td><td class="wrap">A real foreign key</td><td class="wrap">Not possible</td></tr>
+    <tr><td class="wrap">Filter fast on it</td><td class="wrap">A plain B-tree index and accurate statistics</td><td class="wrap">An expression index or a GIN index; weaker statistics</td></tr>
+    <tr><td class="wrap">Add a new attribute per product type</td><td class="wrap">An <code>ALTER TABLE</code> for everybody</td><td class="wrap">Just write the key</td></tr>
+    <tr><td class="wrap">Update one attribute</td><td class="wrap">Rewrites the row</td><td class="wrap">Rewrites the row <em>and</em> the whole document</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>
+  In the shop, <code>products.attrs</code> and <code>customers.profile</code> are the flexible part: a colour, a weight, a locale.
+  <code>price</code>, <code>stock</code> and <code>category_id</code> are columns, because the course filters, sums and joins on them.
+</p>
+
+<h2 id="read">2. Reading values: -&gt;, -&gt;&gt;, #&gt; and #&gt;&gt;</h2>
+
+<p>Four operators reach into a document. Two return <code>jsonb</code>, two return <code>text</code>:</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Operator</th><th>Meaning</th><th>Returns</th></tr></thead>
+  <tbody>
+    <tr><td><code>doc -&gt; 'key'</code> or <code>doc -&gt; 2</code></td><td class="wrap">Value of an object key, or element of an array (0-based)</td><td><code>jsonb</code></td></tr>
+    <tr><td><code>doc -&gt;&gt; 'key'</code></td><td class="wrap">The same, converted to text</td><td><code>text</code></td></tr>
+    <tr><td><code>doc #&gt; '{a,b,1}'</code></td><td class="wrap">Value at a path of keys and positions</td><td><code>jsonb</code></td></tr>
+    <tr><td><code>doc #&gt;&gt; '{a,b,1}'</code></td><td class="wrap">The same, as text</td><td><code>text</code></td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">real PostgreSQL 18 in your browser · seeded with a small shop</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select sku,
+       attrs -&gt; 'color'            as color_json,
+       attrs -&gt;&gt; 'color'           as color_text,
+       (attrs -&gt;&gt; 'weight_g')::int as weight_g
+from shop.products
+order by (attrs -&gt;&gt; 'weight_g')::int desc nulls last, sku
+limit 4;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  Notice <code>color_json</code> is shown with quotes: it is a JSON string, not a SQL string. <code>-&gt;&gt;</code> removes them. A key
+  that does not exist, or a step into the wrong kind of value, gives SQL <code>NULL</code>, not an error:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">missing keys are NULL</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select attrs -&gt; 'size'          as missing_key,
+       attrs -&gt; 'color' -&gt; 'x'  as wrong_type
+from shop.products
+where id = 1;
+-- both columns are NULL</code></pre>
+</figure>
+
+<div class="note warn">
+  <span class="note-title">-&gt;&gt; always gives text, and text sorts like text</span>
+  <p>
+    <code>attrs -&gt;&gt; 'weight_g' &gt; '1000'</code> compares strings, so <code>'95'</code> is bigger than <code>'1000'</code> (the first
+    character <code>9</code> sorts after <code>1</code>). On the Docker data, the text comparison finds <strong>500</strong> of 500 products, and the
+    correct numeric comparison finds <strong>399</strong>:
+  </p>
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">text compares versus numeric compares</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select count(*) from shop.products where attrs -&gt;&gt; 'weight_g' &gt; '1000';          -- 500, wrong
+select count(*) from shop.products where (attrs -&gt;&gt; 'weight_g')::int &gt; 1000;     -- 399</code></pre>
+</figure>
+  <p>
+    Cast after extracting. If a single document has a non-number in that key, the cast fails for the whole query; the
+    safest filter is a jsonpath comparison (section 4), which compares JSON numbers as numbers.
+  </p>
+</div>
+
+<h3 id="null-kinds">Two kinds of null</h3>
+<p>
+  A JSON <code>null</code> is a value; SQL <code>NULL</code> means "nothing here". <code>'{"a": null}'::jsonb -&gt; 'a'</code> returns the JSON value
+  <code>null</code>, which is <em>not</em> SQL <code>NULL</code> (<code>IS NULL</code> is false), while <code>-&gt;&gt; 'a'</code> returns SQL <code>NULL</code>.
+  <code>jsonb_typeof(doc -&gt; 'a')</code> tells them apart: it returns <code>'null'</code> for the JSON value and SQL <code>NULL</code> for a missing key.
+</p>
+
+<h2 id="contain">3. Containment and key tests</h2>
+
+<p>
+  <strong>Containment</strong> asks "does this document contain that smaller document?". It is written <code>@&gt;</code> ("contains"); its mirror is
+  <code>&lt;@</code> ("is contained by"). The right-hand side is the shape you are looking for:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">containment on the Docker data</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select count(*) from shop.products where attrs @&gt; '{"color": "red"}';
+-- 84
+
+select count(*) from shop.products
+where attrs @&gt; '{"color": "red", "warranty_months": 36}';
+-- 84: every red product in this dataset has a 36-month warranty</code></pre>
+</figure>
+
+<p>
+  Containment is recursive and understands arrays: an array contains another array if it holds all its elements, in any order.
+  An array does <em>not</em> contain a bare scalar, which surprises people:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">arrays inside documents</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select '{"a": [1, 2, 3]}'::jsonb @&gt; '{"a": [2]}' as array_in_array,   -- true
+       '{"a": [1, 2, 3]}'::jsonb @&gt; '{"a": 2}'   as scalar_vs_array;  -- false</code></pre>
+</figure>
+
+<p>Three more operators test only for the presence of keys (top level only, and for string elements of an array):</p>
+
+<ul>
+  <li><code>doc ? 'key'</code>: the key exists.</li>
+  <li><code>doc ?| array['a','b']</code>: at least one of these keys exists.</li>
+  <li><code>doc ?&amp; array['a','b']</code>: all of these keys exist.</li>
+</ul>
+
+<p>
+  The question mark is also used for parameters by some database drivers. If yours rejects <code>?</code>, use the function forms
+  <code>jsonb_exists(doc, 'key')</code>, <code>jsonb_exists_any</code> and <code>jsonb_exists_all</code>.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">real PostgreSQL 18 in your browser · seeded with a small shop</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select count(*) filter (where profile @&gt; '{"tier": "pro"}')           as pro,
+       count(*) filter (where profile @&gt; '{"locale": "nl"}')          as dutch,
+       count(*) filter (where profile ?&amp; array['tier', 'locale'])     as has_both_keys,
+       count(*) filter (where profile ?| array['phone', 'vip'])       as has_either_key
+from shop.customers;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<h2 id="path">4. jsonpath: a small query language for documents</h2>
+
+<p>
+  A <strong>jsonpath</strong> is an expression in its own mini-language (<code>$</code> is the document, <code>.key</code> a field,
+  <code>[*]</code> every array element, <code>? (…)</code> a filter where <code>@</code> is the current item). It lets you compare JSON numbers
+  as numbers and reach into arrays of objects, which <code>@&gt;</code> cannot do.
+</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Form</th><th>Use</th></tr></thead>
+  <tbody>
+    <tr><td><code>jsonb_path_exists(doc, path)</code> or <code>doc @? path</code></td><td class="wrap">Does the path match anything? Good in <code>WHERE</code>.</td></tr>
+    <tr><td><code>jsonb_path_query(doc, path)</code></td><td class="wrap">One row per match (a set-returning function).</td></tr>
+    <tr><td><code>jsonb_path_query_array(doc, path)</code></td><td class="wrap">All matches collected into one <code>jsonb</code> array.</td></tr>
+    <tr><td><code>doc @@ predicate</code></td><td class="wrap">Evaluate a true/false predicate such as <code>$.weight_g &gt; 1000</code>.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">real PostgreSQL 18 in your browser · seeded with a small shop</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select sku, attrs
+from shop.products
+where jsonb_path_exists(attrs, '$.weight_g ? (@ &gt; 1000)')
+order by sku;
+
+-- an array of objects: prices above 10 in an order document
+select jsonb_path_query_array(
+         '{"items": [{"p": 5}, {"p": 12}, {"p": 40}]}',
+         '$.items[*].p ? (@ &gt; 10)') as big_prices;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  A playground shows only the result of the last statement, here <code>big_prices</code>, which is <code>[12, 40]</code>. Run the first query on its own to see the
+  products. On the Docker data, <code>jsonb_path_exists(attrs, '$.weight_g ? (@ &gt; 1000)')</code>, <code>attrs @? '$.weight_g ? (@ &gt; 1000)'</code> and
+  <code>attrs @@ '$.weight_g &gt; 1000'</code> each count 399 products, the same as the correct cast above.
+</p>
+
+<h2 id="expand">5. Taking a document apart</h2>
+
+<p>
+  To treat a document as rows, use the set-returning functions. <code>jsonb_each(doc)</code> returns one row per top-level key with columns
+  <code>key</code> and <code>value</code>; <code>jsonb_each_text</code> returns the value as text; <code>jsonb_object_keys(doc)</code> returns only the keys;
+  <code>jsonb_array_elements(doc)</code> does the same for an array. A <strong>set-returning function</strong> is a function that produces a
+  table instead of a single value, so it goes in <code>FROM</code>.
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">one row per key</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select e.key, e.value
+from shop.products p, jsonb_each(p.attrs) as e
+where p.id = 3
+order by e.key;</code></pre>
+</figure>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">output (Docker database)</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code>       key       | value
+-----------------+--------
+ color           | "blue"
+ warranty_months | 12
+ weight_g        | 161</code></pre>
+</figure>
+
+<p>
+  <code>jsonb_object_keys</code> is the quickest way to learn what a column really contains. It is also how you discover that a "schemaless" column
+  has a schema after all; the <a href="#inspect">Inspect it</a> section uses it.
+</p>
+
+<h2 id="change">6. Changing a document</h2>
+
+<p>A <code>jsonb</code> value is immutable: every "change" builds a new document, which you assign back with <code>UPDATE</code>.</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Expression</th><th>Result</th></tr></thead>
+  <tbody>
+    <tr><td><code>doc || '{"k": v}'</code></td><td class="wrap">Merge: keys on the right replace or add to the left (top level only).</td></tr>
+    <tr><td><code>doc - 'key'</code></td><td class="wrap">Remove a top-level key (<code>- 'a'</code>), or several (<code>- array['a','b']</code>).</td></tr>
+    <tr><td><code>doc #- '{a,b}'</code></td><td class="wrap">Remove the value at a path.</td></tr>
+    <tr><td><code>jsonb_set(doc, '{a,b}', new_value)</code></td><td class="wrap">Replace the value at a path. The new value must itself be <code>jsonb</code>, so a string needs quotes: <code>'"pink"'</code>.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">real PostgreSQL 18 in your browser · seeded with a small shop</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select id, attrs,
+       attrs || '{"fragile": true}'            as merged,
+       attrs - 'weight_g'                       as without_weight,
+       jsonb_set(attrs, '{color}', '"pink"')    as repainted
+from shop.products
+where id = 1;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>Now do it for real. This box writes to the playground's own copy of the data; <em>Reset data</em> undoes it.</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">real PostgreSQL 18 in your browser · seeded with a small shop</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">update shop.products
+set attrs = jsonb_set(attrs, '{warranty_months}', '24')
+where id = 1;
+
+select id, attrs from shop.products where id in (1, 2) order by id;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>Product 1 gained a <code>warranty_months</code> key; product 2 did not. Nothing stopped you, and nothing would have stopped a typo.</p>
+
+<div class="note warn">
+  <span class="note-title">jsonb_set does not create missing parents</span>
+  <p>
+    <code>jsonb_set(attrs, '{dims,w}', '10')</code> returns the document unchanged when <code>dims</code> does not exist yet: no error, no change.
+    Create the parent first: <code>jsonb_set(attrs, '{dims}', '{"w": 10}')</code>. Also, <code>jsonb_set</code> with a SQL <code>NULL</code> as the new
+    value returns SQL <code>NULL</code> for the whole document, wiping it. Guard with <code>coalesce</code>, or use <code>jsonb_set_lax</code> with an explicit
+    <code>'delete_key'</code> or <code>'use_json_null'</code> action.
+  </p>
+</div>
+
+<div class="note info">
+  <span class="note-title">Updating one key rewrites the whole value</span>
+  <p>
+    A <code>jsonb</code> value is stored as one unit. Changing a single key writes a new copy of the whole document (and of the row, as
+    <a href="17-vacuum-and-bloat.html">lesson 17</a> explains). That is fine for a small <code>attrs</code>; it is costly for a
+    100 kB document updated many times per second. Large, hot, frequently updated values belong in columns or their own table.
+  </p>
+</div>
+
+<h2 id="index">7. Indexing jsonb</h2>
+
+<p>
+  Without an index, every <code>jsonb</code> filter reads the whole table. PostgreSQL offers two separate tools, and they serve different queries.
+</p>
+
+<h3 id="gin">GIN for containment</h3>
+<p>
+  A <strong>GIN index</strong> (Generalized Inverted Index) maps each key and value inside the documents to the rows that contain it, like the index at
+  the back of a book. It answers <code>@&gt;</code>, <code>?</code>, <code>?|</code>, <code>?&amp;</code> and <code>@?</code>/<code>@@</code>. It has two operator classes
+  (the set of operators an index supports):
+</p>
+
+<ul>
+  <li><code>jsonb_ops</code> (the default): supports <code>@&gt;</code> and the key operators <code>?</code>, <code>?|</code>, <code>?&amp;</code>. Bigger.</li>
+  <li><code>jsonb_path_ops</code>: supports only <code>@&gt;</code> and the jsonpath operators. Smaller and faster for containment.</li>
+</ul>
+
+<p>
+  The numbers below come from the Docker dataset (1 000 000 rows in <code>analytics.events</code>, table size 117 MB), measured in a scratch database
+  so that <code>shop</code> stays unchanged. The query looks for one page and one response time:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">a selective containment query, then a GIN index</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>explain (analyze, buffers off, costs off, timing off, summary off)
+select count(*) from analytics.events
+where payload @&gt; '{"path": "/cart", "ms": 1000}';
+-- Parallel Seq Scan on events ... Rows Removed by Filter: 333317   (per worker)
+
+create index events_payload_gin on analytics.events using gin (payload jsonb_path_ops);
+analyze analytics.events;
+
+explain (analyze, buffers off, costs off, timing off, summary off)
+select count(*) from analytics.events
+where payload @&gt; '{"path": "/cart", "ms": 1000}';
+-- Bitmap Heap Scan on events (actual rows=50)
+--   -&gt; Bitmap Index Scan on events_payload_gin</code></pre>
+</figure>
+
+<p>
+  The index with <code>jsonb_path_ops</code> is 6576 kB; the default <code>jsonb_ops</code> index on the same column is 9792 kB. Both are small next to the table,
+  but an index slows every insert and update; see <a href="12-indexes.html">lesson 12</a>.
+</p>
+
+<div class="note warn">
+  <span class="note-title">A GIN index on the whole column does not help -&gt;&gt;</span>
+  <p>
+    A GIN index can only answer the operators it supports. With the index above in place, the query
+    <code>where payload -&gt;&gt; 'path' = '/cart' and (payload -&gt;&gt; 'ms')::int = 1000</code> still ran a Parallel Seq Scan on the same 1 000 000-row table, because
+    <code>-&gt;&gt;</code> is not an indexable operator for it. Write the filter as containment, or index the expression instead (next).
+  </p>
+</div>
+
+<h3 id="expr">A B-tree on one expression</h3>
+<p>
+  If you always filter on the same key, with equality or a range, index that expression with an ordinary B-tree. The query must repeat the
+  expression exactly:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">expression index</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create index events_ms_idx on analytics.events (((payload -&gt;&gt; 'ms')::int));
+select count(*) from analytics.events where (payload -&gt;&gt; 'ms')::int &gt; 1900;</code></pre>
+</figure>
+
+<p>The next section shows a tidier way to get the same effect.</p>
+
+<h2 id="generated">8. Promote a field you filter on: generated columns</h2>
+
+<p>
+  When a key becomes important, make it a real column but keep the document as the single source of truth. A <strong>generated column</strong> is a column
+  whose value PostgreSQL computes from other columns of the same row. The <code>STORED</code> kind writes the value to disk when the row is written;
+  <a href="07-constraints-and-design.html">lesson 7</a> covers generated columns in full. Here, one pulls <code>path</code> out of the event payload:
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">real PostgreSQL 18 in your browser · seeded with a small shop</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">drop table if exists page_hits;
+create table page_hits (
+  id      integer generated always as identity primary key,
+  payload jsonb not null,
+  path    text generated always as (payload -&gt;&gt; 'path') stored
+);
+create index page_hits_path_idx on page_hits (path);
+
+insert into page_hits (payload)
+select payload from analytics.events where payload ? 'path' order by id limit 20;
+
+select path, count(*) as hits from page_hits group by path order by path;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  Now you have a plain <code>text</code> column with a plain B-tree index, statistics the planner understands, and no way for the two copies
+  to disagree. You cannot write to it directly. This next box is an <strong>intentional error</strong> (run the box above first, otherwise you get "relation does not exist" instead):
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">expect an error: you cannot write to a generated column</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">update page_hits set path = '/x' where id = 1;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>The message is <code>column "path" can only be updated to DEFAULT</code>. Change the payload and the column follows.</p>
+
+<div class="note warn">
+  <span class="note-title">A bad value breaks the ALTER, or the INSERT</span>
+  <p>
+    A generated column that casts (<code>(attrs -&gt;&gt; 'weight_g')::int</code>) fails for any row where the key holds something that is not a number, such as
+    <code>"abc"</code>: the error is <code>invalid input syntax for type integer: "abc"</code>. When you add the column to an existing table, the
+    <code>ALTER TABLE</code> fails and nothing changes; later, the offending <code>INSERT</code> fails. That is the point, since it is the check the document alone could not
+    give you, but find and fix the bad rows first. Adding a stored generated column also rewrites the table, which takes a lock; see
+    <a href="16-locking.html">lesson 16</a>.
+  </p>
+</div>
+
+<h2 id="arrays">9. Arrays</h2>
+
+<p>
+  An <strong>array</strong> column holds an ordered list of values of one type, for example <code>text[]</code>. <code>shop.products.tags</code> is one. A literal is written
+  <code>'{sale,popular}'</code> or <code>array['sale','popular']</code>. Four rules explain most array bugs:
+</p>
+
+<ol>
+  <li><strong>Subscripts start at 1,</strong> not 0. <code>tags[1]</code> is the first element.</li>
+  <li><strong>Out-of-range subscripts return <code>NULL</code>,</strong> not an error. <code>tags[0]</code> is always <code>NULL</code>.</li>
+  <li><strong><code>array_length(a, 1)</code> is <code>NULL</code> for an empty array,</strong> while <code>cardinality(a)</code> is 0. <code>cardinality</code> counts all elements of all dimensions; <code>array_length</code> takes a dimension number.</li>
+  <li><strong>An array can have <code>NULL</code> elements,</strong> and they behave as in section 11.</li>
+</ol>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">real PostgreSQL 18 in your browser · seeded with a small shop</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select id, tags, tags[1] as first_tag, tags[0] as index_zero,
+       array_length(tags, 1) as array_length, cardinality(tags) as cardinality
+from shop.products
+order by id;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>The rows with an empty array show <code>array_length</code> as <code>NULL</code> and <code>cardinality</code> as 0. Use <code>cardinality</code> unless you need a specific dimension.</p>
+
+<h3 id="array-search">Searching in arrays</h3>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Question</th><th>Write</th><th class="wrap">Docker shop result</th></tr></thead>
+  <tbody>
+    <tr><td class="wrap">Has this one tag?</td><td><code>'sale' = ANY (tags)</code> or <code>tags @&gt; array['sale']</code></td><td>166</td></tr>
+    <tr><td class="wrap">Has all of these tags?</td><td><code>tags @&gt; array['sale','popular']</code></td><td>166</td></tr>
+    <tr><td class="wrap">Has any of these tags? ("overlaps")</td><td><code>tags &amp;&amp; array['sale','new']</code></td><td>333</td></tr>
+    <tr><td class="wrap">Has no tag outside this list?</td><td><code>tags &lt;@ array['sale','popular','new']</code></td><td>500 (includes empty arrays)</td></tr>
+    <tr><td class="wrap">Has no tags at all?</td><td><code>tags = '{}'</code> or <code>cardinality(tags) = 0</code></td><td>167</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">real PostgreSQL 18 in your browser · seeded with a small shop</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select
+  (select count(*) from shop.products where 'sale' = any (tags))              as any_sale,
+  (select count(*) from shop.products where tags @&gt; array['sale'])             as contains_sale,
+  (select count(*) from shop.products where tags &amp;&amp; array['sale', 'new'])      as overlaps,
+  (select count(*) from shop.products where tags &lt;@ array['sale', 'popular'])  as only_these;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  <code>@&gt;</code>, <code>&amp;&amp;</code> and <code>&lt;@</code> can use a GIN index (<code>create index on shop.products using gin (tags)</code>); <code>= ANY</code> cannot,
+  so prefer <code>@&gt; array[...]</code> when the column is large. <a href="12-indexes.html">Lesson 12</a> covers GIN in depth.
+</p>
+
+<h2 id="rows-arrays">10. Between rows and arrays: unnest and array_agg</h2>
+
+<p>
+  <code>unnest(array)</code> turns an array into rows. <code>array_agg(x)</code> is the opposite: an aggregate that collects values into an array
+  (give it an <code>ORDER BY</code> inside the parentheses to control element order). Together they let you count tags or rebuild lists:
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">real PostgreSQL 18 in your browser · seeded with a small shop</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select t.tag, count(*) as products, array_agg(p.sku order by p.sku) as skus
+from shop.products p
+cross join lateral unnest(p.tags) as t(tag)
+group by t.tag
+order by t.tag;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  <code>cross join lateral</code> lets the function on the right use the row on the left (<a href="08-advanced-queries.html">lesson 8</a> explains <code>LATERAL</code>).
+  Notice what happened to products with an empty <code>tags</code> array: <code>unnest</code> produced zero rows for them, so they vanished from the result. If you need them,
+  substitute a placeholder as exercise 3 does. <code>unnest(tags) with ordinality as u(tag, n)</code> adds each element's position.
+</p>
+
+<p>To change an array, assign a new one. Use the functions rather than string tricks:</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">building new arrays</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select array_append(tags, 'clearance')   as appended,
+       array_remove(tags, 'sale')         as removed,
+       tags || array['x']                 as concatenated,
+       array_to_string(tags, ', ')        as as_text
+from shop.products
+where id = 3;
+-- {sale,popular,clearance} | {popular} | {sale,popular,x} | sale, popular</code></pre>
+</figure>
+
+<div class="note tip">
+  <span class="note-title">tags || 'x' needs a type hint</span>
+  <p>
+    <code>tags || 'extra'</code> fails with <code>malformed array literal: "extra"</code>, because PostgreSQL reads the unknown-typed string as an array
+    literal. Write <code>tags || 'extra'::text</code>, <code>array_append(tags, 'extra')</code> or <code>tags || array['extra']</code>.
+  </p>
+</div>
+
+<h2 id="array-nulls">11. The NULL traps in arrays</h2>
+
+<p>
+  An array may contain <code>NULL</code> elements. Equality of whole arrays treats two <code>NULL</code> elements as equal, but comparing a value to the
+  elements follows ordinary SQL three-valued logic: the result is true, false or <em>unknown</em> (<code>NULL</code>).
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">real PostgreSQL 18 in your browser · seeded with a small shop</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select 'a' = any (array['a', null])  as found,
+       'z' = any (array['a', null])  as not_found,
+       'z' &lt;&gt; all (array['a', null]) as not_in_list,
+       array[1, 2] = array[1, null]  as equal_with_null;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  <code>found</code> is true. <code>not_found</code> is <code>NULL</code>, not false, because "is <code>'z'</code> equal to the unknown element?" cannot be answered. For the same reason
+  <code>not_in_list</code> is <code>NULL</code>, so <code>WHERE x &lt;&gt; ALL (list_with_a_null)</code> returns no rows at all. It is the same trap as
+  <code>NOT IN (subquery_with_a_null)</code>. Keep arrays free of <code>NULL</code>s (<code>array_remove(a, NULL)</code> does that), or declare a
+  <code>CHECK (array_position(tags, NULL) IS NULL)</code> on the column.
+</p>
+
+<div class="note danger">
+  <span class="note-title">An array column cannot have a foreign key to its elements</span>
+  <p>
+    If the tags must be rows in a <code>tags</code> table, each product-to-tag link is a row in a join table with two foreign keys, not an array. Arrays
+    suit small lists of simple values that you read and write together with the row: tags, phone numbers, a list of allowed roles. They do not suit anything you
+    would join, count per element in a large table, or update one element at a time.
+  </p>
+</div>
+
+<h2 id="when">When to use, when not to</h2>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Situation</th><th class="wrap">✅ Do this</th><th class="wrap">❌ Not this</th></tr></thead>
+  <tbody>
+    <tr><td class="wrap">Attributes differ per product type and are mostly displayed</td><td class="wrap">A <code>jsonb</code> column, with a GIN index if you search inside it</td><td class="wrap">One nullable column per possible attribute</td></tr>
+    <tr><td class="wrap">You filter, join, sort or sum on a value every day</td><td class="wrap">A real column (or a stored generated column from the document)</td><td class="wrap">A key buried in <code>jsonb</code> with <code>-&gt;&gt;</code> and a cast in every query</td></tr>
+    <tr><td class="wrap">Searching "documents that contain this shape"</td><td class="wrap"><code>@&gt;</code> with a <code>jsonb_path_ops</code> GIN index</td><td class="wrap"><code>-&gt;&gt;</code> comparisons on an unindexed column</td></tr>
+    <tr><td class="wrap">A small list of simple values owned by the row</td><td class="wrap">An array column, queried with <code>@&gt;</code> and <code>&amp;&amp;</code></td><td class="wrap">A comma-separated string</td></tr>
+    <tr><td class="wrap">A many-to-many link you must keep consistent</td><td class="wrap">A join table with foreign keys</td><td class="wrap">An array of ids</td></tr>
+    <tr><td class="wrap">Storing an exact copy of an incoming message</td><td class="wrap"><code>json</code> or <code>text</code></td><td class="wrap"><code>jsonb</code> (it reorders and drops duplicates)</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="inspect">Inspect it</h2>
+
+<p>Find every <code>jsonb</code> and <code>text[]</code> column in the shop, then see which keys a document column really has and what type each key holds:</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">where are the documents, and what is in them</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select a.attrelid::regclass as tbl, a.attname as col, format_type(a.atttypid, a.atttypmod) as type
+from pg_attribute a
+join pg_class c on c.oid = a.attrelid
+join pg_namespace n on n.oid = c.relnamespace
+where n.nspname in ('shop', 'analytics') and c.relkind = 'r'
+  and a.atttypid in ('jsonb'::regtype, 'text[]'::regtype) and not a.attisdropped
+order by 1, 2;
+
+select key, jsonb_typeof(profile -&gt; key) as type, count(*) as docs
+from shop.customers, jsonb_object_keys(profile) as key
+group by key, jsonb_typeof(profile -&gt; key)
+order by key;</code></pre>
+</figure>
+
+<p>On the Docker database the first query lists <code>shop.customers.profile</code>, <code>shop.products.attrs</code>, <code>shop.products.tags</code> and <code>analytics.events.payload</code>. The second shows that all 20 000 profiles have the same three keys with the same types:</p>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">output (Docker database)</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code>    key     |  type   | docs
+------------+---------+-------
+ locale     | string  | 20000
+ newsletter | boolean | 20000
+ tier       | string  | 20000</code></pre>
+</figure>
+
+<p>
+  A key that is present in every document, with one type, is a column that has not been promoted yet.
+  If a key is in 100% of the rows and you filter on it, that is your sign to extract it.
+</p>
+
+<h2 id="exercises">Your turn</h2>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 1</span><span class="grow"></span><span class="lvl">basic</span></div>
+  <div class="ex-body">
+    <p>
+      List the products whose <code>attrs</code> say <code>warranty_months</code> is 36 and whose <code>weight_g</code> is below 300. Return the columns
+      <code>sku</code> and <code>color</code> (the colour as plain text), ordered by <code>sku</code>.
+    </p>
+    <p>Open <code>exercises/10/1.sql</code>, write your answer, then run <code>./pg check 10 1</code>.</p>
+  </div>
+  {{stub 10 1}}
+  <details><summary>Hint</summary><p>Use containment for the warranty, and a cast after <code>-&gt;&gt;</code> for the weight, so the comparison is numeric.</p></details>
+  {{solution 10 1}}
+</section>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 2</span><span class="grow"></span><span class="lvl">intermediate</span></div>
+  <div class="ex-body">
+    <p>
+      Make the weight in <code>shop.products.attrs</code> filterable like a real column. Add a stored generated integer column <code>shop.products.weight_g</code> that always
+      equals <code>attrs -&gt;&gt; 'weight_g'</code>, and create a B-tree index on it (any name).
+    </p>
+    <p>Open <code>exercises/10/2.sql</code>, write your answer, then run <code>./pg check 10 2</code>.</p>
+  </div>
+  {{stub 10 2}}
+  <details><summary>Hint</summary><p>The expression must be wrapped in its own parentheses after <code>generated always as</code>, and you need the cast to <code>int</code> inside them.</p></details>
+  {{solution 10 2}}
+</section>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 3</span><span class="grow"></span><span class="lvl">challenge</span></div>
+  <div class="ex-body">
+    <p>
+      For every tag in <code>shop.products.tags</code>, report how many products carry it, how many of those have a <code>weight_g</code> above 1000 in <code>attrs</code>, and
+      their average price rounded to 2 decimals. Products with an empty <code>tags</code> array count under the tag <code>'(untagged)'</code>. Return the columns
+      <code>tag</code>, <code>products</code>, <code>heavy_products</code> and <code>avg_price</code>, ordered by <code>tag</code>.
+    </p>
+    <p>Open <code>exercises/10/3.sql</code>, write your answer, then run <code>./pg check 10 3</code>.</p>
+  </div>
+  {{stub 10 3}}
+  <details><summary>Hint</summary><p><code>unnest</code> drops rows whose array is empty. Replace an empty array with <code>array['(untagged)']</code> before unnesting, and use <code>count(*) filter (where …)</code> for the heavy products.</p></details>
+  {{solution 10 3}}
+</section>
+
+<h2 id="summary">Summary</h2>
+<ul>
+  <li>Use <code>jsonb</code>, not <code>json</code>, unless you need the original text. Columns win for anything you filter, join, constrain or update often.</li>
+  <li><code>-&gt;</code> returns <code>jsonb</code>, <code>-&gt;&gt;</code> returns text: cast after extracting, or compare numbers with jsonpath. Missing keys give <code>NULL</code>; a JSON <code>null</code> is a value.</li>
+  <li><code>@&gt;</code> tests containment, <code>?</code> tests keys, and jsonpath (<code>jsonb_path_exists</code>, <code>@?</code>) reaches into nested arrays.</li>
+  <li>Changing a document builds a new one: <code>||</code>, <code>-</code>, <code>jsonb_set</code>. It rewrites the whole value, and <code>jsonb_set</code> does not create missing parents.</li>
+  <li>A GIN index (<code>jsonb_path_ops</code> for containment only) serves <code>@&gt;</code> but not <code>-&gt;&gt;</code>; a stored generated column plus a B-tree serves one hot field.</li>
+  <li>Arrays are 1-based, out-of-range reads are <code>NULL</code>, <code>cardinality</code> beats <code>array_length</code> on empty arrays, and <code>NULL</code> elements make <code>= ANY</code> and <code>&lt;&gt; ALL</code> return unknown.</li>
+</ul>
+
+<h2 id="next">Looking ahead</h2>
+<p>
+  So far you matched documents and arrays exactly. <a href="11-text-search.html">Lesson 11</a> moves to matching human language: <code>LIKE</code> and its limits,
+  full-text search with <code>tsvector</code> and ranking, and trigram similarity, with the index that serves each.
+</p>

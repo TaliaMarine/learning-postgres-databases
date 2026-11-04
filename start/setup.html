@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Set up your lab &mdash; Learning PostgreSQL</title>
+<meta name="description" content="Install Docker, start PostgreSQL 18 with one command, meet the shop dataset, learn the ./pg helper and the in-browser playground.">
+<link rel="stylesheet" href="../assets/css/course.css">
+</head>
+<body data-root="../" data-page="setup">
+<a class="skip-link" href="#content">Skip to content</a>
+<header class="topbar">
+  <button class="icon-btn menu-btn" type="button" aria-label="Toggle navigation" aria-expanded="false" aria-controls="sidebar">&#9776;</button>
+  <a class="brand" href="../index.html"><span class="mark pgm">PG</span> Learning PostgreSQL <span class="sub">PostgreSQL 18</span></a>
+  <span class="spacer"></span>
+  <div class="search" role="search">
+    <span class="glyph" aria-hidden="true">&#9906;</span>
+    <input type="search" placeholder="Search the course&#8230;" aria-label="Search the course" autocomplete="off" spellcheck="false">
+    <kbd>/</kbd>
+    <div class="search-results" role="listbox"></div>
+  </div>
+  <nav class="topbar-links">
+    <a class="hide-sm" href="../appendices/d-glossary.html">Glossary</a>
+    <a class="hide-sm" href="../appendices/b-psql.html">psql</a>
+  </nav>
+  <button class="icon-btn theme-btn" type="button" aria-label="Toggle theme">&#9790;</button>
+</header>
+<div class="scrim"></div>
+<div class="shell">
+<nav class="sidebar" id="sidebar" aria-label="Course contents">
+  <h4>Start here</h4>
+  <ol>
+    <li><a href="../start/setup.html" data-page="setup"><span class="n">00</span><span>Set up your lab</span></a></li>
+  </ol>
+  <h4>Part 1 — Foundations: the server, databases, schemas and roles</h4>
+  <ol>
+    <li><a href="../lessons/01-architecture.html" data-page="01-architecture"><span class="n">01</span><span>How PostgreSQL is built</span></a></li>
+    <li><a href="../lessons/02-databases-and-schemas.html" data-page="02-databases-and-schemas"><span class="n">02</span><span>Databases and schemas</span></a></li>
+    <li><a href="../lessons/03-roles-and-users.html" data-page="03-roles-and-users"><span class="n">03</span><span>Roles and users</span></a></li>
+    <li><a href="../lessons/04-privileges-and-grants.html" data-page="04-privileges-and-grants"><span class="n">04</span><span>Privileges and grants</span></a></li>
+    <li><a href="../lessons/05-security-and-rls.html" data-page="05-security-and-rls"><span class="n">05</span><span>Hardening and row-level security</span></a></li>
+  </ol>
+  <h4>Part 2 — Modelling and SQL in depth</h4>
+  <ol>
+    <li><a href="../lessons/06-data-types.html" data-page="06-data-types"><span class="n">06</span><span>Data types</span></a></li>
+    <li><a href="../lessons/07-constraints-and-design.html" data-page="07-constraints-and-design"><span class="n">07</span><span>Constraints and schema design</span></a></li>
+    <li><a href="../lessons/08-advanced-queries.html" data-page="08-advanced-queries"><span class="n">08</span><span>Advanced queries</span></a></li>
+    <li><a href="../lessons/09-changing-data.html" data-page="09-changing-data"><span class="n">09</span><span>Changing data safely</span></a></li>
+    <li><a href="../lessons/10-json-and-arrays.html" data-page="10-json-and-arrays"><span class="n">10</span><span>JSONB and arrays</span></a></li>
+    <li><a href="../lessons/11-text-search.html" data-page="11-text-search"><span class="n">11</span><span>Text search and pattern matching</span></a></li>
+  </ol>
+  <h4>Part 3 — Performance</h4>
+  <ol>
+    <li><a href="../lessons/12-indexes.html" data-page="12-indexes"><span class="n">12</span><span>Indexes</span></a></li>
+    <li><a href="../lessons/13-explain-and-planner.html" data-page="13-explain-and-planner"><span class="n">13</span><span>EXPLAIN and the planner</span></a></li>
+    <li><a href="../lessons/14-query-tuning.html" data-page="14-query-tuning"><span class="n">14</span><span>A query-tuning workflow</span></a></li>
+  </ol>
+  <h4>Part 4 — Transactions and concurrency</h4>
+  <ol>
+    <li><a href="../lessons/15-transactions-and-mvcc.html" data-page="15-transactions-and-mvcc"><span class="n">15</span><span>Transactions and MVCC</span></a></li>
+    <li><a href="../lessons/16-locking.html" data-page="16-locking"><span class="n">16</span><span>Locking and concurrency</span></a></li>
+    <li><a href="../lessons/17-vacuum-and-bloat.html" data-page="17-vacuum-and-bloat"><span class="n">17</span><span>Vacuum, bloat and autovacuum</span></a></li>
+  </ol>
+  <h4>Part 5 — Programming the database</h4>
+  <ol>
+    <li><a href="../lessons/18-views-and-functions.html" data-page="18-views-and-functions"><span class="n">18</span><span>Views, functions and procedures</span></a></li>
+    <li><a href="../lessons/19-triggers-and-events.html" data-page="19-triggers-and-events"><span class="n">19</span><span>Triggers, LISTEN/NOTIFY and audit</span></a></li>
+    <li><a href="../lessons/20-partitioning.html" data-page="20-partitioning"><span class="n">20</span><span>Partitioning</span></a></li>
+  </ol>
+  <h4>Part 6 — Operating PostgreSQL</h4>
+  <ol>
+    <li><a href="../lessons/21-configuration.html" data-page="21-configuration"><span class="n">21</span><span>Configuration and tuning</span></a></li>
+    <li><a href="../lessons/22-wal-and-durability.html" data-page="22-wal-and-durability"><span class="n">22</span><span>WAL, checkpoints and durability</span></a></li>
+    <li><a href="../lessons/23-backup-and-recovery.html" data-page="23-backup-and-recovery"><span class="n">23</span><span>Backup, restore and PITR</span></a></li>
+    <li><a href="../lessons/24-replication.html" data-page="24-replication"><span class="n">24</span><span>Replication and high availability</span></a></li>
+    <li><a href="../lessons/25-monitoring.html" data-page="25-monitoring"><span class="n">25</span><span>Monitoring and diagnostics</span></a></li>
+    <li><a href="../lessons/26-connections-and-upgrades.html" data-page="26-connections-and-upgrades"><span class="n">26</span><span>Connections, pooling, extensions and upgrades</span></a></li>
+  </ol>
+  <h4>Part 7 — Putting it together</h4>
+  <ol>
+    <li><a href="../lessons/27-capstone.html" data-page="27-capstone"><span class="n">27</span><span>Capstone project</span></a></li>
+  </ol>
+  <h4>Annexes</h4>
+  <ol>
+    <li><a href="../appendices/a1-select-basics.html" data-page="a1-select-basics"><span class="n">A1</span><span>SELECT, filtering and sorting</span></a></li>
+    <li><a href="../appendices/a2-joins.html" data-page="a2-joins"><span class="n">A2</span><span>Joins and combining tables</span></a></li>
+    <li><a href="../appendices/a3-aggregation.html" data-page="a3-aggregation"><span class="n">A3</span><span>Aggregation and grouping</span></a></li>
+    <li><a href="../appendices/a4-subqueries-and-ctes.html" data-page="a4-subqueries-and-ctes"><span class="n">A4</span><span>Subqueries and CTEs</span></a></li>
+    <li><a href="../appendices/a5-ddl-and-dml.html" data-page="a5-ddl-and-dml"><span class="n">A5</span><span>Creating and changing things</span></a></li>
+    <li><a href="../appendices/b-psql.html" data-page="b-psql"><span class="n">B</span><span>psql cheat sheet</span></a></li>
+    <li><a href="../appendices/c-catalog-queries.html" data-page="c-catalog-queries"><span class="n">C</span><span>Catalog and diagnostic queries</span></a></li>
+    <li><a href="../appendices/d-glossary.html" data-page="d-glossary"><span class="n">D</span><span>Glossary</span></a></li>
+    <li><a href="../appendices/e-troubleshooting.html" data-page="e-troubleshooting"><span class="n">E</span><span>Troubleshooting</span></a></li>
+    <li><a href="../appendices/f-whats-next.html" data-page="f-whats-next"><span class="n">F</span><span>What to learn next</span></a></li>
+  </ol>
+</nav>
+<div class="main">
+<main class="content" id="content">
+<p class="eyebrow">Start here</p>
+<h1>Set up your lab</h1>
+<p class="lede">
+  You need Docker and a terminal. The course database runs in a container on your machine, so you can
+  break it, drop it and rebuild it without consequences. Nothing is installed on your system except Docker.
+</p>
+
+<div class="meta-row">
+  <span class="tag">about 10 minutes</span>
+  <span class="tag">Docker Desktop or Docker Engine</span>
+  <span class="tag">macOS · Linux · Windows (WSL 2)</span>
+</div>
+
+<h2 id="docker">1. Install Docker</h2>
+<p>
+  Install Docker Desktop (macOS, Windows) or Docker Engine with the Compose plugin (Linux). Then check it works:
+</p>
+
+<figure class="code" data-lang="bash">
+  <figcaption><span class="path">terminal</span><span class="grow"></span><span class="lang">bash</span></figcaption>
+<pre><code>docker version
+docker compose version</code></pre>
+</figure>
+
+<div class="note info">
+  <span class="note-title">Windows</span>
+  <p>Run every command below inside WSL 2 (Ubuntu), not in PowerShell. The <code>./pg</code> helper is a Bash script.</p>
+</div>
+
+<h2 id="repo">2. Get the course</h2>
+<p>
+  Clone the repository, or download it as a zip and unpack it. Then open a terminal in its folder.
+</p>
+
+<figure class="code" data-lang="bash">
+  <figcaption><span class="path">terminal</span><span class="grow"></span><span class="lang">bash</span></figcaption>
+<pre><code>git clone https://github.com/&lt;owner&gt;/learning-postgres-databases.git
+cd learning-postgres-databases
+./pg help</code></pre>
+</figure>
+
+<h2 id="up">3. Start PostgreSQL 18</h2>
+
+<figure class="code" data-lang="bash">
+  <figcaption><span class="path">terminal</span><span class="grow"></span><span class="lang">bash</span></figcaption>
+<pre><code>./pg up</code></pre>
+</figure>
+
+<p>
+  The first start takes half a minute: the image is downloaded, the cluster is created, and the course dataset is
+  loaded (about 240 MB, one million analytics events). When you see <code>ready</code>, the database is
+  listening on <code>127.0.0.1:55432</code> with user <code>postgres</code>, password <code>course</code>.
+</p>
+
+<div class="note warn">
+  <span class="note-title">Port already in use?</span>
+  <p>
+    Another PostgreSQL may be on port 55432. Run <code>PG_PORT=55433 ./pg up</code> instead. The helper
+    passes the port to Docker Compose; the exercises use the helper, so they follow the port automatically.
+  </p>
+</div>
+
+<h2 id="check">4. Confirm it works</h2>
+
+<figure class="code" data-lang="bash">
+  <figcaption><span class="path">terminal</span><span class="grow"></span><span class="lang">bash</span></figcaption>
+<pre><code>./pg status
+./pg sql "select version()"
+./pg sql "select count(*) from shop.orders"</code></pre>
+</figure>
+
+<p>
+  The count should be <strong>200 000</strong>. Open a full interactive session with <code>./pg psql</code>, type
+  <code>\dn</code> to list the schemas, and <code>\q</code> to leave.
+</p>
+
+<h2 id="pg">The ./pg helper</h2>
+
+<p>
+  Every exercise and most commands in the course go through one script, so you never need to remember Docker
+  flags. The commands you will use most:
+</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Command</th><th>What it does</th></tr></thead>
+  <tbody>
+    <tr><td class="wrap"><code>./pg up</code> / <code>./pg down</code></td><td class="wrap">Start and stop the container. Your data is kept.</td></tr>
+    <tr><td class="wrap"><code>./pg psql</code></td><td class="wrap">Interactive <code>psql</code> as the superuser, in database <code>shop</code>.</td></tr>
+    <tr><td class="wrap"><code>./pg sql "…" [db]</code></td><td class="wrap">Run one statement and print the result.</td></tr>
+    <tr><td class="wrap"><code>./pg run FILE.sql [db]</code></td><td class="wrap">Run a whole file.</td></tr>
+    <tr><td class="wrap"><code>./pg psql-as ROLE</code></td><td class="wrap">Connect as another role, to see what its privileges allow.</td></tr>
+    <tr><td class="wrap"><code>./pg check LESSON [N]</code></td><td class="wrap">Check your exercises. For example <code>./pg check 03</code> or <code>./pg check 03 2</code>.</td></tr>
+    <tr><td class="wrap"><code>./pg solution LESSON N</code></td><td class="wrap">Print a model solution. Try the exercise first.</td></tr>
+    <tr><td class="wrap"><code>./pg reset</code></td><td class="wrap">Delete all data and start again from the seeded dataset. Use this when you have changed the shop data and want it back.</td></tr>
+    <tr><td class="wrap"><code>./pg logs</code></td><td class="wrap">Follow the server log. Useful when something is slow or failing.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="note tip">
+  <span class="note-title">Two databases, one server</span>
+  <p>
+    Your practice database is <code>shop</code>. The exercise checker never touches it: it copies a clean
+    template for every check and throws the copy away. You can therefore experiment in <code>shop</code>
+    freely and still have the checker work.
+  </p>
+</div>
+
+<h2 id="shop">The shop dataset</h2>
+
+<p>
+  Almost every lesson uses the same data. Learn its shape once here; you will see it again and again.
+</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Table</th><th>Rows</th><th>What it is</th></tr></thead>
+  <tbody>
+    <tr><td><code>shop.customers</code></td><td>20 000</td><td>Customers with country, status, a JSONB profile and an optional self-reference (<code>referred_by</code>).</td></tr>
+    <tr><td><code>shop.categories</code></td><td>13</td><td>A two-level category tree.</td></tr>
+    <tr><td><code>shop.products</code></td><td>500</td><td>Products with price, stock, text tags and JSONB attributes.</td></tr>
+    <tr><td><code>shop.orders</code></td><td>200 000</td><td>Orders across 2023–2025, with an enum status.</td></tr>
+    <tr><td><code>shop.order_items</code></td><td>≈600 000</td><td>Order lines, primary key <code>(order_id, line_no)</code>.</td></tr>
+    <tr><td><code>analytics.events</code></td><td>1 000 000</td><td>An append-only event stream with no secondary indexes. The lessons on performance start here.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>
+  The seed is deterministic, so a result you see on your machine is the result described in the lessons. The
+  browser playgrounds use a much smaller copy of the same tables, so plans and timings differ there; each lesson
+  says so where it matters.
+</p>
+
+<h2 id="playground">The in-browser playground</h2>
+
+<p>
+  Some pages have a box marked <em>playground</em>. It runs a real PostgreSQL 18 inside your browser (WebAssembly,
+  via PGlite). Nothing is sent to a server: the database lives in the page and is lost when you reload. Press
+  <kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>Enter</kbd> to run what is in the box.
+</p>
+
+<p>
+  The playground behaves like <code>psql</code>: each statement runs on its own (autocommit), and a script stops at its
+  first error. Everything before the error has already happened, so running a box that creates things a second time
+  can fail with <em>already exists</em>. Use <em>Reset data</em> to start over. A few extensions (such as
+  <code>pg_trgm</code>) and everything that needs several sessions, replication or the server's statistics are
+  only available in the Docker database; the lessons say so where it applies.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">try it: the first lesson is three clicks away</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select current_user, version();</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<h2 id="troubles">If something goes wrong</h2>
+
+<ul>
+  <li><strong>“docker: command not found”</strong> — Docker is not installed or not on your PATH. Restart the terminal after installing it.</li>
+  <li><strong>“not ready after 120 s”</strong> — run <code>./pg logs</code>. The usual cause is a failed seed step, which the log shows.</li>
+  <li><strong>Checks fail with “role already exists”</strong> — an earlier run left a <code>lab_*</code> role behind. Run <code>./pg clean-roles</code>.</li>
+  <li><strong>Anything else</strong> — see <a href="../appendices/e-troubleshooting.html">Annex E</a>.</li>
+</ul>
+
+<div class="note tip">
+  <span class="note-title">Ready?</span>
+  <p>Continue with <a href="../lessons/01-architecture.html">lesson 1: How PostgreSQL is built</a>.</p>
+</div>
+<nav class="pager"><a class="prev" href="../index.html"><span class="dir">Previous</span><span class="lbl">Course home</span></a><a class="next" href="../lessons/01-architecture.html"><span class="dir">Next</span><span class="lbl">01 · How PostgreSQL is built</span></a></nav>
+</main>
+<aside class="toc" aria-label="On this page"></aside>
+</div>
+</div>
+<script src="../assets/js/search-index.js"></script>
+<script src="../assets/js/mini-seed.js"></script>
+<script src="../assets/js/course.js"></script>
+</body>
+</html>

@@ -1,0 +1,504 @@
+<p class="lede">
+  When someone says "the database is slow", PostgreSQL can usually tell you why, if you know where to look. This lesson
+  covers the statistics views that describe what the server is doing right now and what it has done since the last
+  reset: sessions, databases, statements, tables and locks. It covers the server log as well, and ends with a short
+  checklist you can follow under pressure.
+</p>
+
+<h2 id="goals">Learning goals</h2>
+<ul>
+  <li>Read <code>pg_stat_activity</code>: process types, session states, wait events, and long or idle-in-transaction sessions.</li>
+  <li>Read the per-database counters in <code>pg_stat_database</code>: commits, rollbacks, cache hits, deadlocks and temporary files.</li>
+  <li>Find the statements that cost the most with <code>pg_stat_statements</code>, using its PostgreSQL 18 column names.</li>
+  <li>Spot tables that are scanned sequentially or need vacuum with <code>pg_stat_user_tables</code>.</li>
+  <li>Find who is blocking whom with <code>pg_locks</code> and <code>pg_blocking_pids()</code>.</li>
+  <li>Use the server log (<code>log_min_duration_statement</code>, <code>log_lock_waits</code>) and a checklist for "the database is slow".</li>
+</ul>
+
+<h2 id="lab">Set up for this lesson</h2>
+<p>
+  The read-only queries run against <code>shop</code>. For the lock example, use a scratch copy, because it holds a row
+  lock on purpose:
+</p>
+
+<figure class="code" data-lang="bash">
+  <figcaption><span class="path">terminal</span><span class="grow"></span><span class="lang">bash</span></figcaption>
+<pre><code>./pg sql "create database lab_s25_scratch template shop_template" postgres
+./pg psql lab_s25_scratch</code></pre>
+</figure>
+
+<p>
+  The playgrounds use the same views, but the browser engine is a single process with one session. Its
+  <code>pg_stat_activity</code> shows only you, it has no background processes, no other sessions to block you, and no
+  <code>pg_stat_statements</code>. Use the playgrounds to learn the columns, and the Docker database to see real numbers.
+</p>
+
+<h2 id="activity">1. pg_stat_activity: what is happening now</h2>
+
+<p>
+  <code>pg_stat_activity</code> has one row per server process. Client connections are rows with
+  <code>backend_type = 'client backend'</code>. The other rows are the server's own helpers: the checkpointer, the
+  background writer, the WAL writer, the autovacuum launcher and, new in PostgreSQL 18, <code>io worker</code> processes
+  that perform asynchronous reads.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">every process, and what each is doing</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">-- Every process the server is running, and what each one is doing.
+select pid, backend_type, state, wait_event_type, wait_event,
+       left(query, 40) as query
+from pg_stat_activity
+order by backend_type, pid;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  The browser returns one row, <code>standalone backend</code>, because it has no separate processes. The Docker
+  database returns nine:
+</p>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">output in the Docker database</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code>  pid  |         backend_type         | state  | wait_event_type |     wait_event      |                  query
+-------+------------------------------+--------+-----------------+---------------------+------------------------------------------
+   198 | autovacuum launcher          |        | Activity        | AutovacuumMain      |
+   195 | background writer            |        | Activity        | BgwriterMain        |
+   194 | checkpointer                 |        | Activity        | CheckpointerMain    |
+ 69925 | client backend               | active |                 |                     | select pid, backend_type, state, wait_ev
+   191 | io worker                    |        | Activity        | IoWorkerMain        |
+   192 | io worker                    |        | Activity        | IoWorkerMain        |
+   193 | io worker                    |        | Activity        | IoWorkerMain        |
+   199 | logical replication launcher |        | Activity        | LogicalLauncherMain |
+   197 | walwriter                    |        | Activity        | WalWriterMain       |</code></pre>
+</figure>
+
+<h3>States</h3>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th><code>state</code></th><th class="wrap">Meaning</th><th class="wrap">Worry when</th></tr></thead>
+  <tbody>
+    <tr><td><code>active</code></td><td class="wrap">Running a statement right now</td><td class="wrap">Many are active for a long time, or there are more active sessions than CPU cores</td></tr>
+    <tr><td><code>idle</code></td><td class="wrap">Connected, waiting for the client to send something</td><td class="wrap">Hundreds of them: each holds memory and a connection slot (<a href="26-connections-and-upgrades.html">lesson 26</a>)</td></tr>
+    <tr><td><code>idle in transaction</code></td><td class="wrap">Inside <code>BEGIN</code>, but not running anything</td><td class="wrap">Always, if it lasts: it holds locks, and its snapshot stops vacuum from removing dead rows</td></tr>
+    <tr><td><code>idle in transaction (aborted)</code></td><td class="wrap">A statement in the transaction failed; the client has not rolled back</td><td class="wrap">Always: an application bug</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>Wait events</h3>
+
+<p>
+  When a session is not using the CPU, <code>wait_event_type</code> and <code>wait_event</code> say what it is waiting
+  for. <code>Lock</code> means it waits for a lock another session holds. <code>IO</code> means a disk read or write.
+  <code>LWLock</code> means a short internal lock, and many of them can point at contention inside the server.
+  <code>Client</code> means it waits for the application, as with <code>ClientRead</code> on an idle session.
+  <code>Activity</code> is the normal resting state of a background process. An <code>active</code> session with
+  <code>wait_event</code> null is running on the CPU.
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">sessions doing something, oldest transaction first</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select pid,
+       usename,
+       application_name,
+       state,
+       now() - xact_start  as xact_age,
+       now() - state_change as in_state_for,
+       left(query, 50) as query
+from pg_stat_activity
+where backend_type = 'client backend'
+  and state &lt;&gt; 'idle'
+  and pid &lt;&gt; pg_backend_pid()
+order by xact_start nulls last;</code></pre>
+</figure>
+
+<p>
+  On an idle course container this returns no rows. On a busy server, the first rows are the ones to look at.
+  <code>query</code> is the session's current statement, or its <em>last</em> one if it is idle.
+</p>
+
+<div class="note warn">
+  <span class="note-title">Cancel first, terminate second</span>
+  <p>
+    <code>select pg_cancel_backend(pid)</code> stops the session's current statement and leaves the connection open.
+    <code>select pg_terminate_backend(pid)</code> closes the connection, and rolls back its open transaction. Try the
+    first before the second, and be sure of the pid: a wrong one may kill a session the business needs.
+  </p>
+</div>
+
+<div class="note tip">
+  <span class="note-title">Let the server end forgotten transactions</span>
+  <p>
+    <code>idle_in_transaction_session_timeout</code> ends sessions that stay idle inside a transaction for too long.
+    It is 0 (off) in the course container. Set it per role or per database
+    (<a href="21-configuration.html">lesson 21</a>), for example <code>alter role app set idle_in_transaction_session_timeout = '5min'</code>.
+  </p>
+</div>
+
+<h2 id="database">2. pg_stat_database: one row of counters per database</h2>
+
+<p>
+  <code>pg_stat_database</code> holds counters that only grow, from the last statistics reset
+  (<code>stats_reset</code>) or server start. A single value tells you little. Read it twice, a minute apart, and
+  subtract to get rates.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">counters for this database</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select datname, numbackends, xact_commit, xact_rollback,
+       round(100.0 * blks_hit / nullif(blks_hit + blks_read, 0), 2) as cache_hit_pct,
+       deadlocks, temp_files, pg_size_pretty(temp_bytes) as temp_written
+from pg_stat_database
+where datname = current_database();</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Column</th><th class="wrap">What it counts</th><th class="wrap">Look for</th></tr></thead>
+  <tbody>
+    <tr><td><code>numbackends</code></td><td class="wrap">Sessions connected to this database now</td><td class="wrap">Close to <code>max_connections</code></td></tr>
+    <tr><td><code>xact_commit</code>, <code>xact_rollback</code></td><td class="wrap">Committed and rolled-back transactions</td><td class="wrap">A rising share of rollbacks: errors in the application</td></tr>
+    <tr><td><code>blks_hit</code>, <code>blks_read</code></td><td class="wrap">Pages found in shared buffers versus asked from the operating system</td><td class="wrap">A hit ratio that drops on an OLTP database (normally well above 99%)</td></tr>
+    <tr><td><code>deadlocks</code></td><td class="wrap">Deadlocks detected and broken (<a href="16-locking.html">lesson 16</a>)</td><td class="wrap">Any increase</td></tr>
+    <tr><td><code>temp_files</code>, <code>temp_bytes</code></td><td class="wrap">Sorts and hashes that did not fit in <code>work_mem</code> and spilled to disk</td><td class="wrap">Steady growth: find the queries with <code>temp_blks_written</code> below</td></tr>
+    <tr><td><code>conflicts</code></td><td class="wrap">Queries cancelled on a standby because of replay (<a href="24-replication.html">lesson 24</a>)</td><td class="wrap">Non-zero on read replicas</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>
+  A <code>blks_read</code> is not necessarily a disk read: the operating system's page cache may answer it. With
+  <code>track_io_timing = on</code> (set in the course container) the columns <code>blk_read_time</code> and
+  <code>blk_write_time</code> say how long those reads and writes took.
+</p>
+
+<h2 id="statements">3. pg_stat_statements: which statements cost the most</h2>
+
+<p>
+  <code>pg_stat_statements</code> is an extension that keeps counters per <em>normalised</em> statement, meaning the
+  statement text with its constants replaced by <code>$1</code>, <code>$2</code>
+  (<a href="14-query-tuning.html">lesson 14</a> introduces it). It must be listed in
+  <code>shared_preload_libraries</code>, which needs a restart, and then created in a database with
+  <code>CREATE EXTENSION</code>. The course container does both.
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">top five statements in this database by total time</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select calls,
+       round(total_exec_time::numeric, 1) as total_ms,
+       round(mean_exec_time::numeric, 2)  as mean_ms,
+       rows,
+       shared_blks_hit + shared_blks_read as blocks,
+       temp_blks_written,
+       left(regexp_replace(query, '\s+', ' ', 'g'), 50) as query
+from pg_stat_statements
+where dbid = (select oid from pg_database where datname = current_database())
+order by total_exec_time desc
+limit 5;</code></pre>
+</figure>
+
+<p>
+  Sort by <code>total_exec_time</code> to find what costs the server the most overall. A 2 ms query run a million times
+  costs more than a 10 s report run once. Sort by <code>mean_exec_time</code> to find what each user waits longest for.
+</p>
+
+<div class="note info">
+  <span class="note-title">The column names changed in PostgreSQL 13</span>
+  <p>
+    Older blog posts use <code>total_time</code>, <code>mean_time</code> and <code>blk_read_time</code>. Those columns no
+    longer exist. In PostgreSQL 18 the view has <code>total_exec_time</code>, <code>mean_exec_time</code>,
+    <code>min_exec_time</code>, <code>max_exec_time</code> and <code>stddev_exec_time</code>, a matching set of
+    <code>*_plan_time</code> columns for planning, and <code>shared_blk_read_time</code> and
+    <code>shared_blk_write_time</code> for I/O timing. It also has <code>wal_bytes</code>, the
+    <code>parallel_workers_to_launch</code> and <code>parallel_workers_launched</code> counters, and
+    <code>stats_since</code>, the time this statement's counters started. List them yourself with
+    <code>\d pg_stat_statements</code> in psql.
+  </p>
+</div>
+
+<p>
+  To measure a change, reset the counters, run the workload, and read again:
+  <code>select pg_stat_statements_reset();</code> (it needs superuser or a grant). Do not reset on a shared server
+  without telling the people who use these numbers.
+</p>
+
+<h2 id="tables">4. pg_stat_user_tables: how each table is used</h2>
+
+<p>
+  <code>pg_stat_user_tables</code> has one row per table, with counts of scans, row changes, dead rows and the last
+  vacuum and analyze. It answers two questions: which tables are read by sequential scans often (a missing index?),
+  and which tables need vacuum (<a href="17-vacuum-and-bloat.html">lesson 17</a>)?
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">the five tables with the most rows read by sequential scans</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select relname, seq_scan, seq_tup_read, idx_scan, n_live_tup, n_dead_tup,
+       last_autovacuum, last_autoanalyze
+from pg_stat_user_tables
+order by seq_tup_read desc
+limit 5;</code></pre>
+</figure>
+
+<p>
+  In the course database, after the earlier lessons have run their examples and checks, the top row is
+  <code>orders</code> with about 140,000 sequential scans that together read about 28 billion rows. Your numbers will
+  differ, because they depend on what has run on your machine. <code>seq_tup_read / seq_scan</code> is the average
+  number of rows each scan read. A large table with many sequential scans and a large average is where an index pays
+  off first.
+</p>
+
+<div class="note warn">
+  <span class="note-title">Statistics arrive a little late</span>
+  <p>
+    Each session sends its counters to shared memory at most about once a second, and at the end of a transaction.
+    A query that reads <code>pg_stat_user_tables</code> straight after your own statements in the same session may not see
+    them yet. <code>select pg_stat_force_next_flush();</code> makes your session send its counters at the end of the
+    current statement. Exercise 2 uses it so that its numbers are repeatable.
+  </p>
+</div>
+
+<h2 id="locks">5. pg_locks and pg_blocking_pids: who blocks whom</h2>
+
+<p>
+  <code>pg_locks</code> lists every lock held or wanted, one row per lock. <code>granted = false</code> means the session
+  is waiting for it. Here is what one <code>UPDATE</code> holds while its transaction is open:
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">the locks of one open UPDATE</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">begin;
+update shop.products set stock = stock where id = 1;
+select locktype, relation::regclass as relation, mode, granted
+from pg_locks
+where pid = pg_backend_pid()
+order by locktype, relation::regclass::text;
+rollback;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  The browser and the Docker database return the same six rows. The table and both of its indexes are locked in
+  <code>RowExclusiveLock</code> mode, which only conflicts with schema changes. The transaction also holds its own
+  transaction id (<code>transactionid</code>) and a <code>virtualxid</code>, plus an <code>AccessShareLock</code> on
+  <code>pg_locks</code> taken by the query itself. The row lock on product 1 is not in the list: row locks are stored in
+  the row, and appear in <code>pg_locks</code> only when someone waits for one.
+</p>
+
+<h3>A real wait</h3>
+
+<p>
+  In the Docker database, open two sessions on <code>lab_s25_scratch</code> (two terminals with
+  <code>./pg psql lab_s25_scratch</code>):
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">session A, then session B</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>-- session A: lock a row and keep the transaction open
+begin;
+update shop.products set stock = stock where id = 1;
+
+-- session B: this waits
+set application_name = 'worker-b';
+update shop.products set stock = stock + 1 where id = 1;</code></pre>
+</figure>
+
+<p>
+  From a third session, <code>pg_blocking_pids(pid)</code> returns the pids that a waiting session is blocked by:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">session C: who is waiting, and for whom</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select a.pid as blocked_pid,
+       a.application_name,
+       a.wait_event_type,
+       a.wait_event,
+       b.pid as blocking_pid,
+       b.state as blocking_state,
+       left(b.query, 40) as blocking_query
+from pg_stat_activity a
+cross join lateral unnest(pg_blocking_pids(a.pid)) as bp(pid)
+join pg_stat_activity b on b.pid = bp.pid;</code></pre>
+</figure>
+
+<p>
+  The blocked session shows <code>wait_event_type = Lock</code> and <code>wait_event = transactionid</code>: it waits
+  for session A's transaction to end, because that transaction holds the row. If session A is
+  <code>idle in transaction</code>, nothing will change until A commits, rolls back, or is terminated. Run
+  <code>rollback;</code> in session A and B finishes at once.
+</p>
+
+<div class="note tip">
+  <span class="note-title">The log saw it too</span>
+  <p>
+    The course container runs with <code>log_lock_waits = on</code>. After <code>deadlock_timeout</code> (1 s), the
+    server logs a waiting session, and logs it again when it gets the lock. Here is what <code>./pg logs</code> printed
+    for that test:
+  </p>
+</div>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">./pg logs</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code>LOG:  process 54187 still waiting for ShareLock on transaction 28350 after 1005.230 ms
+LOG:  process 54187 acquired ShareLock on transaction 28350 after 4995.010 ms
+LOG:  duration: 4996.633 ms  statement: set application_name = 'worker-b'; update shop.products set stock = stock + 1 where id = 1;</code></pre>
+</figure>
+
+<h2 id="logs">6. The server log</h2>
+
+<p>
+  The views show the present and the totals. The log shows individual events with timestamps, which is what you need
+  to explain yesterday's slow period. The settings that matter most:
+</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Setting</th><th class="wrap">Effect</th><th class="wrap">In the course container</th></tr></thead>
+  <tbody>
+    <tr><td><code>log_min_duration_statement</code></td><td class="wrap">Logs every statement that runs longer than this, with its duration</td><td class="wrap"><code>500ms</code>, set in <code>docker-compose.yml</code></td></tr>
+    <tr><td><code>log_lock_waits</code></td><td class="wrap">Logs sessions that wait longer than <code>deadlock_timeout</code> for a lock</td><td class="wrap"><code>on</code>, set in <code>docker-compose.yml</code></td></tr>
+    <tr><td><code>log_temp_files</code></td><td class="wrap">Logs temporary files larger than this size (0 logs all)</td><td class="wrap">off (<code>-1</code>)</td></tr>
+    <tr><td><code>log_autovacuum_min_duration</code></td><td class="wrap">Logs autovacuum runs that take longer than this</td><td class="wrap">the default, <code>10min</code></td></tr>
+    <tr><td><code>log_line_prefix</code></td><td class="wrap">What starts every log line (time, pid, user, database, application)</td><td class="wrap">the default, <code>%m [%p] </code></td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>
+  Because <code>log_min_duration_statement</code> is 500 ms in the course container, any statement you run that takes
+  longer appears in <code>./pg logs</code>. Try <code>select pg_sleep(0.7);</code> and look:
+  <code>LOG:  duration: 704.207 ms  statement: select pg_sleep(0.7)</code>.
+</p>
+
+<div class="note warn">
+  <span class="note-title">Logging every statement is a load of its own</span>
+  <p>
+    <code>log_min_duration_statement = 0</code> or <code>log_statement = 'all'</code> writes every statement to the log.
+    On a busy server that is a lot of disk I/O, and the log may then contain personal data from the query text. Use a
+    threshold that catches the slow minority, and use <code>pg_stat_statements</code> for the totals.
+  </p>
+</div>
+
+<h2 id="checklist">7. A checklist for "the database is slow"</h2>
+
+<p>Work from the outside in. Each step takes a minute and either finds the cause or rules it out:</p>
+
+<ol>
+  <li><strong>Is it the database?</strong> Compare the application's timing for a slow request with the statements it ran. If the database part is small, look elsewhere: the network, the pool, the application.</li>
+  <li><strong>Sessions:</strong> count <code>pg_stat_activity</code> by <code>state</code>. Too many <code>active</code> sessions? Connections near <code>max_connections</code>? Long <code>idle in transaction</code>?</li>
+  <li><strong>Waits:</strong> group active sessions by <code>wait_event_type, wait_event</code>. Mostly <code>Lock</code>: find the blocker with <code>pg_blocking_pids</code>. Mostly <code>IO</code>: the working set does not fit in memory, or a big scan is running. No wait: CPU-bound queries.</li>
+  <li><strong>Statements:</strong> top <code>pg_stat_statements</code> by <code>total_exec_time</code>, then by <code>mean_exec_time</code>. Did a new statement appear at the top since the last deploy? Run <code>EXPLAIN (ANALYZE, BUFFERS)</code> on it (<a href="13-explain-and-planner.html">lesson 13</a>).</li>
+  <li><strong>Tables:</strong> <code>pg_stat_user_tables</code> for big tables with many sequential scans, many dead rows, or an autovacuum that has not run for a long time.</li>
+  <li><strong>The server:</strong> <code>temp_bytes</code> growing, a falling cache hit ratio, checkpoints more often than <code>checkpoint_timeout</code> (<a href="22-wal-and-durability.html">lesson 22</a>), a replica far behind, or a disk filling with WAL from an abandoned replication slot.</li>
+  <li><strong>The log:</strong> what does it show around the time it started? Slow statements, lock waits, errors, a restart?</li>
+</ol>
+
+<div class="note info">
+  <span class="note-title">Keep history</span>
+  <p>
+    Every view in this lesson shows the present or a running total. To answer "what changed since Tuesday?" you need
+    the numbers from Tuesday. A monitoring system that samples these views every few seconds and keeps the history is
+    what turns this checklist into a five-minute job. Examples are Prometheus with postgres_exporter, pganalyze, or
+    your cloud provider's database insights.
+  </p>
+</div>
+
+<h2 id="when">When to use, when not to</h2>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Question</th><th class="wrap">✅ Look here</th><th class="wrap">❌ Not here</th></tr></thead>
+  <tbody>
+    <tr><td class="wrap">What is running right now, and what is it waiting for?</td><td class="wrap"><code>pg_stat_activity</code></td><td class="wrap"><code>pg_stat_statements</code>, which only has totals</td></tr>
+    <tr><td class="wrap">Which statements cost the most this week?</td><td class="wrap"><code>pg_stat_statements</code>, sorted by <code>total_exec_time</code></td><td class="wrap">Logging every statement and grepping the log</td></tr>
+    <tr><td class="wrap">Why is this session stuck?</td><td class="wrap"><code>pg_blocking_pids(pid)</code> and the blocker's row in <code>pg_stat_activity</code></td><td class="wrap">Terminating sessions until it moves</td></tr>
+    <tr><td class="wrap">Which table needs an index or a vacuum?</td><td class="wrap"><code>pg_stat_user_tables</code> (<code>seq_tup_read</code>, <code>n_dead_tup</code>)</td><td class="wrap">Guessing from table size alone</td></tr>
+    <tr><td class="wrap">What happened at 03:12 last night?</td><td class="wrap">The server log and your monitoring history</td><td class="wrap">The <code>pg_stat_*</code> views, which only show now and running totals</td></tr>
+    <tr><td class="wrap">Trying the queries in this lesson</td><td class="wrap">The Docker database, with real processes and sessions</td><td class="wrap">The browser playground for anything about other sessions</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="inspect">Inspect it</h2>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">a one-glance health query</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select count(*) filter (where state = 'active')                         as active,
+       count(*) filter (where state = 'idle')                           as idle,
+       count(*) filter (where state like 'idle in transaction%')        as idle_in_xact,
+       count(*) filter (where wait_event_type = 'Lock')                 as waiting_for_locks,
+       current_setting('max_connections')::int                          as max_connections
+from pg_stat_activity
+where backend_type = 'client backend';</code></pre>
+</figure>
+
+<p>When you are done: <code>./pg sql "drop database if exists lab_s25_scratch with (force)" postgres</code>.</p>
+
+<h2 id="exercises">Your turn</h2>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 1</span><span class="grow"></span><span class="lvl">basic</span></div>
+  <div class="ex-body">
+    <p>
+      Find your own session in <code>pg_stat_activity</code> and return the five columns the file names, including three
+      booleans.
+    </p>
+    <p>Open <code>exercises/25/1.sql</code>, write your answer, then run <code>./pg check 25 1</code>.</p>
+  </div>
+  {{stub 25 1}}
+  <details><summary>Hint</summary><p>Filter on <code>pid = pg_backend_pid()</code>. A boolean column is just an expression: <code>wait_event is not null as is_waiting</code>.</p></details>
+  {{solution 25 1}}
+</section>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 2</span><span class="grow"></span><span class="lvl">intermediate</span></div>
+  <div class="ex-body">
+    <p>
+      Run five queries, flush your statistics, then show how many sequential and index scans
+      <code>shop.products</code> and <code>shop.customers</code> received. The database is a fresh copy, so the counters
+      start at zero.
+    </p>
+    <p>Open <code>exercises/25/2.sql</code>, write your answer, then run <code>./pg check 25 2</code>.</p>
+  </div>
+  {{stub 25 2}}
+  <details><summary>Hint</summary><p>Filter <code>pg_stat_user_tables</code> by <code>relid in ('shop.products'::regclass, …)</code> or by <code>schemaname</code> and <code>relname</code>. Before you run the check, predict which table gets index scans and why.</p></details>
+  {{solution 25 2}}
+</section>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 3</span><span class="grow"></span><span class="lvl">challenge</span></div>
+  <div class="ex-body">
+    <p>
+      Use the setup in the file to make a second session wait for your row lock. Then write one query that finds every
+      blocked session in the database and says whether you are its only blocker.
+    </p>
+    <p>Open <code>exercises/25/3.sql</code>, write your answer, then run <code>./pg check 25 3</code>.</p>
+  </div>
+  {{stub 25 3}}
+  <details><summary>Hint</summary><p><code>pg_blocking_pids(pid)</code> returns an array. A session is blocked when that array is not empty (<code>cardinality(…) &gt; 0</code>), and you are its only blocker when it equals <code>array[pg_backend_pid()]</code>.</p></details>
+  {{solution 25 3}}
+</section>
+
+<h2 id="summary">Summary</h2>
+<ul>
+  <li><code>pg_stat_activity</code> shows every process now: its type, its state, what it waits for, and its current or last query.</li>
+  <li><code>idle in transaction</code> sessions hold locks and stop vacuum; find them, and set a timeout.</li>
+  <li><code>pg_stat_database</code> and <code>pg_stat_user_tables</code> are running totals; compare two readings to get rates.</li>
+  <li><code>pg_stat_statements</code> ranks normalised statements; in PostgreSQL 18 the time columns are <code>total_exec_time</code>, <code>mean_exec_time</code> and friends.</li>
+  <li><code>pg_blocking_pids()</code> names the blocker of a waiting session; <code>log_lock_waits</code> records waits in the log.</li>
+  <li>The course container logs statements slower than 500 ms. Follow the checklist from the outside in.</li>
+</ul>
+
+<h2 id="next">Looking ahead</h2>
+<p>
+  Several items on the checklist come back to connections: how many there are, and what each one costs. In
+  <a href="26-connections-and-upgrades.html">lesson 26</a> you will see why connections are expensive and how a pooler
+  helps. That lesson also covers extensions and how to move to a new PostgreSQL version.
+</p>

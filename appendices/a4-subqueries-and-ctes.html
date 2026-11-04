@@ -1,0 +1,413 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A4. Subqueries and CTEs &mdash; Learning PostgreSQL</title>
+<meta name="description" content="Scalar, row and table subqueries, EXISTS, IN, correlated subqueries and WITH.">
+<link rel="stylesheet" href="../assets/css/course.css">
+</head>
+<body data-root="../" data-page="a4-subqueries-and-ctes">
+<a class="skip-link" href="#content">Skip to content</a>
+<header class="topbar">
+  <button class="icon-btn menu-btn" type="button" aria-label="Toggle navigation" aria-expanded="false" aria-controls="sidebar">&#9776;</button>
+  <a class="brand" href="../index.html"><span class="mark pgm">PG</span> Learning PostgreSQL <span class="sub">PostgreSQL 18</span></a>
+  <span class="spacer"></span>
+  <div class="search" role="search">
+    <span class="glyph" aria-hidden="true">&#9906;</span>
+    <input type="search" placeholder="Search the course&#8230;" aria-label="Search the course" autocomplete="off" spellcheck="false">
+    <kbd>/</kbd>
+    <div class="search-results" role="listbox"></div>
+  </div>
+  <nav class="topbar-links">
+    <a class="hide-sm" href="../appendices/d-glossary.html">Glossary</a>
+    <a class="hide-sm" href="../appendices/b-psql.html">psql</a>
+  </nav>
+  <button class="icon-btn theme-btn" type="button" aria-label="Toggle theme">&#9790;</button>
+</header>
+<div class="scrim"></div>
+<div class="shell">
+<nav class="sidebar" id="sidebar" aria-label="Course contents">
+  <h4>Start here</h4>
+  <ol>
+    <li><a href="../start/setup.html" data-page="setup"><span class="n">00</span><span>Set up your lab</span></a></li>
+  </ol>
+  <h4>Part 1 — Foundations: the server, databases, schemas and roles</h4>
+  <ol>
+    <li><a href="../lessons/01-architecture.html" data-page="01-architecture"><span class="n">01</span><span>How PostgreSQL is built</span></a></li>
+    <li><a href="../lessons/02-databases-and-schemas.html" data-page="02-databases-and-schemas"><span class="n">02</span><span>Databases and schemas</span></a></li>
+    <li><a href="../lessons/03-roles-and-users.html" data-page="03-roles-and-users"><span class="n">03</span><span>Roles and users</span></a></li>
+    <li><a href="../lessons/04-privileges-and-grants.html" data-page="04-privileges-and-grants"><span class="n">04</span><span>Privileges and grants</span></a></li>
+    <li><a href="../lessons/05-security-and-rls.html" data-page="05-security-and-rls"><span class="n">05</span><span>Hardening and row-level security</span></a></li>
+  </ol>
+  <h4>Part 2 — Modelling and SQL in depth</h4>
+  <ol>
+    <li><a href="../lessons/06-data-types.html" data-page="06-data-types"><span class="n">06</span><span>Data types</span></a></li>
+    <li><a href="../lessons/07-constraints-and-design.html" data-page="07-constraints-and-design"><span class="n">07</span><span>Constraints and schema design</span></a></li>
+    <li><a href="../lessons/08-advanced-queries.html" data-page="08-advanced-queries"><span class="n">08</span><span>Advanced queries</span></a></li>
+    <li><a href="../lessons/09-changing-data.html" data-page="09-changing-data"><span class="n">09</span><span>Changing data safely</span></a></li>
+    <li><a href="../lessons/10-json-and-arrays.html" data-page="10-json-and-arrays"><span class="n">10</span><span>JSONB and arrays</span></a></li>
+    <li><a href="../lessons/11-text-search.html" data-page="11-text-search"><span class="n">11</span><span>Text search and pattern matching</span></a></li>
+  </ol>
+  <h4>Part 3 — Performance</h4>
+  <ol>
+    <li><a href="../lessons/12-indexes.html" data-page="12-indexes"><span class="n">12</span><span>Indexes</span></a></li>
+    <li><a href="../lessons/13-explain-and-planner.html" data-page="13-explain-and-planner"><span class="n">13</span><span>EXPLAIN and the planner</span></a></li>
+    <li><a href="../lessons/14-query-tuning.html" data-page="14-query-tuning"><span class="n">14</span><span>A query-tuning workflow</span></a></li>
+  </ol>
+  <h4>Part 4 — Transactions and concurrency</h4>
+  <ol>
+    <li><a href="../lessons/15-transactions-and-mvcc.html" data-page="15-transactions-and-mvcc"><span class="n">15</span><span>Transactions and MVCC</span></a></li>
+    <li><a href="../lessons/16-locking.html" data-page="16-locking"><span class="n">16</span><span>Locking and concurrency</span></a></li>
+    <li><a href="../lessons/17-vacuum-and-bloat.html" data-page="17-vacuum-and-bloat"><span class="n">17</span><span>Vacuum, bloat and autovacuum</span></a></li>
+  </ol>
+  <h4>Part 5 — Programming the database</h4>
+  <ol>
+    <li><a href="../lessons/18-views-and-functions.html" data-page="18-views-and-functions"><span class="n">18</span><span>Views, functions and procedures</span></a></li>
+    <li><a href="../lessons/19-triggers-and-events.html" data-page="19-triggers-and-events"><span class="n">19</span><span>Triggers, LISTEN/NOTIFY and audit</span></a></li>
+    <li><a href="../lessons/20-partitioning.html" data-page="20-partitioning"><span class="n">20</span><span>Partitioning</span></a></li>
+  </ol>
+  <h4>Part 6 — Operating PostgreSQL</h4>
+  <ol>
+    <li><a href="../lessons/21-configuration.html" data-page="21-configuration"><span class="n">21</span><span>Configuration and tuning</span></a></li>
+    <li><a href="../lessons/22-wal-and-durability.html" data-page="22-wal-and-durability"><span class="n">22</span><span>WAL, checkpoints and durability</span></a></li>
+    <li><a href="../lessons/23-backup-and-recovery.html" data-page="23-backup-and-recovery"><span class="n">23</span><span>Backup, restore and PITR</span></a></li>
+    <li><a href="../lessons/24-replication.html" data-page="24-replication"><span class="n">24</span><span>Replication and high availability</span></a></li>
+    <li><a href="../lessons/25-monitoring.html" data-page="25-monitoring"><span class="n">25</span><span>Monitoring and diagnostics</span></a></li>
+    <li><a href="../lessons/26-connections-and-upgrades.html" data-page="26-connections-and-upgrades"><span class="n">26</span><span>Connections, pooling, extensions and upgrades</span></a></li>
+  </ol>
+  <h4>Part 7 — Putting it together</h4>
+  <ol>
+    <li><a href="../lessons/27-capstone.html" data-page="27-capstone"><span class="n">27</span><span>Capstone project</span></a></li>
+  </ol>
+  <h4>Annexes</h4>
+  <ol>
+    <li><a href="../appendices/a1-select-basics.html" data-page="a1-select-basics"><span class="n">A1</span><span>SELECT, filtering and sorting</span></a></li>
+    <li><a href="../appendices/a2-joins.html" data-page="a2-joins"><span class="n">A2</span><span>Joins and combining tables</span></a></li>
+    <li><a href="../appendices/a3-aggregation.html" data-page="a3-aggregation"><span class="n">A3</span><span>Aggregation and grouping</span></a></li>
+    <li><a href="../appendices/a4-subqueries-and-ctes.html" data-page="a4-subqueries-and-ctes"><span class="n">A4</span><span>Subqueries and CTEs</span></a></li>
+    <li><a href="../appendices/a5-ddl-and-dml.html" data-page="a5-ddl-and-dml"><span class="n">A5</span><span>Creating and changing things</span></a></li>
+    <li><a href="../appendices/b-psql.html" data-page="b-psql"><span class="n">B</span><span>psql cheat sheet</span></a></li>
+    <li><a href="../appendices/c-catalog-queries.html" data-page="c-catalog-queries"><span class="n">C</span><span>Catalog and diagnostic queries</span></a></li>
+    <li><a href="../appendices/d-glossary.html" data-page="d-glossary"><span class="n">D</span><span>Glossary</span></a></li>
+    <li><a href="../appendices/e-troubleshooting.html" data-page="e-troubleshooting"><span class="n">E</span><span>Troubleshooting</span></a></li>
+    <li><a href="../appendices/f-whats-next.html" data-page="f-whats-next"><span class="n">F</span><span>What to learn next</span></a></li>
+  </ol>
+</nav>
+<div class="main">
+<main class="content" id="content">
+<p class="eyebrow">Annex</p>
+<h1>A4. Subqueries and CTEs</h1>
+<p class="lede">
+  A subquery is a <code>SELECT</code> written inside another statement. A CTE (common table expression) is a
+  named subquery you write at the top with <code>WITH</code>, so the main query reads top to bottom. This annex
+  shows the three shapes a subquery can have, the three tests that use one (<code>IN</code>, <code>EXISTS</code>,
+  <code>NOT EXISTS</code>), correlated subqueries, and CTEs.
+</p>
+
+<h2 id="lab">Set up</h2>
+<p>
+  The playgrounds run PostgreSQL 18 in your browser on a small copy of the shop (8 customers, 8 products, 12
+  orders). Customer 6 has never ordered and product 8 has never been sold; both help the examples. The same queries
+  run on the Docker database with <code>./pg psql</code>.
+</p>
+
+<h2 id="scalar">1. Scalar subquery: one value</h2>
+<p>
+  A <em>scalar</em> subquery returns exactly one row with one column, and can be used anywhere a single value can.
+  If it returns more than one row, PostgreSQL raises an error; if it returns none, the value is NULL. Wrap it in
+  parentheses.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">compare each product with the average price</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select name,
+       price,
+       (select round(avg(price), 2) from shop.products) as average_price,
+       price - (select avg(price) from shop.products)   as difference
+from shop.products
+where price &gt; (select avg(price) from shop.products)
+order by price desc;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<h2 id="row">2. Row subquery: several columns, one row</h2>
+<p>
+  A <em>row</em> subquery returns one row with several columns, and you compare it with a row constructor
+  <code>(a, b)</code>. It is a compact way to ask “the row that is the most recent / cheapest / largest”.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">the orders that share the biggest order's status and country</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select id, status, shipping_country, total
+from shop.orders
+where (status, shipping_country) = (
+        select status, shipping_country
+        from shop.orders
+        order by total desc, id
+        limit 1)
+order by id;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<h2 id="table">3. Table subquery: many rows</h2>
+<p>
+  A <em>table</em> subquery returns any number of rows and columns. Use it in two places: after
+  <code>IN</code>/<code>EXISTS</code> in a <code>WHERE</code> (next sections), or in <code>FROM</code> as a
+  <em>derived table</em>. A derived table must have an alias.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">a derived table: aggregate first, then filter and join</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select c.full_name, s.orders, s.spent
+from (select customer_id, count(*) as orders, sum(total) as spent
+      from shop.orders
+      group by customer_id) s
+join shop.customers c on c.id = s.customer_id
+where s.spent &gt; 100
+order by s.spent desc;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<h2 id="in">4. IN with a subquery</h2>
+<p>
+  <code>x IN (subquery)</code> is true if <code>x</code> equals any value the subquery returns. It reads naturally
+  for “rows whose id appears in this other set”.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">customers who ordered something that was refunded or cancelled</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select id, full_name
+from shop.customers
+where id in (select customer_id
+             from shop.orders
+             where status in ('cancelled', 'refunded'))
+order by id;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<div class="note danger">
+  <span class="note-title">NOT IN breaks when the list contains NULL</span>
+  <p>
+    If the subquery can return a NULL, <code>x NOT IN (subquery)</code> returns no rows at all
+    (<a href="a1-select-basics.html#null">annex A1</a>). Use <code>NOT EXISTS</code> instead. It has no such trap.
+  </p>
+</div>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">see the trap: one NULL empties the result</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">-- referred_by holds NULL for customers nobody referred.
+-- "customers who are not a referrer" should return people. It returns nothing:
+select id, full_name
+from shop.customers
+where id not in (select referred_by from shop.customers);</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<h2 id="exists">5. EXISTS and NOT EXISTS</h2>
+<p>
+  <code>EXISTS (subquery)</code> is true if the subquery returns at least one row. What the subquery selects does
+  not matter, so people write <code>select 1</code>. <code>NOT EXISTS</code> is true if it returns none. The
+  subquery usually refers to the outer row, which makes it <em>correlated</em> (next section).
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">customers with no orders, and customers with a delivered order</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select c.id, c.full_name,
+       not exists (select 1 from shop.orders o where o.customer_id = c.id)
+         as never_ordered,
+       exists (select 1 from shop.orders o
+               where o.customer_id = c.id and o.status = 'delivered')
+         as has_delivered_order
+from shop.customers c
+order by c.id;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>Used in <code>WHERE</code>, the same tests filter rows:</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">the safe anti-join with NOT EXISTS</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select p.id, p.name
+from shop.products p
+where not exists (select 1
+                  from shop.order_items i
+                  where i.product_id = p.id);</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>You want</th><th class="wrap">✅ Reach for</th><th class="wrap">Why</th></tr></thead>
+  <tbody>
+    <tr><td class="wrap">Rows that have a match somewhere else</td><td class="wrap"><code>EXISTS</code> (or <code>IN</code>)</td><td class="wrap">Stops at the first match; no duplicates from the other side, unlike a join</td></tr>
+    <tr><td class="wrap">Rows that have no match</td><td class="wrap"><code>NOT EXISTS</code> (or <code>LEFT JOIN … IS NULL</code>)</td><td class="wrap">Safe with NULLs</td></tr>
+    <tr><td class="wrap">Columns from the other table too</td><td class="wrap"><code>JOIN</code></td><td class="wrap">A subquery in <code>WHERE</code> cannot return columns to the select list</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="correlated">6. Correlated subqueries</h2>
+<p>
+  A subquery is <em>correlated</em> when it uses a column from the outer query. Conceptually it runs once for each
+  outer row, with that row's values. (The planner often rewrites it into a join, so it is not necessarily slow.)
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">each customer's latest order and order count</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select c.full_name,
+       (select count(*) from shop.orders o where o.customer_id = c.id) as orders,
+       (select max(o.ordered_at)::date::text
+        from shop.orders o where o.customer_id = c.id)                 as latest
+from shop.customers c
+where c.id &lt;= 8          -- the subqueries run once per customer row: keep the list short
+order by c.id;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  Another classic: the rows that beat the average <em>of their own group</em>. Here, products priced above the
+  average of their own category:
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">above the average of its own category</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select p.name, p.category_id, p.price
+from shop.products p
+where p.price &gt; (select avg(p2.price)
+                 from shop.products p2
+                 where p2.category_id = p.category_id)
+order by p.category_id, p.price desc;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<div class="note info">
+  <span class="note-title">Window functions are often shorter</span>
+  <p>
+    Questions like “the latest order per customer” or “above the group average” can also be written with window
+    functions or <code>DISTINCT ON</code>. They are covered in
+    <a href="../lessons/08-advanced-queries.html">lesson 8</a>.
+  </p>
+</div>
+
+<h2 id="cte">7. WITH: common table expressions</h2>
+<p>
+  A CTE gives a subquery a name, defined before the main query:
+  <code>WITH name AS (SELECT …) SELECT … FROM name</code>. You can chain several, separated by commas, and later
+  ones can use earlier ones. The query then reads as a sequence of steps instead of nested parentheses.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">three small steps instead of one nested query</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">with paid_orders as (
+  select * from shop.orders
+  where status in ('paid', 'shipped', 'delivered')
+),
+per_customer as (
+  select customer_id, count(*) as orders, sum(total) as spent
+  from paid_orders
+  group by customer_id
+)
+select c.full_name, p.orders, p.spent,
+       round(100 * p.spent / sum(p.spent) over (), 1) as pct_of_revenue
+from per_customer p
+join shop.customers c on c.id = p.customer_id
+order by p.spent desc;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<h3 id="cte-reuse">Use one CTE twice</h3>
+<p>
+  A CTE you refer to more than once is a good reason to write it: you name the logic once.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">customers who spent more than the average customer</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">with spent as (
+  select customer_id, sum(total) as total_spent
+  from shop.orders
+  group by customer_id
+)
+select c.full_name, s.total_spent
+from spent s
+join shop.customers c on c.id = s.customer_id
+where s.total_spent &gt; (select avg(total_spent) from spent)
+order by s.total_spent desc;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<div class="note info">
+  <span class="note-title">CTEs are not an optimisation fence any more</span>
+  <p>
+    Since PostgreSQL 12, a CTE that is referenced once and has no side effects is folded into the main query like a
+    subquery, so splitting a query into CTEs does not by itself make it slower or faster. A CTE referenced more than
+    once is computed once and its result reused. You can force either behaviour with
+    <code>AS MATERIALIZED (…)</code> or <code>AS NOT MATERIALIZED (…)</code>.
+  </p>
+</div>
+
+<h3 id="cte-write">CTEs that change data</h3>
+<p>
+  A CTE can hold an <code>INSERT</code>, <code>UPDATE</code> or <code>DELETE … RETURNING</code> too, so that the
+  rows it changed feed the next step. For example, archive-and-delete in one statement. That, and recursive CTEs
+  (<code>WITH RECURSIVE</code>, for trees and graphs), belong to
+  <a href="../lessons/08-advanced-queries.html">lesson 8</a> and <a href="../lessons/09-changing-data.html">lesson 9</a>.
+</p>
+
+<h2 id="forward">8. How the planner sees all this</h2>
+<p>
+  <code>IN</code>, <code>EXISTS</code>, <code>NOT EXISTS</code> and many correlated subqueries become semi-joins or
+  anti-joins in the plan, and are executed with the same hash, merge or nested-loop algorithms as a normal join. So
+  the choice between a subquery and a join is mostly about which one you can read, as long as you avoid the
+  <code>NOT IN</code> trap. To see what the planner really did, read the plan: <code>EXPLAIN</code> is the subject
+  of <a href="../lessons/13-explain-and-planner.html">lesson 13</a>. Advanced uses of CTEs, <code>LATERAL</code>
+  (a subquery that can refer to the tables before it in <code>FROM</code>), recursive queries and window functions
+  are in <a href="../lessons/08-advanced-queries.html">lesson 8</a>.
+</p>
+
+<h2 id="summary">Summary</h2>
+<ul>
+  <li>A scalar subquery returns one value; a row subquery one row; a table subquery many rows (alias it in <code>FROM</code>).</li>
+  <li><code>IN</code> and <code>EXISTS</code> test for a match; <code>NOT EXISTS</code> is the safe test for “no match”.</li>
+  <li><code>NOT IN</code> returns nothing if the subquery yields a NULL. Prefer <code>NOT EXISTS</code>.</li>
+  <li>A correlated subquery uses a column of the outer row.</li>
+  <li><code>WITH name AS (…)</code> names a step; chain several; reuse one as often as you like.</li>
+</ul>
+
+<h2 id="next">Where to next</h2>
+<p>
+  Make changes to data in <a href="a5-ddl-and-dml.html">annex A5</a>, or move on to
+  <a href="../lessons/01-architecture.html">lesson 1</a> if you are ready for the course proper.
+</p>
+<nav class="pager"><a class="prev" href="../appendices/a3-aggregation.html"><span class="dir">Previous</span><span class="lbl">A3. Aggregation and grouping</span></a><a class="next" href="../appendices/a5-ddl-and-dml.html"><span class="dir">Next</span><span class="lbl">A5. Creating and changing things</span></a></nav>
+</main>
+<aside class="toc" aria-label="On this page"></aside>
+</div>
+</div>
+<script src="../assets/js/search-index.js"></script>
+<script src="../assets/js/mini-seed.js"></script>
+<script src="../assets/js/course.js"></script>
+</body>
+</html>

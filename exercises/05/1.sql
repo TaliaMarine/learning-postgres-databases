@@ -1,0 +1,6 @@
+-- Set up a least-privilege layout for schema shop:
+--   * lab_05_owner: a role that cannot log in, and owns the schema shop.
+--   * lab_05_ro: a role that cannot log in, may use schema shop and read
+--     every table that is in it today, and can change nothing.
+-- It must have no access at all to schema analytics.
+-- Then run ./pg check 05 1.

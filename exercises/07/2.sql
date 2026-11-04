@@ -1,0 +1,5 @@
+-- Create lab_07_note (id identity primary key, body text not null) and
+-- lab_07_note_tag (note_id, tag text; primary key (note_id, tag); note_id references
+-- lab_07_note and deleting a note deletes its tags). Add a STORED generated column
+-- tag_len = length(tag) to lab_07_note_tag.
+-- Run ./pg check 07 2 when you are done.

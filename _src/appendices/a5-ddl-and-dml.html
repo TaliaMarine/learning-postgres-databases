@@ -1,0 +1,364 @@
+<p class="lede">
+  So far you have only read data. This annex covers the statements that create and change things: DDL (data
+  definition language: <code>CREATE</code>, <code>ALTER</code>, <code>DROP</code>) and DML (data manipulation
+  language: <code>INSERT</code>, <code>UPDATE</code>, <code>DELETE</code>). It also shows transactions, which let
+  you make several changes and keep them all or none, and the basic constraints that keep bad data out.
+</p>
+
+<h2 id="lab">Set up</h2>
+<p>
+  The playgrounds here run PostgreSQL 18 in your browser. Each block starts with <code>drop table if exists</code>,
+  so you can run it as often as you like. It creates tables of its own, such as <code>shop.wishlist</code>; it
+  does not touch the shop tables. The playground keeps one database per page, so a table made in one block is
+  visible in the next, and <em>Reset data</em> starts over.
+</p>
+<p>
+  If you want to try DDL on the Docker database, do not do it in <code>shop</code>. Make a scratch copy and throw it
+  away afterwards:
+</p>
+
+<figure class="code" data-lang="bash">
+  <figcaption><span class="path">terminal</span><span class="grow"></span><span class="lang">bash</span></figcaption>
+<pre><code>./pg sql "create database lab_scratch template shop_template" postgres
+./pg psql lab_scratch          # experiment freely
+./pg sql "drop database lab_scratch" postgres</code></pre>
+</figure>
+
+<p>
+  <code>shop_template</code> is a pristine copy of the shop that the course keeps for exactly this purpose. Any
+  database whose name starts with <code>lab_</code> is removed by <code>./pg clean-roles</code> too.
+</p>
+
+<h2 id="create">1. CREATE TABLE</h2>
+<p>
+  <code>CREATE TABLE</code> names the table, then lists its columns, each with a type and optional rules. The
+  table here belongs to the schema <code>shop</code>; without a schema prefix it goes into the first schema of your
+  <code>search_path</code> (usually <code>public</code>).
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">create a table and look at it</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">drop table if exists shop.wishlist;
+
+create table shop.wishlist (
+  id          integer generated always as identity primary key,
+  customer_id integer not null references shop.customers (id),
+  product_id  integer not null references shop.products (id),
+  note        text,
+  priority    smallint not null default 3 check (priority between 1 and 5),
+  added_at    timestamptz not null default now(),
+  unique (customer_id, product_id)
+);
+
+select column_name, data_type, is_nullable, column_default
+from information_schema.columns
+where table_schema = 'shop' and table_name = 'wishlist'
+order by ordinal_position;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>Common column types you will use first:</p>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Type</th><th class="wrap">Holds</th></tr></thead>
+  <tbody>
+    <tr><td><code>integer</code>, <code>bigint</code>, <code>smallint</code></td><td class="wrap">Whole numbers (4, 8 and 2 bytes)</td></tr>
+    <tr><td><code>numeric(10,2)</code></td><td class="wrap">Exact decimals: 10 digits in all, 2 after the point. Use it for money.</td></tr>
+    <tr><td><code>text</code></td><td class="wrap">Strings of any length. <code>varchar(n)</code> adds a length limit and nothing else.</td></tr>
+    <tr><td><code>boolean</code></td><td class="wrap"><code>true</code>, <code>false</code> or NULL</td></tr>
+    <tr><td><code>date</code>, <code>timestamptz</code></td><td class="wrap">A day; a moment in time (stored in UTC, shown in your time zone)</td></tr>
+  </tbody>
+</table>
+</div>
+<p>
+  There are many more, and a few traps. They get a full lesson: <a href="../lessons/06-data-types.html">lesson 6</a>.
+</p>
+
+<h2 id="constraints">2. The basic constraints</h2>
+<p>
+  A constraint is a rule the database enforces on every write. If a statement would break it, PostgreSQL rejects the
+  statement with an error and changes nothing.
+</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Constraint</th><th class="wrap">Rule</th><th class="wrap">Example</th></tr></thead>
+  <tbody>
+    <tr><td><code>NOT NULL</code></td><td class="wrap">The column must have a value</td><td class="wrap"><code>email text not null</code></td></tr>
+    <tr><td><code>DEFAULT</code></td><td class="wrap">Value used when the insert gives none (not a restriction)</td><td class="wrap"><code>status text default 'active'</code></td></tr>
+    <tr><td><code>PRIMARY KEY</code></td><td class="wrap">Unique and not null: identifies one row</td><td class="wrap"><code>id integer primary key</code></td></tr>
+    <tr><td><code>UNIQUE</code></td><td class="wrap">No two rows may have the same value (NULLs are allowed, and do not clash)</td><td class="wrap"><code>unique (customer_id, product_id)</code></td></tr>
+    <tr><td><code>CHECK</code></td><td class="wrap">An expression that must not be false</td><td class="wrap"><code>check (priority between 1 and 5)</code></td></tr>
+    <tr><td><code>FOREIGN KEY</code> (<code>REFERENCES</code>)</td><td class="wrap">The value must exist in another table's key</td><td class="wrap"><code>customer_id integer references shop.customers (id)</code></td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>
+  <code>generated always as identity</code> gives the column an automatic number from a sequence, and refuses
+  hand-written values unless you say so. Keys, foreign-key actions (<code>ON DELETE …</code>), exclusion constraints
+  and design advice are in <a href="../lessons/07-constraints-and-design.html">lesson 7</a>.
+</p>
+
+<h2 id="insert">3. INSERT</h2>
+<p>
+  <code>INSERT INTO table (columns) VALUES (…)</code> adds rows. Always name the columns; an insert that depends on
+  the table's column order breaks the day someone adds a column. Columns you leave out get their default (or NULL).
+  Give several rows in one statement, separated by commas: it is shorter and faster than many single inserts.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">insert several rows at once</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">delete from shop.wishlist;
+
+insert into shop.wishlist (customer_id, product_id, note, priority)
+values (1, 2, 'birthday', 1),
+       (1, 6, null, 4),
+       (3, 2, 'for the office', default),
+       (5, 7, null, 5);
+
+select id, customer_id, product_id, note, priority from shop.wishlist order by id;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  (This block assumes you ran the <code>CREATE TABLE</code> block above first. If you get <em>relation
+  "shop.wishlist" does not exist</em>, run that one.) Note the word <code>default</code> in the values list: it asks
+  for the column's default, here <code>3</code>.
+</p>
+
+<h3 id="returning">RETURNING: get the new row back</h3>
+<p>
+  <code>RETURNING</code> makes <code>INSERT</code>, <code>UPDATE</code> and <code>DELETE</code> send back the rows
+  they changed, including values the database made up, such as an identity number or a default. It saves a second
+  query and cannot race with another session.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">INSERT ... RETURNING</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">insert into shop.wishlist (customer_id, product_id)
+values (8, 4)
+on conflict (customer_id, product_id) do nothing
+returning id, priority, added_at is not null as has_timestamp;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  <code>ON CONFLICT … DO NOTHING</code> skips a row that would break a unique rule instead of raising an error. If
+  you run the block twice, the second run returns no rows. The upsert form (<code>DO UPDATE</code>) is in
+  <a href="../lessons/09-changing-data.html">lesson 9</a>.
+</p>
+
+<h3 id="constraint-errors">Watching a constraint say no</h3>
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">a CHECK violation</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">insert into shop.wishlist (customer_id, product_id, priority)
+values (2, 3, 9);</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  The error names the constraint (<code>wishlist_priority_check</code>), and no row is inserted. Other errors you
+  can provoke the same way (a duplicate pair, a missing customer, a NULL in a <code>NOT NULL</code> column) are
+  listed with their exact messages in <a href="e-troubleshooting.html">annex E</a>.
+</p>
+
+<h2 id="update">4. UPDATE</h2>
+<p>
+  <code>UPDATE table SET column = value, … WHERE condition</code> changes existing rows. The expression on the
+  right can use the row's current values.
+</p>
+
+<div class="note danger">
+  <span class="note-title">UPDATE and DELETE without WHERE change every row</span>
+  <p>
+    There is no confirmation prompt. Write the <code>WHERE</code> first, run it as a <code>SELECT</code> to see which
+    rows it picks, and only then turn it into an <code>UPDATE</code> or <code>DELETE</code>. In a real database, do
+    it inside a transaction (section 6) so you can <code>ROLLBACK</code>.
+  </p>
+</div>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">UPDATE with a WHERE and RETURNING</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">update shop.wishlist
+set priority = priority - 1,
+    note = coalesce(note, 'moved up')
+where customer_id = 1 and priority &gt; 1
+returning id, customer_id, product_id, note, priority;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  To update from another table, use <code>UPDATE … FROM</code> (<a href="../lessons/09-changing-data.html">lesson 9</a>).
+</p>
+
+<h2 id="delete">5. DELETE</h2>
+<p>
+  <code>DELETE FROM table WHERE condition</code> removes rows. <code>TRUNCATE table</code> removes all rows at once,
+  faster, but it takes a stronger lock and cannot be filtered.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">DELETE ... RETURNING shows what went</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">delete from shop.wishlist
+where priority &gt;= 4
+returning id, customer_id, product_id, priority;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  A foreign key also protects the other direction: you cannot delete a customer who still has orders pointing at
+  them, unless the foreign key was created with <code>ON DELETE CASCADE</code> (which deletes the orders too) or
+  similar. The default is to refuse.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">a foreign key refusing a delete</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">delete from shop.customers where id = 5;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<h2 id="tx">6. Transactions: BEGIN, COMMIT, ROLLBACK</h2>
+<p>
+  A <em>transaction</em> groups statements so they succeed or fail together. <code>BEGIN</code> starts one,
+  <code>COMMIT</code> makes every change permanent, and <code>ROLLBACK</code> undoes them all. Without an explicit
+  <code>BEGIN</code>, each statement is its own transaction and is committed as soon as it finishes
+  (<em>autocommit</em>).
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">change, look, undo</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">begin;
+  delete from shop.wishlist;
+  select count(*) as rows_inside_the_transaction from shop.wishlist;
+rollback;
+
+select count(*) as rows_after_rollback from shop.wishlist;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  Only the last result is shown, so the block shows the count after the rollback; the delete was undone. Change
+  <code>rollback</code> to <code>commit</code> and run it again to see the other outcome. If a statement fails
+  inside a transaction, PostgreSQL marks the whole transaction as aborted and ignores everything until you
+  <code>ROLLBACK</code>. The classic use is a transfer where two updates must both happen:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">all or nothing</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>begin;
+update accounts set balance = balance - 100 where id = 1;
+update accounts set balance = balance + 100 where id = 2;
+commit;                  -- if anything failed above, run rollback; instead</code></pre>
+</figure>
+
+<p>
+  (<code>accounts</code> is an imaginary table here.) What other sessions see while your transaction is open, and what
+  "isolation" means, is in <a href="../lessons/15-transactions-and-mvcc.html">lesson 15</a>.
+</p>
+
+<div class="note warn">
+  <span class="note-title">DDL is transactional in PostgreSQL</span>
+  <p>
+    Unlike in many databases, <code>CREATE TABLE</code> and <code>ALTER TABLE</code> can be rolled back too. That is a
+    useful safety net for migrations: <code>BEGIN; …changes…; ROLLBACK;</code> shows you whether they work and
+    leaves nothing behind. A few commands cannot run in a transaction, such as <code>CREATE DATABASE</code> and
+    <code>CREATE INDEX CONCURRENTLY</code>.
+  </p>
+</div>
+
+<h2 id="alter">7. ALTER TABLE</h2>
+<p>
+  <code>ALTER TABLE</code> changes the structure of a table that already exists. Several actions can be combined in
+  one statement, separated by commas.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">add, rename and drop things</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">alter table shop.wishlist add column reminded boolean not null default false;
+alter table shop.wishlist rename column note to comment;
+alter table shop.wishlist alter column comment set default '';
+alter table shop.wishlist add constraint wishlist_comment_len check (length(comment) &lt;= 200);
+alter table shop.wishlist drop column reminded;
+
+select column_name, data_type, column_default
+from information_schema.columns
+where table_schema = 'shop' and table_name = 'wishlist'
+order by ordinal_position;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>The forms you will use most:</p>
+<ul>
+  <li><code>ADD COLUMN</code>, <code>DROP COLUMN</code>, <code>RENAME COLUMN a TO b</code>, <code>RENAME TO new_name</code></li>
+  <li><code>ALTER COLUMN c SET DATA TYPE …</code> (may rewrite the table), <code>SET DEFAULT</code>, <code>DROP DEFAULT</code>, <code>SET NOT NULL</code>, <code>DROP NOT NULL</code></li>
+  <li><code>ADD CONSTRAINT name …</code>, <code>DROP CONSTRAINT name</code></li>
+</ul>
+
+<div class="note warn">
+  <span class="note-title">On a big, busy table, some ALTERs are not free</span>
+  <p>
+    Some changes take a strong lock that blocks every other query on the table while they run, and some rewrite the
+    whole table. Adding a column with a constant default is quick in modern PostgreSQL; changing a column's type
+    usually is not. The safe-migration patterns are in <a href="../lessons/16-locking.html">lesson 16</a>.
+  </p>
+</div>
+
+<h2 id="drop">8. DROP</h2>
+<p>
+  <code>DROP TABLE name</code> removes a table and its data for good, along with its indexes and constraints.
+  <code>IF EXISTS</code> turns "it is not there" from an error into a notice. If other objects depend on the table
+  (a view, or another table's foreign key), PostgreSQL refuses unless you add <code>CASCADE</code>, which drops those
+  too. Treat <code>CASCADE</code> with respect: read what it will remove first.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">drop the table, safely</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">drop table if exists shop.wishlist;
+
+select to_regclass('shop.wishlist') as wishlist_now;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  <code>to_regclass</code> returns the table's name if it exists and NULL if not. The other objects have the same
+  shape: <code>DROP INDEX</code>, <code>DROP VIEW</code>, <code>DROP SCHEMA</code>, <code>DROP ROLE</code>,
+  <code>DROP DATABASE</code>.
+</p>
+
+<h2 id="summary">Summary</h2>
+<ul>
+  <li><code>CREATE TABLE</code> lists columns, types and rules. <code>ALTER TABLE</code> changes it, <code>DROP TABLE</code> removes it.</li>
+  <li>Constraints (<code>NOT NULL</code>, <code>PRIMARY KEY</code>, <code>UNIQUE</code>, <code>CHECK</code>, <code>FOREIGN KEY</code>) reject bad writes.</li>
+  <li><code>INSERT</code> accepts several rows; always name the columns. <code>RETURNING</code> gives back what was written.</li>
+  <li><code>UPDATE</code> and <code>DELETE</code> need a <code>WHERE</code>; test it as a <code>SELECT</code> first.</li>
+  <li><code>BEGIN … COMMIT</code> makes changes atomic; <code>ROLLBACK</code> undoes them. DDL is transactional too.</li>
+  <li>Practise on a <code>lab_</code> database cloned from <code>shop_template</code>, never on a database you care about.</li>
+</ul>
+
+<h2 id="next">Where to next</h2>
+<p>
+  You now have the SQL the course assumes. Begin with <a href="../lessons/01-architecture.html">lesson 1</a>, where
+  we look at what PostgreSQL does when it runs these statements. Keep <a href="b-psql.html">annex B</a> (psql) open
+  in another tab.
+</p>

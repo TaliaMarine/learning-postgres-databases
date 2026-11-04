@@ -1,0 +1,11 @@
+-- lab_05_clerk (a login role you create) must be able to learn the total spend of a
+-- customer, but must NOT be able to read shop.orders directly.
+-- Create:
+--   * lab_05_fn_owner: a role that cannot log in, can use schema shop and
+--     SELECT from shop.orders, and owns the function below.
+--   * function shop.customer_spend(p_customer integer) returns numeric:
+--     the sum of shop.orders.total for that customer, or 0 if there are none.
+--     It runs with its owner's rights (SECURITY DEFINER) and has a pinned
+--     search_path that cannot be hijacked.
+--   * execute rights: lab_05_clerk may call it; PUBLIC may not.
+-- lab_05_clerk needs USAGE on schema shop. Then run ./pg check 05 3.

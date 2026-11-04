@@ -1,0 +1,4 @@
+-- Look at the two built-in template databases, template0 and template1.
+-- Return three columns named datname, encoding (the encoding as text, for
+-- example UTF8) and allows_connections (the datallowconn flag), ordered by
+-- datname. Run ./pg check 01 1 when you are done.

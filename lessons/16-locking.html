@@ -1,0 +1,871 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Locking and concurrency &mdash; Learning PostgreSQL</title>
+<meta name="description" content="Row and table locks, lock queues, deadlocks, SELECT FOR UPDATE, SKIP LOCKED, advisory locks, safe migrations.">
+<link rel="stylesheet" href="../assets/css/course.css">
+</head>
+<body data-root="../" data-page="16-locking">
+<a class="skip-link" href="#content">Skip to content</a>
+<header class="topbar">
+  <button class="icon-btn menu-btn" type="button" aria-label="Toggle navigation" aria-expanded="false" aria-controls="sidebar">&#9776;</button>
+  <a class="brand" href="../index.html"><span class="mark pgm">PG</span> Learning PostgreSQL <span class="sub">PostgreSQL 18</span></a>
+  <span class="spacer"></span>
+  <div class="search" role="search">
+    <span class="glyph" aria-hidden="true">&#9906;</span>
+    <input type="search" placeholder="Search the course&#8230;" aria-label="Search the course" autocomplete="off" spellcheck="false">
+    <kbd>/</kbd>
+    <div class="search-results" role="listbox"></div>
+  </div>
+  <nav class="topbar-links">
+    <a class="hide-sm" href="../appendices/d-glossary.html">Glossary</a>
+    <a class="hide-sm" href="../appendices/b-psql.html">psql</a>
+  </nav>
+  <button class="icon-btn theme-btn" type="button" aria-label="Toggle theme">&#9790;</button>
+</header>
+<div class="scrim"></div>
+<div class="shell">
+<nav class="sidebar" id="sidebar" aria-label="Course contents">
+  <h4>Start here</h4>
+  <ol>
+    <li><a href="../start/setup.html" data-page="setup"><span class="n">00</span><span>Set up your lab</span></a></li>
+  </ol>
+  <h4>Part 1 — Foundations: the server, databases, schemas and roles</h4>
+  <ol>
+    <li><a href="../lessons/01-architecture.html" data-page="01-architecture"><span class="n">01</span><span>How PostgreSQL is built</span></a></li>
+    <li><a href="../lessons/02-databases-and-schemas.html" data-page="02-databases-and-schemas"><span class="n">02</span><span>Databases and schemas</span></a></li>
+    <li><a href="../lessons/03-roles-and-users.html" data-page="03-roles-and-users"><span class="n">03</span><span>Roles and users</span></a></li>
+    <li><a href="../lessons/04-privileges-and-grants.html" data-page="04-privileges-and-grants"><span class="n">04</span><span>Privileges and grants</span></a></li>
+    <li><a href="../lessons/05-security-and-rls.html" data-page="05-security-and-rls"><span class="n">05</span><span>Hardening and row-level security</span></a></li>
+  </ol>
+  <h4>Part 2 — Modelling and SQL in depth</h4>
+  <ol>
+    <li><a href="../lessons/06-data-types.html" data-page="06-data-types"><span class="n">06</span><span>Data types</span></a></li>
+    <li><a href="../lessons/07-constraints-and-design.html" data-page="07-constraints-and-design"><span class="n">07</span><span>Constraints and schema design</span></a></li>
+    <li><a href="../lessons/08-advanced-queries.html" data-page="08-advanced-queries"><span class="n">08</span><span>Advanced queries</span></a></li>
+    <li><a href="../lessons/09-changing-data.html" data-page="09-changing-data"><span class="n">09</span><span>Changing data safely</span></a></li>
+    <li><a href="../lessons/10-json-and-arrays.html" data-page="10-json-and-arrays"><span class="n">10</span><span>JSONB and arrays</span></a></li>
+    <li><a href="../lessons/11-text-search.html" data-page="11-text-search"><span class="n">11</span><span>Text search and pattern matching</span></a></li>
+  </ol>
+  <h4>Part 3 — Performance</h4>
+  <ol>
+    <li><a href="../lessons/12-indexes.html" data-page="12-indexes"><span class="n">12</span><span>Indexes</span></a></li>
+    <li><a href="../lessons/13-explain-and-planner.html" data-page="13-explain-and-planner"><span class="n">13</span><span>EXPLAIN and the planner</span></a></li>
+    <li><a href="../lessons/14-query-tuning.html" data-page="14-query-tuning"><span class="n">14</span><span>A query-tuning workflow</span></a></li>
+  </ol>
+  <h4>Part 4 — Transactions and concurrency</h4>
+  <ol>
+    <li><a href="../lessons/15-transactions-and-mvcc.html" data-page="15-transactions-and-mvcc"><span class="n">15</span><span>Transactions and MVCC</span></a></li>
+    <li><a href="../lessons/16-locking.html" data-page="16-locking"><span class="n">16</span><span>Locking and concurrency</span></a></li>
+    <li><a href="../lessons/17-vacuum-and-bloat.html" data-page="17-vacuum-and-bloat"><span class="n">17</span><span>Vacuum, bloat and autovacuum</span></a></li>
+  </ol>
+  <h4>Part 5 — Programming the database</h4>
+  <ol>
+    <li><a href="../lessons/18-views-and-functions.html" data-page="18-views-and-functions"><span class="n">18</span><span>Views, functions and procedures</span></a></li>
+    <li><a href="../lessons/19-triggers-and-events.html" data-page="19-triggers-and-events"><span class="n">19</span><span>Triggers, LISTEN/NOTIFY and audit</span></a></li>
+    <li><a href="../lessons/20-partitioning.html" data-page="20-partitioning"><span class="n">20</span><span>Partitioning</span></a></li>
+  </ol>
+  <h4>Part 6 — Operating PostgreSQL</h4>
+  <ol>
+    <li><a href="../lessons/21-configuration.html" data-page="21-configuration"><span class="n">21</span><span>Configuration and tuning</span></a></li>
+    <li><a href="../lessons/22-wal-and-durability.html" data-page="22-wal-and-durability"><span class="n">22</span><span>WAL, checkpoints and durability</span></a></li>
+    <li><a href="../lessons/23-backup-and-recovery.html" data-page="23-backup-and-recovery"><span class="n">23</span><span>Backup, restore and PITR</span></a></li>
+    <li><a href="../lessons/24-replication.html" data-page="24-replication"><span class="n">24</span><span>Replication and high availability</span></a></li>
+    <li><a href="../lessons/25-monitoring.html" data-page="25-monitoring"><span class="n">25</span><span>Monitoring and diagnostics</span></a></li>
+    <li><a href="../lessons/26-connections-and-upgrades.html" data-page="26-connections-and-upgrades"><span class="n">26</span><span>Connections, pooling, extensions and upgrades</span></a></li>
+  </ol>
+  <h4>Part 7 — Putting it together</h4>
+  <ol>
+    <li><a href="../lessons/27-capstone.html" data-page="27-capstone"><span class="n">27</span><span>Capstone project</span></a></li>
+  </ol>
+  <h4>Annexes</h4>
+  <ol>
+    <li><a href="../appendices/a1-select-basics.html" data-page="a1-select-basics"><span class="n">A1</span><span>SELECT, filtering and sorting</span></a></li>
+    <li><a href="../appendices/a2-joins.html" data-page="a2-joins"><span class="n">A2</span><span>Joins and combining tables</span></a></li>
+    <li><a href="../appendices/a3-aggregation.html" data-page="a3-aggregation"><span class="n">A3</span><span>Aggregation and grouping</span></a></li>
+    <li><a href="../appendices/a4-subqueries-and-ctes.html" data-page="a4-subqueries-and-ctes"><span class="n">A4</span><span>Subqueries and CTEs</span></a></li>
+    <li><a href="../appendices/a5-ddl-and-dml.html" data-page="a5-ddl-and-dml"><span class="n">A5</span><span>Creating and changing things</span></a></li>
+    <li><a href="../appendices/b-psql.html" data-page="b-psql"><span class="n">B</span><span>psql cheat sheet</span></a></li>
+    <li><a href="../appendices/c-catalog-queries.html" data-page="c-catalog-queries"><span class="n">C</span><span>Catalog and diagnostic queries</span></a></li>
+    <li><a href="../appendices/d-glossary.html" data-page="d-glossary"><span class="n">D</span><span>Glossary</span></a></li>
+    <li><a href="../appendices/e-troubleshooting.html" data-page="e-troubleshooting"><span class="n">E</span><span>Troubleshooting</span></a></li>
+    <li><a href="../appendices/f-whats-next.html" data-page="f-whats-next"><span class="n">F</span><span>What to learn next</span></a></li>
+  </ol>
+</nav>
+<div class="main">
+<main class="content" id="content">
+<p class="eyebrow">Lesson 16 &middot; Part 4</p>
+<h1>Locking and concurrency</h1>
+<div class="meta-row"><span class="tag">lesson 16</span><span class="tag">Docker exercises</span><span class="tag">live playground</span></div>
+<p class="lede">
+  <a href="15-transactions-and-mvcc.html">Lesson 15</a> showed that readers never block writers. Writers still
+  block other writers, and schema changes block almost everyone. This lesson shows which locks PostgreSQL takes,
+  how to see who is waiting for whom, how to build a safe job queue, what a deadlock is, and how to run
+  <code>ALTER TABLE</code> on a busy table without taking the application down.
+</p>
+
+<h2 id="goals">Learning goals</h2>
+<ul>
+  <li>Explain which statements take row locks and which take table locks, and why plain <code>SELECT</code> takes neither kind that blocks anyone.</li>
+  <li>Choose between <code>FOR UPDATE</code>, <code>FOR NO KEY UPDATE</code>, <code>FOR SHARE</code> and <code>FOR KEY SHARE</code>.</li>
+  <li>Claim work from a queue table with <code>FOR UPDATE SKIP LOCKED</code>, and fail fast with <code>NOWAIT</code> or <code>lock_timeout</code>.</li>
+  <li>Read <code>pg_locks</code> and <code>pg_blocking_pids()</code> to find the session that is blocking another.</li>
+  <li>Recognise a deadlock error, explain why it happens, and prevent it by locking in a consistent order.</li>
+  <li>Use advisory locks, and tell session-level from transaction-level ones.</li>
+  <li>Run a schema change safely: know the lock level, set <code>lock_timeout</code>, and split risky changes into short steps.</li>
+</ul>
+
+<h2 id="lab">Set up for this lesson</h2>
+<p>
+  Use the <code>shop</code> database. Several demonstrations need <strong>two sessions</strong>. Open two
+  terminals, run <code>./pg psql</code> in each, and call them <em>session A</em> and <em>session B</em>. Every
+  two-session example below is marked “two terminals”. The browser playground has only one session, so it can show
+  which locks a statement takes, but not one session waiting for another. The playground's tiny dataset and
+  single connection are for illustration only.
+</p>
+<p>
+  Everything you change in the two-terminal examples is rolled back at the end. If a session hangs, press
+  <kbd>Ctrl</kbd>+<kbd>C</kbd> to cancel the waiting statement, then run <code>rollback;</code>.
+</p>
+
+<h2 id="two-kinds">1. Two kinds of lock: row and table</h2>
+
+<p>
+  A <em>lock</em> is a promise that makes other sessions wait (or fail) when they want something incompatible.
+  PostgreSQL uses two layers:
+</p>
+<ul>
+  <li><strong>Row locks</strong> protect individual rows. <code>UPDATE</code>, <code>DELETE</code> and <code>SELECT … FOR UPDATE</code> take them. A row lock is not stored in a lock table in memory; it is recorded in the row's own header (the <code>xmax</code> field from lesson 15) and held until the transaction ends.</li>
+  <li><strong>Table locks</strong> protect a whole table (or index). Every statement takes one. Most of them are weak and compatible with each other. A few, such as <code>ALTER TABLE</code>, are strong.</li>
+</ul>
+
+<p>
+  All locks are released at <code>COMMIT</code> or <code>ROLLBACK</code>. You cannot release one earlier (advisory
+  locks, section 8, are the exception).
+</p>
+
+<p>Look at what a row update really takes. Run this in the playground, then think about the output:</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">locks held by one session · one session only, so nothing waits</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">begin;
+select id, name from shop.products where id = 3 for update;
+
+select locktype, relation::regclass as rel, mode, granted
+from pg_locks
+where pid = pg_backend_pid()
+  and locktype in ('relation', 'transactionid')
+  and relation is distinct from 'pg_locks'::regclass
+order by locktype, 2, mode;
+
+rollback;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  In the Docker database the answer is the same: <code>RowShareLock</code> on the table and on each of its
+  indexes, plus an <code>ExclusiveLock</code> on the session's own <code>transactionid</code>. The table lock is
+  weak: it only conflicts with the strongest table locks. The row lock itself is <em>not</em> in this list. That is
+  why PostgreSQL can lock millions of rows without running out of memory. Another session that wants the same row
+  finds the lock by waiting on this <code>transactionid</code>.
+</p>
+
+<div class="note info">
+  <span class="note-title">Why a plain SELECT never waits for a writer</span>
+  <p>
+    A plain <code>SELECT</code> takes only <code>AccessShareLock</code> on the table, and no row locks. It reads the
+    snapshot from lesson 15 instead. So a long report does not hold up an <code>UPDATE</code>, and an
+    <code>UPDATE</code> does not hold up the report. Locks matter when two sessions <em>write</em> to the same
+    rows, or when someone changes the table's structure.
+  </p>
+</div>
+
+<h2 id="row-modes">2. Row lock modes</h2>
+
+<p>
+  <code>SELECT</code> can lock rows without changing them. You choose how strong the lock is:
+</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Clause</th><th>Blocks other sessions from…</th><th>Use it when…</th></tr></thead>
+  <tbody>
+    <tr><td><code>FOR UPDATE</code></td><td class="wrap">update, delete, and every other <code>FOR …</code> lock on the row</td><td class="wrap">you read a row and will delete it or change a key column</td></tr>
+    <tr><td><code>FOR NO KEY UPDATE</code></td><td class="wrap">update, delete, <code>FOR UPDATE</code>, <code>FOR SHARE</code>, but <em>not</em> <code>FOR KEY SHARE</code></td><td class="wrap">you read a row and will update it, without touching its primary or unique key. A normal <code>UPDATE</code> takes this lock.</td></tr>
+    <tr><td><code>FOR SHARE</code></td><td class="wrap">update and delete (many sessions can share the lock)</td><td class="wrap">you need the row to stay as it is while you read related data</td></tr>
+    <tr><td><code>FOR KEY SHARE</code></td><td class="wrap">only <code>DELETE</code> and key changes</td><td class="wrap">PostgreSQL uses it for you inside foreign-key checks</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>
+  The two weaker modes exist because of foreign keys. When you insert an order, the foreign key checks that the
+  customer exists with <code>FOR KEY SHARE</code>. If an unrelated <code>UPDATE</code> of the same customer took a
+  full <code>FOR UPDATE</code>, every order insert for that customer would wait. Because a normal
+  <code>UPDATE</code> that does not change the key takes only <code>FOR NO KEY UPDATE</code>, they do not wait.
+</p>
+
+<p><strong>Two terminals.</strong> Prove it yourself:</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">session A, then session B</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>-- session A
+begin;
+select id from shop.customers where id = 1 for no key update;   -- keep this open
+
+-- session B: an order for customer 1 goes through immediately
+begin;
+insert into shop.orders (customer_id, status, ordered_at, shipping_country)
+values (1, 'pending', '2025-01-01', 'NL');
+rollback;
+
+-- session A: now try the strong lock instead
+rollback;
+begin;
+select id from shop.customers where id = 1 for update;          -- keep this open
+
+-- session B: the same insert now hangs, because its foreign-key check needs FOR KEY SHARE
+insert into shop.orders (customer_id, status, ordered_at, shipping_country)
+values (1, 'pending', '2025-01-01', 'NL');                       -- waits; press Ctrl+C
+
+-- both sessions
+rollback;</code></pre>
+</figure>
+
+<div class="note tip">
+  <span class="note-title">Default to the weakest lock that works</span>
+  <p>
+    If you lock a row so that you can update it a moment later, use <code>FOR NO KEY UPDATE</code>. Use
+    <code>FOR UPDATE</code> only when you will delete the row or change its key. Strong locks block more sessions
+    than you intended, including ones that only wanted to insert a child row.
+  </p>
+</div>
+
+<h2 id="read-modify-write">3. Why you lock: the lost update</h2>
+
+<p>
+  Reading a value in the application and writing it back later is a race. Two sessions both read stock 5, both
+  write 4, and one sale is lost. There are two correct fixes.
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">fix 1: do it in one statement</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>update shop.products
+set stock = stock - 1
+where id = 7 and stock &gt; 0;          -- the row lock makes the second session wait, then re-check</code></pre>
+</figure>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">fix 2: lock the row, then decide</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>begin;
+select stock from shop.products where id = 7 for update;   -- other writers now wait here
+-- ... application logic decides what to do with the value ...
+update shop.products set stock = stock - 1 where id = 7;
+commit;</code></pre>
+</figure>
+
+<p>
+  Fix 1 is better whenever the new value can be computed in SQL. It is one round trip, and it holds the lock for
+  the shortest possible time. Under <code>READ COMMITTED</code>, the waiting session re-reads the updated row
+  and re-checks <code>where stock &gt; 0</code>, so it does not oversell. Fix 2 is for decisions that really need
+  application code.
+</p>
+
+<h2 id="wait-or-fail">4. Wait, skip, or fail fast: SKIP LOCKED, NOWAIT, lock_timeout</h2>
+
+<p>
+  By default a session that meets a locked row waits for as long as it takes. Three options change that.
+</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Option</th><th>If a row is locked…</th></tr></thead>
+  <tbody>
+    <tr><td><code>FOR UPDATE NOWAIT</code></td><td class="wrap">raise an error at once: <code>could not obtain lock on row in relation "products"</code></td></tr>
+    <tr><td><code>FOR UPDATE SKIP LOCKED</code></td><td class="wrap">silently leave that row out of the result and take the next ones</td></tr>
+    <tr><td><code>SET lock_timeout = '2s'</code></td><td class="wrap">wait up to two seconds, then raise <code>canceling statement due to lock timeout</code>. Applies to any lock, including table locks.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>
+  <code>SKIP LOCKED</code> turns a table into a work queue. Many workers can each ask for “the next job” and
+  never take the same one, and none of them waits for another. Here is the pattern, which you will build in
+  exercise 2. Run it in the playground to see one job being claimed:
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">claim one job · the real value of SKIP LOCKED needs two sessions</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">create table shop.jobs (
+  id serial primary key,
+  payload text,
+  claimed_at timestamptz
+);
+insert into shop.jobs (payload) select 'job-' || g from generate_series(1, 4) g;
+
+update shop.jobs
+set claimed_at = '2025-01-01'
+where id = (select id
+            from shop.jobs
+            where claimed_at is null
+            order by id
+            for update skip locked
+            limit 1)
+returning id, payload;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  The subquery locks the first unclaimed row that nobody else has locked. The outer <code>UPDATE</code> marks it.
+  You will get <code>job-1</code>. (Running the whole script twice fails on <code>create table</code>: press
+  “Reset data” first.) If you delete the <code>create</code> and <code>insert</code> lines and run the
+  <code>update</code> again, you get <code>job-2</code>.
+</p>
+
+<p><strong>Two terminals.</strong> See the skip happen against the shop's own products:</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">session A, then session B</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>-- session A
+begin;
+select id from shop.products where id = 1 for update;   -- keep open
+
+-- session B
+select id from shop.products where id in (1, 2, 3) order by id for update skip locked limit 2;
+--  id
+-- ----
+--   2
+--   3
+select id from shop.products where id = 1 for update nowait;
+-- ERROR:  could not obtain lock on row in relation "products"
+begin;
+set local lock_timeout = '500ms';
+update shop.products set stock = 0 where id = 1;
+-- ERROR:  canceling statement due to lock timeout
+rollback;
+
+-- session A
+rollback;</code></pre>
+</figure>
+
+<div class="note warn">
+  <span class="note-title">SKIP LOCKED gives an incomplete view on purpose</span>
+  <p>
+    A query with <code>SKIP LOCKED</code> returns a result that depends on what other sessions are doing at that
+    moment. That is exactly right for a queue and exactly wrong for a report. Never use it to count or to
+    sum rows.
+  </p>
+</div>
+
+<div class="note warn">
+  <span class="note-title">A queue worker must commit quickly</span>
+  <p>
+    The claim only works while the row lock is held. If a worker commits the claim and then crashes while
+    processing, the job stays marked as claimed forever. Real queues also store a lease time or a status and
+    re-queue stale jobs. Do the claim and the status change in one transaction, and keep it short.
+  </p>
+</div>
+
+<h2 id="see-locks">5. Seeing locks: pg_locks and pg_blocking_pids</h2>
+
+<p>
+  When a statement hangs, two questions matter: <em>what is it waiting for</em>, and <em>who holds it</em>?
+</p>
+
+<ul>
+  <li><code>pg_stat_activity</code> lists every session. A waiting one has <code>wait_event_type = 'Lock'</code>.</li>
+  <li><code>pg_blocking_pids(pid)</code> returns the process ids that block the given session.</li>
+  <li><code>pg_locks</code> lists every lock held or requested. A row with <code>granted = false</code> is a session in the queue.</li>
+</ul>
+
+<p><strong>Three terminals.</strong> A waiting session cannot run queries, so you diagnose from a third one (session C):</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">session A, session B, then session C</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>-- session A
+begin;
+update shop.products set stock = stock where id = 1;      -- keep open
+
+-- session B
+update shop.products set stock = 0 where id = 1;          -- hangs
+
+-- session C
+select pid,
+       pg_blocking_pids(pid) as blocked_by,
+       wait_event_type, wait_event, state,
+       left(query, 45) as query
+from pg_stat_activity
+where cardinality(pg_blocking_pids(pid)) &gt; 0;</code></pre>
+</figure>
+
+<p>
+  On the Docker database this returned one row: the <code>update</code> of session B, with
+  <code>wait_event_type = Lock</code> and <code>wait_event = transactionid</code>, state <code>active</code>, and
+  <code>blocked_by</code> holding session A's pid. In <code>pg_locks</code> the waiting request showed as
+  <code>locktype = transactionid</code>, <code>mode = ShareLock</code>, <code>granted = f</code>: session B is
+  waiting for session A's transaction to finish. To end the problem, either commit/roll back session A, or (as a
+  last resort, from a superuser) call <code>select pg_cancel_backend(pid)</code> to cancel its statement, or
+  <code>pg_terminate_backend(pid)</code> to end the whole session.
+</p>
+
+<div class="note danger">
+  <span class="note-title">The real culprit is usually “idle in transaction”</span>
+  <p>
+    A session that ran <code>BEGIN</code>, did some work, and then went quiet keeps all its locks. In
+    <code>pg_stat_activity</code> it shows <code>state = 'idle in transaction'</code>. It is the most common
+    reason a table “is locked”. Protect yourself with
+    <code>idle_in_transaction_session_timeout</code> (exercise 1), and make sure application code never keeps a
+    transaction open while it waits for a user or a remote service.
+  </p>
+</div>
+
+<h2 id="deadlocks">6. Deadlocks</h2>
+
+<p>
+  A <em>deadlock</em> is a cycle of waiting: A waits for B, and B waits for A. Neither can ever finish, so
+  PostgreSQL detects the cycle (after <code>deadlock_timeout</code>, one second by default) and cancels one of the
+  transactions so the other can continue.
+</p>
+
+<figure class="dia">
+  <div class="dia-hold">
+    <svg class="d" viewBox="0 0 860 260" role="img" aria-labelledby="dl-t dl-d">
+      <title id="dl-t">Two transactions waiting for each other's row</title>
+      <desc id="dl-d">Transaction A holds product 1 and waits for product 2. Transaction B holds product 2 and waits for product 1. The arrows form a cycle.</desc>
+      <defs>
+        <marker id="dm" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z"/></marker>
+      </defs>
+      <rect class="box accent" x="40" y="40" width="200" height="60" rx="8"/>
+      <text class="hd ctr" x="140" y="76">transaction A</text>
+      <rect class="box accent" x="620" y="40" width="200" height="60" rx="8"/>
+      <text class="hd ctr" x="720" y="76">transaction B</text>
+      <rect class="box teal" x="40" y="170" width="200" height="60" rx="8"/>
+      <text class="hd ctr" x="140" y="206">product 1</text>
+      <rect class="box teal" x="620" y="170" width="200" height="60" rx="8"/>
+      <text class="hd ctr" x="720" y="206">product 2</text>
+      <path class="line" d="M140 170 L140 104" marker-end="url(#dm)"/>
+      <text class="mut tiny" x="150" y="140">A holds</text>
+      <path class="line" d="M720 170 L720 104" marker-end="url(#dm)"/>
+      <text class="mut tiny" x="730" y="140">B holds</text>
+      <path class="line" d="M244 60 L616 60" marker-end="url(#dm)"/>
+      <text class="mut tiny" x="430" y="52" text-anchor="middle">A waits for product 2 (B)</text>
+      <path class="line" d="M616 84 L244 84" marker-end="url(#dm)"/>
+      <text class="mut tiny" x="430" y="104" text-anchor="middle">B waits for product 1 (A)</text>
+    </svg>
+  </div>
+  <figcaption>Each transaction holds a row the other one needs. No amount of waiting helps.</figcaption>
+</figure>
+
+<p><strong>Two terminals.</strong> Provoke one on purpose. Use the steps in order and switch terminals:</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">session A and session B, alternating</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>-- 1. session A
+begin;
+update shop.products set stock = stock + 1 where id = 1;
+
+-- 2. session B
+begin;
+update shop.products set stock = stock + 1 where id = 2;
+
+-- 3. session A: waits for session B's row
+update shop.products set stock = stock + 1 where id = 2;
+
+-- 4. session B: closes the cycle; after about a second one session fails
+update shop.products set stock = stock + 1 where id = 1;
+
+-- 5. both sessions
+rollback;</code></pre>
+</figure>
+
+<p>The victim gets this error (the process ids and transaction ids will differ on your machine):</p>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">what the loser sees</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code>ERROR:  deadlock detected
+DETAIL:  Process 18720 waits for ShareLock on transaction 1305; blocked by process 18727.
+Process 18727 waits for ShareLock on transaction 1299; blocked by process 18720.
+HINT:  See server log for query details.
+CONTEXT:  while updating tuple (0,2) in relation "products"</code></pre>
+</figure>
+
+<p>
+  The error has SQLSTATE <code>40P01</code>. The other session simply continues. The cancelled transaction was
+  rolled back as a whole, so your application must <em>retry the entire transaction</em>, not just the failing
+  statement.
+</p>
+
+<div class="note tip">
+  <span class="note-title">Prevent deadlocks with one rule</span>
+  <p>
+    Always lock rows in the same order. If every transaction that touches several products does so in ascending
+    <code>id</code> order, a cycle cannot form. In SQL:
+    <code>select id from shop.products where id = any($1) order by id for update;</code> before you update. Keep
+    transactions short, and treat 40P01 (and <code>40001</code>, the serialization failure from lesson 15) as
+    “retry”.
+  </p>
+</div>
+
+<h2 id="table-locks">7. Table locks and the lock queue</h2>
+
+<p>
+  Table locks have eight modes, from weak to strong. You do not need to learn the whole conflict matrix. Remember
+  these modes:
+</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Mode</th><th>Taken by</th><th>Conflicts with</th></tr></thead>
+  <tbody>
+    <tr><td><code>AccessShareLock</code></td><td class="wrap">plain <code>SELECT</code></td><td class="wrap">only <code>AccessExclusiveLock</code></td></tr>
+    <tr><td><code>RowShareLock</code></td><td class="wrap"><code>SELECT … FOR UPDATE</code> and friends</td><td class="wrap">the two strongest modes</td></tr>
+    <tr><td><code>RowExclusiveLock</code></td><td class="wrap"><code>INSERT</code>, <code>UPDATE</code>, <code>DELETE</code></td><td class="wrap">modes that block writers (<code>ShareLock</code> and stronger)</td></tr>
+    <tr><td><code>ShareUpdateExclusiveLock</code></td><td class="wrap"><code>VALIDATE CONSTRAINT</code>, <code>VACUUM</code>, <code>CREATE INDEX CONCURRENTLY</code></td><td class="wrap">itself and stronger modes, but not ordinary reads and writes</td></tr>
+    <tr><td><code>ShareLock</code></td><td class="wrap">plain <code>CREATE INDEX</code></td><td class="wrap">all writers</td></tr>
+    <tr><td><code>AccessExclusiveLock</code></td><td class="wrap">most <code>ALTER TABLE</code>, <code>DROP TABLE</code>, <code>TRUNCATE</code>, <code>VACUUM FULL</code></td><td class="wrap">everything, including plain <code>SELECT</code></td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>
+  You can check a statement's lock without any second session. Run the next playground; it shows that adding a
+  column asks for the strongest lock:
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">which table lock does ALTER TABLE take?</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">begin;
+alter table shop.products add column lab_note text;
+
+select relation::regclass as rel, mode
+from pg_locks
+where pid = pg_backend_pid()
+  and locktype = 'relation'
+  and relation = 'shop.products'::regclass;
+
+rollback;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  <code>AccessExclusiveLock</code> conflicts with <em>every</em> other lock, even a plain
+  <code>SELECT</code>. The table below lists the table lock each statement took when checked on the Docker
+  database (using the same <code>pg_locks</code> query inside a transaction that was then rolled back):
+</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Statement</th><th>Lock on the table</th></tr></thead>
+  <tbody>
+    <tr><td class="wrap"><code>alter table … add column x text</code></td><td class="wrap">AccessExclusiveLock</td></tr>
+    <tr><td class="wrap"><code>alter table … add column x text default 'x'</code></td><td class="wrap">AccessExclusiveLock (but no rewrite, see below)</td></tr>
+    <tr><td class="wrap"><code>alter table … alter column … type …</code></td><td class="wrap">AccessExclusiveLock</td></tr>
+    <tr><td class="wrap"><code>alter table … add constraint … check (…) not valid</code></td><td class="wrap">AccessExclusiveLock (instant: no table scan)</td></tr>
+    <tr><td class="wrap"><code>alter table … validate constraint …</code></td><td class="wrap">ShareUpdateExclusiveLock</td></tr>
+    <tr><td class="wrap"><code>alter table orders add foreign key … not valid</code></td><td class="wrap">ShareRowExclusiveLock on <em>both</em> tables</td></tr>
+    <tr><td class="wrap"><code>create index …</code></td><td class="wrap">ShareLock</td></tr>
+    <tr><td class="wrap"><code>lock table … in share mode</code></td><td class="wrap">ShareLock</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3 id="queue">The queue effect</h3>
+
+<p>
+  Locks are granted in order. If an <code>ALTER TABLE</code> waits for an older transaction that still holds a weak
+  lock, <em>every statement that arrives after it waits behind it</em>, even plain <code>SELECT</code>s that would
+  have been fine on their own. A migration that merely “waits a bit” can freeze the whole table.
+</p>
+
+<p><strong>Two terminals.</strong> See it with a small table:</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">three sessions: A, B, C</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>-- session A: an ordinary read inside a transaction that stays open
+begin;
+select count(*) from shop.categories;
+
+-- session B: the migration. It must wait for session A.
+begin;
+alter table shop.categories add column lab_q int;       -- hangs
+
+-- session C: a plain read now hangs too, behind session B's request
+set lock_timeout = '500ms';
+select count(*) from shop.categories;
+-- ERROR:  canceling statement due to lock timeout
+
+-- session A
+rollback;      -- session B's ALTER now proceeds
+
+-- session B
+rollback;      -- undo the ALTER, so the column is never added</code></pre>
+</figure>
+
+<h3 id="safe-migrations">Safe migrations</h3>
+
+<p>
+  From the queue effect follows the rule for changing a busy table: <strong>ask for the lock with a short
+  timeout and retry, instead of waiting in line</strong>.
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">a migration that cannot take the site down</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>begin;
+set local lock_timeout = '2s';                 -- give up quickly; the app is not blocked for long
+alter table shop.products add column lab_note text;
+commit;
+-- If it fails with "lock timeout", run it again a little later.</code></pre>
+</figure>
+
+<p>Three more habits make migrations safe:</p>
+<ol>
+  <li><strong>Add constraints in two steps.</strong> <code>ADD … NOT VALID</code> is quick and checks only new rows. <code>VALIDATE CONSTRAINT</code> then scans the old rows with a lock that lets reads and writes continue. This is exercise 3.</li>
+  <li><strong>Build indexes with <code>CREATE INDEX CONCURRENTLY</code></strong> (<a href="12-indexes.html">lesson 12</a>), which takes <code>ShareUpdateExclusiveLock</code> instead of <code>ShareLock</code>. It cannot run inside a transaction block, and a failure leaves an <code>INVALID</code> index to drop.</li>
+  <li><strong>Avoid table rewrites.</strong> In current PostgreSQL, <code>ADD COLUMN … DEFAULT constant</code> does not rewrite the table, but changing a column's type often does. The rewrite holds an <code>AccessExclusiveLock</code> for as long as it takes.</li>
+</ol>
+
+<div class="note warn">
+  <span class="note-title">A foreign key locks two tables</span>
+  <p>
+    Adding a foreign key takes <code>ShareRowExclusiveLock</code> on <em>both</em> the child and the parent table
+    (observed above), which blocks writes to both. Adding it as <code>NOT VALID</code> shortens the time it is
+    held, because the scan of old rows moves to <code>VALIDATE CONSTRAINT</code>.
+  </p>
+</div>
+
+<h2 id="advisory">8. Advisory locks: locks you define</h2>
+
+<p>
+  An <em>advisory lock</em> is a lock on a number that you choose. PostgreSQL does nothing with it except make
+  other sessions wait for the same number. It is useful for “only one worker may run this job” or “only one
+  process may migrate at a time”, without a table to lock.
+</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Function</th><th>Held until</th></tr></thead>
+  <tbody>
+    <tr><td class="wrap"><code>pg_advisory_xact_lock(key)</code></td><td class="wrap">the transaction ends. It cannot be forgotten.</td></tr>
+    <tr><td class="wrap"><code>pg_advisory_lock(key)</code></td><td class="wrap">you call <code>pg_advisory_unlock(key)</code>, or the session ends. It survives <code>COMMIT</code>.</td></tr>
+    <tr><td class="wrap"><code>pg_try_advisory_lock(key)</code></td><td class="wrap">same as <code>pg_advisory_lock</code>, but returns <code>false</code> immediately instead of waiting</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">take, inspect and release an advisory lock</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select pg_try_advisory_lock(42) as got_it;
+
+select classid, objid, mode, granted
+from pg_locks
+where locktype = 'advisory' and pid = pg_backend_pid();
+
+select pg_advisory_unlock(42) as released;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  In a second session, <code>select pg_try_advisory_lock(42);</code> would return <code>false</code> while the
+  first holds it.
+</p>
+
+<div class="note warn">
+  <span class="note-title">Session-level locks and connection pools</span>
+  <p>
+    A session-level advisory lock belongs to the <em>connection</em>, not to the transaction. If a connection
+    pool hands your next statement to a different connection (lesson 26), you can unlock on the wrong session and
+    leave the lock stuck on another one. Calling <code>pg_advisory_lock</code> twice needs two unlocks. Prefer
+    <code>pg_advisory_xact_lock</code> whenever the work fits in a transaction.
+  </p>
+</div>
+
+<h2 id="when">When to use, when not to</h2>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Situation</th><th class="wrap">✅ Do this</th><th class="wrap">❌ Not this</th></tr></thead>
+  <tbody>
+    <tr><td class="wrap">Decrement stock safely</td><td class="wrap">One <code>UPDATE … SET stock = stock - 1 WHERE stock &gt; 0</code></td><td class="wrap">Read, compute in the app, write back</td></tr>
+    <tr><td class="wrap">Many workers consume jobs</td><td class="wrap"><code>FOR UPDATE SKIP LOCKED</code> with a short transaction</td><td class="wrap">Plain <code>FOR UPDATE</code> (workers queue behind each other) or polling without locking (duplicates)</td></tr>
+    <tr><td class="wrap">Fail fast instead of hanging</td><td class="wrap"><code>NOWAIT</code> or <code>lock_timeout</code></td><td class="wrap">Waiting forever and letting the user time out</td></tr>
+    <tr><td class="wrap">Touching several rows</td><td class="wrap">Lock in a fixed order (by id) and retry on 40P01</td><td class="wrap">Random order, no retry</td></tr>
+    <tr><td class="wrap">“Only one process may do X”</td><td class="wrap"><code>pg_advisory_xact_lock</code></td><td class="wrap">A lock row you must clean up, or <code>LOCK TABLE</code></td></tr>
+    <tr><td class="wrap">Schema change on a busy table</td><td class="wrap"><code>SET lock_timeout</code>, <code>NOT VALID</code> then <code>VALIDATE</code>, <code>CONCURRENTLY</code></td><td class="wrap">A bare <code>ALTER TABLE</code> during peak traffic</td></tr>
+    <tr><td class="wrap">Report on a live table</td><td class="wrap">Plain <code>SELECT</code> (no lock that blocks)</td><td class="wrap"><code>LOCK TABLE</code> “to be consistent”: use a snapshot instead (lesson 15)</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="inspect">Inspect it</h2>
+
+<p>
+  Run this whenever something hangs. It lists every blocked session with the session that blocks it. With nothing
+  blocked, it returns no rows, which is the answer you want.
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">who is blocked, and by whom</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select blocked.pid                  as blocked_pid,
+       left(blocked.query, 40)      as blocked_query,
+       blocker.pid                  as blocker_pid,
+       blocker.state                as blocker_state,
+       left(blocker.query, 40)      as blocker_last_query
+from pg_stat_activity blocked
+join lateral unnest(pg_blocking_pids(blocked.pid)) as b(pid) on true
+join pg_stat_activity blocker on blocker.pid = b.pid
+order by blocked.pid;</code></pre>
+</figure>
+
+<p>
+  For a quick look at your own session's locks, use the query from section 1. For a long-term view, set
+  <code>log_lock_waits = on</code> (the course container already does): the server then writes a log line whenever
+  a statement waits longer than <code>deadlock_timeout</code>.
+</p>
+
+<h2 id="exercises">Your turn</h2>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 1</span><span class="grow"></span><span class="lvl">basic</span></div>
+  <div class="ex-body">
+    <p>
+      Create a login role <code>lab_16_app</code> that always gets <code>lock_timeout = 2s</code> and
+      <code>idle_in_transaction_session_timeout = 1min</code>, stored as role settings. Check it with
+      <code>./pg check 16 1</code>.
+    </p>
+  </div>
+  <figure class="code" data-lang="sql">
+  <figcaption><span class="path">exercises/16/1.sql</span><span class="grow"></span><span class="lang">your starting file</span></figcaption>
+<pre><code>-- Create a login role lab_16_app. Whenever it connects, a statement that waits
+-- longer than 2 seconds for a lock must give up (lock_timeout = 2s), and a session
+-- that sits idle inside a transaction for more than 1 minute must be ended
+-- (idle_in_transaction_session_timeout = 1min). Store both as settings of the role.
+-- Then run ./pg check 16 1.</code></pre>
+</figure>
+  <details><summary>Hint</summary><p><code>ALTER ROLE name SET parameter = value</code> stores a default for every new session of that role. The settings appear in <code>pg_roles.rolconfig</code>.</p></details>
+  <details class="solution"><summary>Show a model solution for exercise 1 (try first!)</summary>
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">solutions/16/1.sql</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create role lab_16_app login password 'lab-only';
+alter role lab_16_app set lock_timeout = '2s';
+alter role lab_16_app set idle_in_transaction_session_timeout = '1min';</code></pre>
+</figure>
+</details>
+</section>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 2</span><span class="grow"></span><span class="lvl">intermediate</span></div>
+  <div class="ex-body">
+    <p>
+      Build a small job queue: a table <code>shop.lab_jobs</code> with five jobs, and a function
+      <code>shop.lab_claim_job()</code> that claims the lowest-numbered unclaimed job and returns its id (or
+      <code>NULL</code> when none is left). It must be safe for many concurrent workers. Check it with
+      <code>./pg check 16 2</code>.
+    </p>
+  </div>
+  <figure class="code" data-lang="sql">
+  <figcaption><span class="path">exercises/16/2.sql</span><span class="grow"></span><span class="lang">your starting file</span></figcaption>
+<pre><code>-- Build a tiny job queue in the shop database.
+-- 1. Create table shop.lab_jobs(id integer identity primary key, payload text not null,
+--    claimed_at timestamptz) and insert five jobs with payloads job-1 ... job-5.
+-- 2. Create function shop.lab_claim_job() returning integer. Each call claims the
+--    unclaimed job with the lowest id (sets claimed_at) and returns its id, or returns
+--    NULL when nothing is left. It must be safe to call from many workers at once.
+-- Then run ./pg check 16 2.</code></pre>
+</figure>
+  <details><summary>Hint</summary><p>Use the pattern from section 4: an <code>UPDATE … WHERE id = (SELECT … FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING id</code>. A SQL function whose last statement returns one row gives you that value; with no row it returns NULL.</p></details>
+  <details class="solution"><summary>Show a model solution for exercise 2 (try first!)</summary>
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">solutions/16/2.sql</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create table shop.lab_jobs (
+  id         integer generated always as identity primary key,
+  payload    text not null,
+  claimed_at timestamptz
+);
+insert into shop.lab_jobs (payload) select 'job-' || g from generate_series(1, 5) g;
+
+create function shop.lab_claim_job() returns integer
+language sql as $$
+  update shop.lab_jobs
+  set claimed_at = clock_timestamp()
+  where id = (select id
+              from shop.lab_jobs
+              where claimed_at is null
+              order by id
+              for update skip locked
+              limit 1)
+  returning id
+$$;</code></pre>
+</figure>
+</details>
+</section>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 3</span><span class="grow"></span><span class="lvl">challenge</span></div>
+  <div class="ex-body">
+    <p>
+      Add the foreign key <code>lab_events_customer_fk</code> from <code>analytics.events(customer_id)</code> to
+      <code>shop.customers(id)</code> the safe way for a busy table, so it ends up validated. Then create the index
+      <code>events_customer_id_idx</code> on <code>analytics.events(customer_id)</code> without blocking writers.
+      Check it with <code>./pg check 16 3</code>.
+    </p>
+    <p>The index step can take a few seconds on 1 million rows.</p>
+  </div>
+  <figure class="code" data-lang="sql">
+  <figcaption><span class="path">exercises/16/3.sql</span><span class="grow"></span><span class="lang">your starting file</span></figcaption>
+<pre><code>-- Add a foreign key lab_events_customer_fk from analytics.events(customer_id) to
+-- shop.customers(id) the safe way for a big, busy table: in two steps, so the
+-- long check does not block writers. Then create an index named
+-- events_customer_id_idx on analytics.events(customer_id) without blocking writes.
+-- Then run ./pg check 16 3.</code></pre>
+</figure>
+  <details><summary>Hint</summary><p>Two statements for the constraint (<code>NOT VALID</code>, then <code>VALIDATE CONSTRAINT</code>), and <code>CREATE INDEX CONCURRENTLY</code> for the index. Run the file with the checker, which sends it to <code>psql</code> without wrapping it in a transaction, so <code>CONCURRENTLY</code> is allowed.</p></details>
+  <details class="solution"><summary>Show a model solution for exercise 3 (try first!)</summary>
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">solutions/16/3.sql</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>alter table analytics.events
+  add constraint lab_events_customer_fk
+  foreign key (customer_id) references shop.customers (id) not valid;
+alter table analytics.events validate constraint lab_events_customer_fk;
+create index concurrently events_customer_id_idx on analytics.events (customer_id);</code></pre>
+</figure>
+</details>
+</section>
+
+<h2 id="summary">Summary</h2>
+<ul>
+  <li>Row locks live in the row header and last until the transaction ends. Plain reads take no row locks and never wait for writers.</li>
+  <li>Prefer the weakest lock that works: <code>FOR NO KEY UPDATE</code> over <code>FOR UPDATE</code>. Prefer one atomic <code>UPDATE</code> over read-then-write.</li>
+  <li><code>SKIP LOCKED</code> makes a queue table, <code>NOWAIT</code> and <code>lock_timeout</code> make a session fail fast instead of hang.</li>
+  <li><code>pg_blocking_pids()</code> and <code>pg_locks</code> show who blocks whom. The usual culprit is a session that is idle in a transaction.</li>
+  <li>A deadlock (SQLSTATE 40P01) is a cycle of waits. Lock in a consistent order, and retry the whole transaction.</li>
+  <li>Most <code>ALTER TABLE</code> forms take <code>AccessExclusiveLock</code>, and a waiting request blocks everyone behind it. Use <code>lock_timeout</code>, <code>NOT VALID</code> + <code>VALIDATE</code>, and <code>CREATE INDEX CONCURRENTLY</code>.</li>
+  <li>Advisory locks are locks on numbers you pick. Prefer the transaction-level form.</li>
+</ul>
+
+<h2 id="next">Looking ahead</h2>
+<p>
+  Every <code>UPDATE</code> leaves old row versions behind, and long transactions keep them from being cleaned
+  up. <a href="17-vacuum-and-bloat.html">Lesson 17</a> explains how vacuum removes those dead rows, what bloat is,
+  and how autovacuum is tuned.
+</p>
+<div class="lesson-done" data-lesson="16-locking"></div>
+<nav class="pager"><a class="prev" href="../lessons/15-transactions-and-mvcc.html"><span class="dir">Previous</span><span class="lbl">15 · Transactions and MVCC</span></a><a class="next" href="../lessons/17-vacuum-and-bloat.html"><span class="dir">Next</span><span class="lbl">17 · Vacuum, bloat and autovacuum</span></a></nav>
+</main>
+<aside class="toc" aria-label="On this page"></aside>
+</div>
+</div>
+<script src="../assets/js/search-index.js"></script>
+<script src="../assets/js/mini-seed.js"></script>
+<script src="../assets/js/course.js"></script>
+</body>
+</html>

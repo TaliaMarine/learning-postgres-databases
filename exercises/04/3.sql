@@ -1,0 +1,8 @@
+-- Set up an owner, a viewer and a lead:
+--   * lab_04_owner  (login) may create tables in schema shop
+--   * lab_04_viewer (cannot log in) may use schema shop, and must be able to
+--     SELECT from every table that lab_04_owner creates in schema shop LATER
+--     (but not from tables that already exist, such as shop.orders)
+--   * lab_04_lead   (login) may use schema shop, may read shop.orders, and may
+--     pass that SELECT privilege on to other roles
+-- Then run ./pg check 04 3.

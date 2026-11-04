@@ -1,0 +1,394 @@
+<p class="lede">
+  This is the last lesson, and it has one job: build a small service database from a blank scratch database, using
+  what you learned in the other lessons. You will create roles and a locked-down schema, load data and add the one index
+  its busiest query needs, then take a backup, restore it somewhere else, and prove the copy is identical. It is longer
+  than the other lessons on purpose. There is little new here to read, and a lot to do.
+</p>
+
+<h2 id="goals">Learning goals</h2>
+<ul>
+  <li>Lay out a service database with an owner role, an application role and a read-only role, and give each only the privileges it needs.</li>
+  <li>Design tables with keys, foreign keys and check constraints that reject bad data.</li>
+  <li>Load test data in bulk with <code>generate_series</code>, and index for one real query with a partial index.</li>
+  <li>Read an <code>EXPLAIN</code> plan to confirm the index is used and no sort remains.</li>
+  <li>Take a <code>pg_dump</code> backup, restore it into a blank database, and compare row counts and fingerprints.</li>
+  <li>Run a check that proves your work, and clean up everything you created.</li>
+</ul>
+
+<h2 id="lab">Set up for this lesson</h2>
+<p>
+  The service is a tiny support-desk database: <em>agents</em> who work on <em>tickets</em>. You build it in a new
+  database named <code>lab_27_service</code>, never in <code>shop</code>. Roles and databases are cluster-wide, so every
+  name carries the <code>lab_27_</code> prefix and the checker removes them all when it is done. The three parts are
+  independent: each file begins from a blank state. Part 1 creates everything, and parts 2 and 3 give you a short setup
+  block to paste so they do not depend on the previous part. Start the container with <code>./pg up</code>.
+</p>
+
+<figure class="code" data-lang="bash">
+  <figcaption><span class="path">terminal</span><span class="grow"></span><span class="lang">bash</span></figcaption>
+<pre><code>./pg status
+./pg exec pg_dump --version</code></pre>
+</figure>
+
+<p>
+  The browser playground cannot create databases or roles that outlive the page, and it has no <code>pg_dump</code>, so
+  this lesson has no playground. Everything runs in Docker. Because the files contain several steps, run them with
+  <code>./pg run</code> to see every statement's output, or open them in <code>./pg psql</code> and paste one step at a time.
+</p>
+
+<h2 id="plan">1. The design</h2>
+
+<p>The service has three kinds of user, which map to three roles:</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Role</th><th class="wrap">Can log in?</th><th class="wrap">Purpose</th><th class="wrap">Privileges</th></tr></thead>
+  <tbody>
+    <tr><td><code>lab_27_owner</code></td><td>no</td><td class="wrap">Owns the database, the schema and every table. Migrations run as this role.</td><td class="wrap">Everything, on its own objects</td></tr>
+    <tr><td><code>lab_27_app</code></td><td>yes</td><td class="wrap">The application's own connection</td><td class="wrap"><code>SELECT</code>, <code>INSERT</code>, <code>UPDATE</code>, <code>DELETE</code> on the two tables; no <code>CREATE</code>, no <code>DROP</code></td></tr>
+    <tr><td><code>lab_27_reader</code></td><td>yes</td><td class="wrap">Reports and dashboards</td><td class="wrap"><code>SELECT</code> only</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>
+  Separating the owner from the application is the layout from <a href="05-security-and-rls.html">lesson 5</a>. If the
+  application connects as the owner, one SQL injection can drop your tables. If it connects as <code>lab_27_app</code>,
+  the worst it can do is what the application could do anyway.
+</p>
+
+<p>The data is two tables:</p>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">the model</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code>tickets.agents                      tickets.tickets
+  id         identity, PK             id          identity, PK
+  email      text, unique, not null   agent_id    integer, not null, FK → agents(id)
+  full_name  text, not null           title       text, not null
+                                      status      text, not null, default 'open', in ('open','closed')
+                                      priority    smallint, not null, default 2, between 1 and 3
+                                      created_at  timestamptz, not null, default now()</code></pre>
+</figure>
+
+<p>
+  The <code>check</code> constraints keep bad values out of the table no matter which program writes to it
+  (<a href="07-constraints-and-design.html">lesson 7</a>). Text with a fixed set of values would also fit an enum
+  type (<a href="06-data-types.html">lesson 6</a>); a <code>check</code> is easier to change later.
+</p>
+
+<h2 id="part1">2. Part 1: roles, database and schema</h2>
+
+<p>
+  Work in this order, because each step needs the previous one. Roles come first (they are cluster-wide). The database
+  comes next. <code>CREATE DATABASE</code> cannot run inside a transaction block, so give it its own statement. Then
+  connect to the new database, and create the schema and tables as the owner, so the owner owns them. Finally grant.
+</p>
+
+<ol>
+  <li><strong>Roles:</strong> <code>create role lab_27_owner nologin;</code> and two login roles with a password. The password <code>lab-only</code> is for the local container only.</li>
+  <li><strong>Database:</strong> <code>create database lab_27_service owner lab_27_owner template template0;</code> (<code>template0</code> is always blank). A new database lets <code>PUBLIC</code> connect to it, so <code>revoke connect on database … from public</code>, then grant <code>connect</code> back to the two login roles (<a href="04-privileges-and-grants.html">lesson 4</a>).</li>
+  <li><strong>Switch:</strong> <code>\c lab_27_service</code> in psql. This works in a file run by <code>./pg run</code> too.</li>
+  <li><strong>Objects as the owner:</strong> <code>set role lab_27_owner;</code> then <code>create schema tickets;</code> and the two tables. <code>reset role;</code> afterwards. Objects are owned by whoever creates them, which is why you switch first (<a href="02-databases-and-schemas.html">lesson 2</a>).</li>
+  <li><strong>Grants:</strong> <code>usage</code> on the schema, then table privileges, to each login role. Tables with an identity column need no separate sequence grant: the <code>INSERT</code> privilege is enough.</li>
+</ol>
+
+<div class="note warn">
+  <span class="note-title">Why not just create everything as postgres?</span>
+  <p>
+    Then <code>postgres</code> owns the schema and the tables, and the owner role owns nothing. The next time someone runs a
+    migration as <code>lab_27_owner</code> it fails with <em>must be owner of table</em>. Decide who owns what before you
+    create anything, because changing it later means <code>ALTER … OWNER TO</code> on every object.
+  </p>
+</div>
+
+<div class="note tip">
+  <span class="note-title">Check as you go</span>
+  <p>
+    After the grants, test from the outside. <code>./pg psql-as lab_27_reader lab_27_service</code> opens a session as the
+    reader (it works because the container trusts local connections). Try <code>select count(*) from tickets.tickets;</code>
+    and then an <code>update</code>, and read the error. <code>\dp tickets.*</code> shows the access privileges you set.
+  </p>
+</div>
+
+<h2 id="part2">3. Part 2: data and the index the busy query needs</h2>
+
+<p>
+  A support screen shows an agent the ten newest open tickets assigned to them. It runs this query all day:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">the busy query</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select id, title
+from tickets.tickets
+where status = 'open' and agent_id = 3
+order by created_at desc
+limit 10;</code></pre>
+</figure>
+
+<p>
+  Load 20,000 tickets in one statement with <code>generate_series</code> (<a href="09-changing-data.html">lesson 9</a>), so
+  that the table is big enough for the planner to care. In the data recipe, one ticket in 47 is open and the rest are
+  closed, which is how a support desk looks: a long history and a short list of live work. Without an index the planner
+  reads the whole table, and sorts what it found:
+</p>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">EXPLAIN (ANALYZE, COSTS OFF, TIMING OFF, SUMMARY OFF), before the index</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code> Limit (actual rows=10.00 loops=1)
+   Buffers: shared hit=167
+   ->  Sort (actual rows=10.00 loops=1)
+         Sort Key: created_at DESC
+         Sort Method: top-N heapsort  Memory: 26kB
+         Buffers: shared hit=167
+         ->  Seq Scan on tickets (actual rows=85.00 loops=1)
+               Filter: ((status = 'open'::text) AND (agent_id = 3))
+               Rows Removed by Filter: 19915
+               Buffers: shared hit=167</code></pre>
+</figure>
+
+<p>
+  It reads 20,000 rows to keep 85. A partial index (<a href="12-indexes.html">lesson 12</a>) fits this shape well:
+  the <code>WHERE status = 'open'</code> condition is in the index definition, so only the 425 open tickets are
+  stored, and the key columns are in the order the query needs them: first the one it compares (<code>agent_id</code>),
+  then the one it sorts by (<code>created_at desc</code>). The index then returns the rows already sorted:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">the shape of the index</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create index tickets_open_by_agent_idx
+  on tickets.tickets (agent_id, created_at desc)
+  where status = 'open';</code></pre>
+</figure>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">the same EXPLAIN, after the index and an ANALYZE</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code> Limit (actual rows=10.00 loops=1)
+   Buffers: shared hit=10 read=2
+   ->  Index Scan using tickets_open_by_agent_idx on tickets (actual rows=10.00 loops=1)
+         Index Cond: (agent_id = 3)
+         Index Searches: 1
+         Buffers: shared hit=10 read=2</code></pre>
+</figure>
+
+<p>
+  No <code>Seq Scan</code>, no <code>Sort</code>, and 12 buffers instead of 167. The index file is 32 kB, against 456 kB
+  for the table's primary key, because it holds only the open tickets. Exercise 2 asks you to build exactly this.
+  Finish by running <code>ANALYZE</code> so that the planner's statistics reflect the loaded data
+  (<a href="13-explain-and-planner.html">lesson 13</a>).
+</p>
+
+<div class="note info">
+  <span class="note-title">Why not index status too?</span>
+  <p>
+    <code>status</code> has only two values, so an ordinary index on it is nearly useless. The partial index
+    answers the question "which tickets are open?" without storing the 19,000 that are not. The rule to remember: a
+    partial index is smallest when the condition matches a small share of the rows.
+  </p>
+</div>
+
+<h2 id="part3">4. Part 3: a backup you have proved</h2>
+
+<p>
+  A backup is real only after a restore (<a href="23-backup-and-recovery.html">lesson 23</a>). You will take a custom-format
+  dump of the service database, restore it into a second, blank database, and then compare the two. A <em>fingerprint</em>
+  is a hash over all the rows of a table, in a fixed order. If the counts and the fingerprints match, the copy is the same:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">a count and a fingerprint of one table</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select count(*) as src_agents_rows,
+       md5(string_agg(id || ':' || email || ':' || full_name, ',' order by id)) as src_agents_fp
+from tickets.agents \gset</code></pre>
+</figure>
+
+<p>
+  <code>\gset</code> is a psql command that runs the query and stores each column in a psql variable named after the column
+  (<code>:src_agents_rows</code> and <code>:'src_agents_fp'</code> afterwards; the quotes turn the value into a string
+  literal). The variables stay with the psql session when you switch databases with <code>\c</code>, so you can compute
+  the numbers in the source and use them in the copy. Here is the overall flow of part 3:
+</p>
+
+<figure class="dia">
+  <div class="dia-hold">
+    <svg class="d" viewBox="0 0 860 200" role="img" aria-labelledby="cap-t cap-d">
+      <title id="cap-t">Backup and verify: dump the source, restore into a blank database, compare</title>
+      <desc id="cap-d">The source database lab_27_service is dumped to a file. The file is restored into the blank database lab_27_verify. Counts and fingerprints from the source are compared with those computed on the restored copy, and the result is stored in restore_report.</desc>
+      <defs>
+        <marker id="ca" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z"/></marker>
+      </defs>
+      <rect class="box accent" x="30" y="60" width="180" height="80" rx="10"/>
+      <text class="hd ctr" x="120" y="96">lab_27_service</text>
+      <text class="lbl ctr" x="120" y="118">source</text>
+      <rect class="box sunken" x="340" y="70" width="170" height="60" rx="8"/>
+      <text class="hd ctr" x="425" y="96">dump file</text>
+      <text class="lbl ctr" x="425" y="116">pg_dump -Fc</text>
+      <rect class="box teal" x="640" y="60" width="190" height="80" rx="10"/>
+      <text class="hd ctr" x="735" y="96">lab_27_verify</text>
+      <text class="lbl ctr" x="735" y="118">restored copy</text>
+      <path class="line" d="M210 100 L340 100" marker-end="url(#ca)"/>
+      <path class="line" d="M510 100 L640 100" marker-end="url(#ca)"/>
+      <text class="mut tiny" x="275" y="90" text-anchor="middle">1. dump</text>
+      <text class="mut tiny" x="575" y="90" text-anchor="middle">2. pg_restore</text>
+      <path class="line dash amber" d="M120 60 L120 24 L735 24 L735 60" marker-end="url(#ca)"/>
+      <text class="mut tiny" x="428" y="16" text-anchor="middle">3. compare counts and fingerprints → public.restore_report</text>
+    </svg>
+  </div>
+  <figcaption>The proof is the comparison, not the existence of a dump file.</figcaption>
+</figure>
+
+<p>
+  Inside a file you can run the shell commands with psql's <code>\!</code>. Set <code>PGUSER</code> first so that
+  <code>pg_dump</code> and <code>pg_restore</code> connect as <code>postgres</code> (<a href="23-backup-and-recovery.html">lesson 23</a>
+  explains why):
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">dump, restore with --exit-on-error, remove the file</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>\setenv PGUSER postgres
+\! pg_dump -Fc -d lab_27_service -f /tmp/lab_27_3.dump
+\c postgres
+create database lab_27_verify template template0;
+\! pg_restore -d lab_27_verify --exit-on-error /tmp/lab_27_3.dump
+\! rm -f /tmp/lab_27_3.dump</code></pre>
+</figure>
+
+<div class="note warn">
+  <span class="note-title">What this restore does not prove</span>
+  <p>
+    It proves that this dump restores into an empty database on the same server, with the same roles available. It does
+    not prove that the roles exist on a new machine (you need <code>pg_dumpall --globals-only</code> for that), that your
+    WAL archive is complete, or how long a restore of production data takes. The habit matters more than this one test.
+  </p>
+</div>
+
+<h2 id="clean">5. Cleaning up</h2>
+
+<p>
+  Databases and roles are not removed when you close psql. The checker removes everything named <code>lab_*</code> for you,
+  and this is how to do it by hand after your own experiments:
+</p>
+
+<figure class="code" data-lang="bash">
+  <figcaption><span class="path">terminal</span><span class="grow"></span><span class="lang">bash</span></figcaption>
+<pre><code>./pg sql "drop database if exists lab_27_service with (force)" postgres
+./pg sql "drop database if exists lab_27_verify with (force)" postgres
+./pg sql "drop role if exists lab_27_app" postgres
+./pg sql "drop role if exists lab_27_reader" postgres
+./pg sql "drop role if exists lab_27_owner" postgres
+./pg exec rm -f /tmp/lab_27_3.dump</code></pre>
+</figure>
+
+<p>
+  Drop the roles <em>after</em> the databases: a role that still owns objects cannot be dropped
+  (<a href="03-roles-and-users.html">lesson 3</a>).
+</p>
+
+<h2 id="when">When to use, when not to</h2>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Situation</th><th class="wrap">✅ Do this</th><th class="wrap">❌ Not this</th></tr></thead>
+  <tbody>
+    <tr><td class="wrap">Starting a new service database</td><td class="wrap">An owner role that cannot log in, an application role and a read-only role, in a dedicated database</td><td class="wrap">One superuser connection shared by everyone</td></tr>
+    <tr><td class="wrap">Keeping invalid values out</td><td class="wrap">Constraints in the table: keys, <code>NOT NULL</code>, <code>CHECK</code>, foreign keys</td><td class="wrap">Validation only in the application</td></tr>
+    <tr><td class="wrap">Indexing for one hot query that touches a small share of rows</td><td class="wrap">A partial index with the filter in <code>WHERE</code> and the sort column in the key</td><td class="wrap">Indexes on every column "to be safe"</td></tr>
+    <tr><td class="wrap">Believing a backup works</td><td class="wrap">Restore into a blank database and compare counts and fingerprints, on a schedule</td><td class="wrap">Checking that the dump file is not empty</td></tr>
+    <tr><td class="wrap">Practising any of this</td><td class="wrap">A scratch database named <code>lab_*</code></td><td class="wrap">The <code>shop</code> database</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="inspect">Inspect it</h2>
+
+<p>When your part 1 is done, this query summarises the layout, using the catalogs you met in lessons 2 to 4:</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">run it in lab_27_service</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select c.relname as table_name,
+       c.relowner::regrole as owner,
+       c.relacl as privileges
+from pg_class c
+where c.relnamespace = 'tickets'::regnamespace and c.relkind = 'r'
+order by c.relname;</code></pre>
+</figure>
+
+<p>
+  <code>relacl</code> lists each grantee as <code>role=privileges/grantor</code>. The letters are
+  <code>a</code> = <code>INSERT</code>, <code>r</code> = <code>SELECT</code>, <code>w</code> = <code>UPDATE</code>,
+  <code>d</code> = <code>DELETE</code>. With the solution, <code>lab_27_app=arwd/lab_27_owner</code> and
+  <code>lab_27_reader=r/lab_27_owner</code>. The owner holds <code>arwdDxtm</code>, every table privilege.
+</p>
+<p>
+  Two quick tests as the application role show the layout working. An attempt to change the table's structure fails with
+  <code>ERROR:  must be owner of table agents</code>, and the reader's <code>update</code> fails with
+  <code>ERROR:  permission denied for table tickets</code>.
+</p>
+
+<h2 id="exercises">Your turn</h2>
+
+<p>
+  Three exercises, in order of the walkthrough above. Each file is run in a fresh copy of the course database, and the
+  checker removes the <code>lab_*</code> objects afterwards. Expect each one to take longer than the exercises in earlier
+  lessons: 20 to 40 minutes is normal.
+</p>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 1</span><span class="grow"></span><span class="lvl">basic</span></div>
+  <div class="ex-body">
+    <p>
+      Build the roles, the database <code>lab_27_service</code>, the schema <code>tickets</code> with its two tables, and
+      the privileges, exactly as the file describes. The check tests what each role can and cannot do.
+    </p>
+    <p>Open <code>exercises/27/1.sql</code>, write your answer, then run <code>./pg check 27 1</code>.</p>
+  </div>
+  {{stub 27 1}}
+  <details><summary>Hint</summary><p>Order matters: roles, <code>create database</code>, <code>revoke connect … from public</code>, <code>\c lab_27_service</code>, <code>set role lab_27_owner</code>, schema and tables, grants, <code>reset role</code>. A <code>default</code> and a <code>check</code> can sit on the same column.</p></details>
+  {{solution 27 1}}
+</section>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 2</span><span class="grow"></span><span class="lvl">intermediate</span></div>
+  <div class="ex-body">
+    <p>
+      Load the data from the recipe and create the one partial index that lets the support query read its ten rows in
+      order, with an index scan and no <code>Sort</code>. Then refresh the statistics.
+    </p>
+    <p>Open <code>exercises/27/2.sql</code>, write your answer, then run <code>./pg check 27 2</code>.</p>
+  </div>
+  {{stub 27 2}}
+  <details><summary>Hint</summary><p>The index has two key columns and a <code>where status = 'open'</code> clause. Put the column the query <em>compares</em> first and the column it <em>sorts by</em> second. Check your index with <code>explain</code> before you run the check.</p></details>
+  {{solution 27 2}}
+</section>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 3</span><span class="grow"></span><span class="lvl">challenge</span></div>
+  <div class="ex-body">
+    <p>
+      Fingerprint the source tables, dump the database, restore it into a blank <code>lab_27_verify</code>, and store a
+      comparison report in <code>public.restore_report</code>. The check recomputes everything itself, so a report with
+      typed-in values will not pass.
+    </p>
+    <p>Open <code>exercises/27/3.sql</code>, write your answer, then run <code>./pg check 27 3</code>.</p>
+  </div>
+  {{stub 27 3}}
+  <details><summary>Hint</summary><p>Use <code>\gset</code> to keep the source numbers in psql variables, and <code>:'name'</code> to use a text variable in SQL. <code>\c</code> keeps variables when you switch databases. <code>create table … as</code> can build the report from a <code>with</code> query that joins the restored values to the source values.</p></details>
+  {{solution 27 3}}
+</section>
+
+<h2 id="summary">Summary</h2>
+<ul>
+  <li>A service database has an owner role that creates objects, an application role with data privileges only, and a read-only role. Take <code>CONNECT</code> away from <code>PUBLIC</code>.</li>
+  <li>Constraints in the table protect the data from every program that writes to it.</li>
+  <li>Bulk-load with <code>generate_series</code>, then build the smallest index that serves the hot query: a partial index whose key matches the filter and the sort.</li>
+  <li>Confirm an index with <code>EXPLAIN</code>: an index scan, no <code>Sort</code>, and fewer buffers.</li>
+  <li>A backup is proved by restoring it into a blank database and comparing counts and fingerprints.</li>
+  <li>Drop every scratch database and role you create. Everything named <code>lab_*</code> is fair game for the checker.</li>
+</ul>
+
+<h2 id="next">Looking ahead</h2>
+<p>
+  That completes the course. The annexes collect what you will keep reaching for:
+  <a href="../appendices/c-catalog-queries.html">catalog and diagnostic queries</a>,
+  <a href="../appendices/e-troubleshooting.html">troubleshooting</a> and
+  <a href="../appendices/f-whats-next.html">what to learn next</a>.
+</p>

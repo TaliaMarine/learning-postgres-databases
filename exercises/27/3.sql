@@ -1,0 +1,40 @@
+-- CAPSTONE, part 3 of 3: a backup you have proved. Every check starts from a
+-- fresh copy of the course database, so this part brings its own starting point.
+-- Paste this setup at the top of your file:
+--
+--   create database lab_27_service template template0;
+--   \c lab_27_service
+--   create schema tickets;
+--   create table tickets.agents (id integer generated always as identity primary key,
+--     email text not null unique, full_name text not null);
+--   create table tickets.tickets (id integer generated always as identity primary key,
+--     agent_id integer not null references tickets.agents (id), title text not null,
+--     status text not null default 'open' check (status in ('open', 'closed')),
+--     priority smallint not null default 2 check (priority between 1 and 3),
+--     created_at timestamptz not null default now());
+--   insert into tickets.agents (email, full_name)
+--     select 'agent' || g || '@example.com', 'Agent ' || g from generate_series(1, 5) g;
+--   insert into tickets.tickets (agent_id, title, status, priority, created_at)
+--     select 1 + g % 5, 'Ticket ' || g, case when g % 47 = 0 then 'open' else 'closed' end,
+--            (1 + g % 3)::smallint, timestamptz '2026-01-01 00:00+00' + g * interval '10 minutes'
+--     from generate_series(1, 2000) g;
+--
+-- Then:
+--   1. Compute, in lab_27_service, a row count and an md5 fingerprint for each
+--      of tickets.agents and tickets.tickets, and keep the four values in psql
+--      variables with \gset. A fingerprint is
+--        md5(string_agg(<all columns joined with ':'>, ',' order by id))
+--   2. Dump lab_27_service in custom format to /tmp/lab_27_3.dump (\setenv
+--      PGUSER postgres, then \! pg_dump ...).
+--   3. Create the empty database lab_27_verify from template0 and restore the
+--      dump into it, stopping at the first error.
+--   4. In lab_27_verify, create the table public.restore_report with one row
+--      per table and the columns
+--        table_name, source_rows, restored_rows, source_fingerprint,
+--        restored_fingerprint, matches (boolean)
+--      where the restored_* values are computed from the restored tables and
+--      the source_* values are the ones you kept in step 1. matches says
+--      whether both the count and the fingerprint are equal.
+--   5. Remove the dump file.
+-- Then run ./pg check 27 3.
+

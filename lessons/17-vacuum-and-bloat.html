@@ -1,0 +1,641 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vacuum, bloat and autovacuum &mdash; Learning PostgreSQL</title>
+<meta name="description" content="Dead tuples, HOT updates, autovacuum tuning, wraparound and how to measure bloat.">
+<link rel="stylesheet" href="../assets/css/course.css">
+</head>
+<body data-root="../" data-page="17-vacuum-and-bloat">
+<a class="skip-link" href="#content">Skip to content</a>
+<header class="topbar">
+  <button class="icon-btn menu-btn" type="button" aria-label="Toggle navigation" aria-expanded="false" aria-controls="sidebar">&#9776;</button>
+  <a class="brand" href="../index.html"><span class="mark pgm">PG</span> Learning PostgreSQL <span class="sub">PostgreSQL 18</span></a>
+  <span class="spacer"></span>
+  <div class="search" role="search">
+    <span class="glyph" aria-hidden="true">&#9906;</span>
+    <input type="search" placeholder="Search the course&#8230;" aria-label="Search the course" autocomplete="off" spellcheck="false">
+    <kbd>/</kbd>
+    <div class="search-results" role="listbox"></div>
+  </div>
+  <nav class="topbar-links">
+    <a class="hide-sm" href="../appendices/d-glossary.html">Glossary</a>
+    <a class="hide-sm" href="../appendices/b-psql.html">psql</a>
+  </nav>
+  <button class="icon-btn theme-btn" type="button" aria-label="Toggle theme">&#9790;</button>
+</header>
+<div class="scrim"></div>
+<div class="shell">
+<nav class="sidebar" id="sidebar" aria-label="Course contents">
+  <h4>Start here</h4>
+  <ol>
+    <li><a href="../start/setup.html" data-page="setup"><span class="n">00</span><span>Set up your lab</span></a></li>
+  </ol>
+  <h4>Part 1 — Foundations: the server, databases, schemas and roles</h4>
+  <ol>
+    <li><a href="../lessons/01-architecture.html" data-page="01-architecture"><span class="n">01</span><span>How PostgreSQL is built</span></a></li>
+    <li><a href="../lessons/02-databases-and-schemas.html" data-page="02-databases-and-schemas"><span class="n">02</span><span>Databases and schemas</span></a></li>
+    <li><a href="../lessons/03-roles-and-users.html" data-page="03-roles-and-users"><span class="n">03</span><span>Roles and users</span></a></li>
+    <li><a href="../lessons/04-privileges-and-grants.html" data-page="04-privileges-and-grants"><span class="n">04</span><span>Privileges and grants</span></a></li>
+    <li><a href="../lessons/05-security-and-rls.html" data-page="05-security-and-rls"><span class="n">05</span><span>Hardening and row-level security</span></a></li>
+  </ol>
+  <h4>Part 2 — Modelling and SQL in depth</h4>
+  <ol>
+    <li><a href="../lessons/06-data-types.html" data-page="06-data-types"><span class="n">06</span><span>Data types</span></a></li>
+    <li><a href="../lessons/07-constraints-and-design.html" data-page="07-constraints-and-design"><span class="n">07</span><span>Constraints and schema design</span></a></li>
+    <li><a href="../lessons/08-advanced-queries.html" data-page="08-advanced-queries"><span class="n">08</span><span>Advanced queries</span></a></li>
+    <li><a href="../lessons/09-changing-data.html" data-page="09-changing-data"><span class="n">09</span><span>Changing data safely</span></a></li>
+    <li><a href="../lessons/10-json-and-arrays.html" data-page="10-json-and-arrays"><span class="n">10</span><span>JSONB and arrays</span></a></li>
+    <li><a href="../lessons/11-text-search.html" data-page="11-text-search"><span class="n">11</span><span>Text search and pattern matching</span></a></li>
+  </ol>
+  <h4>Part 3 — Performance</h4>
+  <ol>
+    <li><a href="../lessons/12-indexes.html" data-page="12-indexes"><span class="n">12</span><span>Indexes</span></a></li>
+    <li><a href="../lessons/13-explain-and-planner.html" data-page="13-explain-and-planner"><span class="n">13</span><span>EXPLAIN and the planner</span></a></li>
+    <li><a href="../lessons/14-query-tuning.html" data-page="14-query-tuning"><span class="n">14</span><span>A query-tuning workflow</span></a></li>
+  </ol>
+  <h4>Part 4 — Transactions and concurrency</h4>
+  <ol>
+    <li><a href="../lessons/15-transactions-and-mvcc.html" data-page="15-transactions-and-mvcc"><span class="n">15</span><span>Transactions and MVCC</span></a></li>
+    <li><a href="../lessons/16-locking.html" data-page="16-locking"><span class="n">16</span><span>Locking and concurrency</span></a></li>
+    <li><a href="../lessons/17-vacuum-and-bloat.html" data-page="17-vacuum-and-bloat"><span class="n">17</span><span>Vacuum, bloat and autovacuum</span></a></li>
+  </ol>
+  <h4>Part 5 — Programming the database</h4>
+  <ol>
+    <li><a href="../lessons/18-views-and-functions.html" data-page="18-views-and-functions"><span class="n">18</span><span>Views, functions and procedures</span></a></li>
+    <li><a href="../lessons/19-triggers-and-events.html" data-page="19-triggers-and-events"><span class="n">19</span><span>Triggers, LISTEN/NOTIFY and audit</span></a></li>
+    <li><a href="../lessons/20-partitioning.html" data-page="20-partitioning"><span class="n">20</span><span>Partitioning</span></a></li>
+  </ol>
+  <h4>Part 6 — Operating PostgreSQL</h4>
+  <ol>
+    <li><a href="../lessons/21-configuration.html" data-page="21-configuration"><span class="n">21</span><span>Configuration and tuning</span></a></li>
+    <li><a href="../lessons/22-wal-and-durability.html" data-page="22-wal-and-durability"><span class="n">22</span><span>WAL, checkpoints and durability</span></a></li>
+    <li><a href="../lessons/23-backup-and-recovery.html" data-page="23-backup-and-recovery"><span class="n">23</span><span>Backup, restore and PITR</span></a></li>
+    <li><a href="../lessons/24-replication.html" data-page="24-replication"><span class="n">24</span><span>Replication and high availability</span></a></li>
+    <li><a href="../lessons/25-monitoring.html" data-page="25-monitoring"><span class="n">25</span><span>Monitoring and diagnostics</span></a></li>
+    <li><a href="../lessons/26-connections-and-upgrades.html" data-page="26-connections-and-upgrades"><span class="n">26</span><span>Connections, pooling, extensions and upgrades</span></a></li>
+  </ol>
+  <h4>Part 7 — Putting it together</h4>
+  <ol>
+    <li><a href="../lessons/27-capstone.html" data-page="27-capstone"><span class="n">27</span><span>Capstone project</span></a></li>
+  </ol>
+  <h4>Annexes</h4>
+  <ol>
+    <li><a href="../appendices/a1-select-basics.html" data-page="a1-select-basics"><span class="n">A1</span><span>SELECT, filtering and sorting</span></a></li>
+    <li><a href="../appendices/a2-joins.html" data-page="a2-joins"><span class="n">A2</span><span>Joins and combining tables</span></a></li>
+    <li><a href="../appendices/a3-aggregation.html" data-page="a3-aggregation"><span class="n">A3</span><span>Aggregation and grouping</span></a></li>
+    <li><a href="../appendices/a4-subqueries-and-ctes.html" data-page="a4-subqueries-and-ctes"><span class="n">A4</span><span>Subqueries and CTEs</span></a></li>
+    <li><a href="../appendices/a5-ddl-and-dml.html" data-page="a5-ddl-and-dml"><span class="n">A5</span><span>Creating and changing things</span></a></li>
+    <li><a href="../appendices/b-psql.html" data-page="b-psql"><span class="n">B</span><span>psql cheat sheet</span></a></li>
+    <li><a href="../appendices/c-catalog-queries.html" data-page="c-catalog-queries"><span class="n">C</span><span>Catalog and diagnostic queries</span></a></li>
+    <li><a href="../appendices/d-glossary.html" data-page="d-glossary"><span class="n">D</span><span>Glossary</span></a></li>
+    <li><a href="../appendices/e-troubleshooting.html" data-page="e-troubleshooting"><span class="n">E</span><span>Troubleshooting</span></a></li>
+    <li><a href="../appendices/f-whats-next.html" data-page="f-whats-next"><span class="n">F</span><span>What to learn next</span></a></li>
+  </ol>
+</nav>
+<div class="main">
+<main class="content" id="content">
+<p class="eyebrow">Lesson 17 &middot; Part 4</p>
+<h1>Vacuum, bloat and autovacuum</h1>
+<div class="meta-row"><span class="tag">lesson 17</span><span class="tag">Docker exercises</span><span class="tag">live playground</span></div>
+<p class="lede">
+  In PostgreSQL an <code>UPDATE</code> never changes a row in place: it writes a new version and leaves the old
+  one behind. This lesson shows where those leftovers go, what <code>VACUUM</code> and autovacuum do about them,
+  how to tell whether a table is bloated, and what the transaction-ID counter has to do with any of it.
+</p>
+
+<h2 id="goals">Learning goals</h2>
+<ul>
+  <li>Explain why <code>UPDATE</code> and <code>DELETE</code> leave dead row versions behind, and where you can see them.</li>
+  <li>Say what plain <code>VACUUM</code> does, what <code>VACUUM FULL</code> does differently, and why the second one is a last resort.</li>
+  <li>Explain HOT updates and how <code>fillfactor</code> makes them more likely.</li>
+  <li>Work out, for a given table, how many dead rows it takes before autovacuum starts, and change that for one table.</li>
+  <li>Read <code>pg_stat_user_tables</code> and measure real bloat with <code>pgstattuple</code>.</li>
+  <li>Explain freezing and read the age of a table's oldest unfrozen transaction ID.</li>
+</ul>
+
+<h2 id="lab">Set up for this lesson</h2>
+<p>
+  Use the <code>shop</code> database (see <a href="15-transactions-and-mvcc.html">lesson 15</a> for <code>xmin</code> and <code>xmax</code>). Anything you create in the
+  examples goes into the <code>public</code> schema with a <code>vac_</code> or <code>lab_</code> prefix, so you can drop it afterwards.
+  The playgrounds on this page run in your browser and show the <em>row versions</em> directly. They cannot
+  show statistics or run autovacuum: the in-browser engine is a single-user build with no background workers, and
+  its <code>pg_stat_*</code> counters stay at zero. The Docker database does all of that.
+</p>
+
+<figure class="code" data-lang="bash">
+  <figcaption><span class="path">terminal</span><span class="grow"></span><span class="lang">bash</span></figcaption>
+<pre><code>./pg psql
+select name, setting from pg_settings where name like 'autovacuum%' order by name;</code></pre>
+</figure>
+
+<p>
+  Autovacuum is <code>on</code> in the course container, as it is by default everywhere. You will see its settings later in this lesson.
+</p>
+
+<h2 id="dead">1. Where old row versions go</h2>
+
+<p>
+  Lesson 15 showed that every row version carries <code>xmin</code> (the transaction that created it) and
+  <code>xmax</code> (the transaction that deleted or replaced it). An <code>UPDATE</code> is therefore a delete plus an
+  insert: the old version is marked as ended, and a new version is written, usually in a different place. The old
+  version stays in the table file because another transaction that started earlier may still need to see it.
+  Once <em>no</em> transaction can see it any more, it is a <strong>dead tuple</strong> (a dead row version). The word
+  “tuple” is just the engine's name for a physical row version.
+</p>
+
+<p>
+  The system column <code>ctid</code> is the physical address of a version: <code>(page, slot)</code>. Watch it change:
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">step 1: create a small table and look at the addresses</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">create table public.vac_demo (id integer primary key, note text);
+insert into public.vac_demo select g, 'row ' || g from generate_series(1, 5) g;
+select ctid, id, note from public.vac_demo order by id;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>Every row is on page 0, in slots 1 to 5. Now edit one row and look again:</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">step 2: an UPDATE moves the row</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">update public.vac_demo set note = 'edited' where id = 1;
+select ctid, id, note from public.vac_demo order by id;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  Row 1 now lives at <code>(0,6)</code>. The old version at <code>(0,1)</code> is still on the page, invisible to
+  your query but not yet removed. That invisible leftover is a dead tuple. A table that is updated or deleted from
+  heavily collects them, and they take space and make scans slower. That accumulated waste is called
+  <strong>bloat</strong>.
+</p>
+
+<p>On the Docker database you can count dead tuples exactly, with the <code>pgstattuple</code> extension that ships with PostgreSQL:</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">in a scratch copy of your data</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create extension pgstattuple;
+create table public.vac_demo (id integer primary key, note text, qty integer);
+insert into public.vac_demo select g, 'row ' || g, 0 from generate_series(1, 1000) g;
+update public.vac_demo set note = note || ' (edited)' where id &lt;= 300;
+
+select tuple_count, dead_tuple_count, dead_tuple_percent from pgstattuple('public.vac_demo');</code></pre>
+</figure>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">output</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code> tuple_count | dead_tuple_count | dead_tuple_percent
+-------------+------------------+--------------------
+        1000 |              300 |              18.31</code></pre>
+</figure>
+
+<p>
+  1000 live rows and 300 dead ones, because 300 rows were rewritten. <code>pgstattuple</code> reads the table pages
+  themselves, so the answer is exact (and it costs a full scan).
+</p>
+
+<h2 id="vacuum">2. What VACUUM does, and what VACUUM FULL does</h2>
+
+<p>
+  <code>VACUUM</code> walks the table, finds the dead tuples that no transaction can need any more, and marks their
+  space as <em>reusable</em>. It does not shrink the file and it does not block readers or writers. It also updates two
+  maps: the <strong>free space map</strong> (where there is room for new rows) and the <strong>visibility map</strong> (which
+  pages contain only rows every transaction can see, which lets index-only scans skip the table).
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">continue the example</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>vacuum public.vac_demo;
+select tuple_count, dead_tuple_count, free_space from pgstattuple('public.vac_demo');
+select pg_size_pretty(pg_relation_size('public.vac_demo')) as file_size;</code></pre>
+</figure>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">output</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code> tuple_count | dead_tuple_count | free_space
+-------------+------------------+------------
+        1000 |                0 |      16124
+
+ file_size
+-----------
+ 64 kB</code></pre>
+</figure>
+
+<p>
+  The dead tuples are gone and their space is free for new rows, but the file is still 64 kB, exactly as big as before.
+  That is normal: plain <code>VACUUM</code> recycles space inside the file. It only gives space back to the operating
+  system when the <em>last</em> pages of the table are completely empty.
+</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th></th><th>Plain <code>VACUUM</code></th><th><code>VACUUM FULL</code></th></tr></thead>
+  <tbody>
+    <tr><td>What it does</td><td class="wrap">Marks dead space reusable, updates the maps</td><td class="wrap">Writes a brand-new, compact copy of the table and its indexes, then swaps files</td></tr>
+    <tr><td>Locks</td><td class="wrap">Light; reads and writes continue</td><td class="wrap"><code>ACCESS EXCLUSIVE</code>: nothing can read or write the table until it finishes</td></tr>
+    <tr><td>File size</td><td class="wrap">Usually unchanged</td><td class="wrap">Shrinks to what the live rows need</td></tr>
+    <tr><td>Extra disk needed</td><td class="wrap">Almost none</td><td class="wrap">Room for a full second copy of the table</td></tr>
+    <tr><td>Use it for</td><td class="wrap">Routine upkeep (autovacuum does this for you)</td><td class="wrap">Rare recovery after a one-off mass delete, in a maintenance window</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>
+  You can see the rewrite: the table gets a new <code>relfilenode</code> (the number in its file name).
+  <code>select relfilenode from pg_class where relname = 'vac_demo';</code> returns a different value after
+  <code>vacuum full</code>, and <code>VACUUM</code> alone leaves it unchanged.
+</p>
+
+<div class="note warn">
+  <span class="note-title">VACUUM FULL takes the table away</span>
+  <p>
+    <code>VACUUM FULL</code> holds an <code>ACCESS EXCLUSIVE</code> lock for as long as the rewrite takes, so every query
+    on that table queues behind it (<a href="16-locking.html">lesson 16</a>). On a large table that can be minutes
+    or hours of downtime. When you must shrink a big table while it is in use, people use the third-party
+    <code>pg_repack</code> extension, which rebuilds the table in the background and takes the heavy lock only for a
+    moment at the end. It is an extension you install and test, not part of core PostgreSQL, and it needs free disk space and
+    a primary key (or other unique index). The course container does not include it.
+  </p>
+</div>
+
+<h2 id="hot">3. HOT updates and fillfactor</h2>
+
+<p>
+  Every index entry points at a table row. A normal update therefore has to insert a new entry into <em>every</em>
+  index of the table, even for indexes on columns the update did not touch. A <strong>HOT update</strong> (heap-only
+  tuple) avoids this. If the update changes no indexed column <em>and</em> the new version fits on the same page as
+  the old one, PostgreSQL writes the new version on that page and chains it to the old one. The indexes are left
+  alone, and the page can later clean up its own dead versions without a full <code>VACUUM</code>.
+</p>
+
+<p>
+  The column <code>n_tup_hot_upd</code> in <code>pg_stat_user_tables</code> counts HOT updates;
+  <code>n_tup_newpage_upd</code> counts updates where the new version had to go to a different page.
+  The first one fails if the page is full. That is what <code>fillfactor</code> is for: it tells PostgreSQL to fill table
+  pages only to a given percentage (default 100) and keep the rest empty for exactly these new versions.
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">leave 30% of each page free for updates</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create table public.hot_demo (id integer primary key, hits integer not null default 0, note text)
+  with (fillfactor = 70);
+insert into public.hot_demo select g, 0, 'row ' || g from generate_series(1, 1000) g;
+update public.hot_demo set hits = hits + 1 where id &lt;= 50;   -- hits is not indexed
+
+select pg_stat_force_next_flush();   -- make the counters visible now
+select n_tup_upd, n_tup_hot_upd, n_tup_newpage_upd
+from pg_stat_user_tables where relname = 'hot_demo';</code></pre>
+</figure>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">output</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code> n_tup_upd | n_tup_hot_upd | n_tup_newpage_upd
+-----------+---------------+-------------------
+        50 |            50 |                 0</code></pre>
+</figure>
+
+<p>
+  All 50 updates were HOT: the column is not indexed and the pages had room. Statistics counters are sent
+  to the statistics system a moment after the statement, which is why this example calls
+  <code>pg_stat_force_next_flush()</code> first. You will not need that in normal use, but it explains why
+  counters can lag by a second or so when you query them immediately.
+</p>
+
+<div class="note info">
+  <span class="note-title">The trade-off of fillfactor</span>
+  <p>
+    A lower fillfactor makes the table physically larger (more pages for the same rows), so scans read more. Set it
+    below 100 only for tables that are updated often on non-indexed columns, such as counters and status flags, and
+    leave append-only tables at the default.
+  </p>
+</div>
+
+<h2 id="autovacuum">4. Autovacuum: when does it run?</h2>
+
+<p>
+  You normally never run <code>VACUUM</code> by hand. The <strong>autovacuum launcher</strong>, a background process, wakes
+  up every <code>autovacuum_naptime</code> (one minute by default), looks at the statistics, and starts a worker for each
+  table that crossed a threshold. A table is vacuumed when its dead rows exceed:
+</p>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">the rule</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code>autovacuum_vacuum_threshold + autovacuum_vacuum_scale_factor * reltuples
+        (default 50)         +         (default 0.2)           * (rows in the table)</code></pre>
+</figure>
+
+<p>
+  With the defaults a table needs 50 dead rows <em>plus 20% of its size</em>. That is fine for small tables and
+  slow to react on big ones: a table with 1 million rows waits for about 200,050 dead rows. (PostgreSQL 18 also has
+  <code>autovacuum_vacuum_max_threshold</code>, default 100 million, as a ceiling for that number on enormous tables.)
+  Rows that are only inserted have their own, similar trigger
+  (<code>autovacuum_vacuum_insert_threshold</code> 1000, <code>autovacuum_vacuum_insert_scale_factor</code> 0.2), which exists so
+  append-only tables still get their visibility map and freezing work done. A parallel pair,
+  <code>autovacuum_analyze_threshold</code> and <code>autovacuum_analyze_scale_factor</code>, decides when to refresh the planner statistics.
+</p>
+
+<p>Compute the trigger point for the shop tables, using the planner's row estimate <code>reltuples</code>:</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">dead rows needed per table (small tables here, same formula as Docker)</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select c.relname,
+       c.reltuples::bigint as estimated_rows,
+       round(current_setting('autovacuum_vacuum_threshold')::numeric
+           + current_setting('autovacuum_vacuum_scale_factor')::numeric * c.reltuples) as vacuum_after_dead_rows
+from pg_class c
+join pg_namespace n on n.oid = c.relnamespace
+where n.nspname in ('shop', 'analytics') and c.relkind = 'r'
+order by c.relname;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>On the Docker database (1 million events) the same query gives these thresholds for a fresh copy of the dataset:</p>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">output</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code>    relname   | estimated_rows | vacuum_after_dead_rows
+-------------+----------------+------------------------
+ categories  |             13 |                     53
+ customers   |          20000 |                   4050
+ events      |        1000000 |                 200050
+ order_items |         599702 |                 119990
+ orders      |         200000 |                  40050
+ products    |            500 |                    150</code></pre>
+</figure>
+
+<p>
+  You can change the rule for one table without touching the server, with storage parameters. They are stored
+  in <code>pg_class.reloptions</code>:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">a hot table gets vacuumed earlier</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>alter table shop.orders set (
+  autovacuum_vacuum_scale_factor = 0.02,   -- 2% instead of 20%
+  autovacuum_vacuum_threshold    = 1000
+);
+select reloptions from pg_class where oid = 'shop.orders'::regclass;
+alter table shop.orders reset (autovacuum_vacuum_scale_factor, autovacuum_vacuum_threshold);</code></pre>
+</figure>
+
+<p>
+  Autovacuum is deliberately polite. It sleeps for <code>autovacuum_vacuum_cost_delay</code> (2 ms) whenever it has used up its
+  I/O budget, so that it does not starve your queries. That makes it slow on big tables by design; if it cannot keep
+  up, the usual fix is a lower scale factor for the busiest tables (so each run has less to do) and a higher cost limit, not turning it off.
+</p>
+
+<div class="note danger">
+  <span class="note-title">Never switch autovacuum off to “save resources”</span>
+  <p>
+    Without it, dead tuples pile up, tables and indexes grow, queries slow down, and eventually the
+    transaction-ID counter runs out of room (section 6). Setting <code>autovacuum_enabled = off</code> on a table is
+    occasionally right for a table you bulk-load and drop; as a general setting it is a mistake that arrives later as an outage.
+  </p>
+</div>
+
+<h2 id="stuck">5. Why vacuum sometimes cannot clean</h2>
+
+<p>
+  <code>VACUUM</code> can only remove a dead tuple that <em>no</em> running transaction might still need. The oldest
+  transaction that is still open therefore sets a line: nothing that died after it started can be removed. A
+  session left <code>idle in transaction</code> overnight, an abandoned replication slot, or a very long report
+  query can hold that line back for hours, and bloat grows no matter how often autovacuum runs.
+</p>
+
+<div class="note warn">
+  <span class="note-title">Long transactions are the usual cause of bloat</span>
+  <p>
+    If a table keeps growing although autovacuum runs, look for old transactions before tuning anything:
+    <code>select pid, state, xact_start, query from pg_stat_activity where xact_start is not null order by xact_start;</code>.
+    A VACUUM log line such as “<em>N dead row versions cannot be removed yet</em>” is the same symptom.
+    <a href="25-monitoring.html">Lesson 25</a> returns to this query.
+  </p>
+</div>
+
+<h2 id="measure">6. Measuring bloat, and freezing</h2>
+
+<p>
+  The statistics view <code>pg_stat_user_tables</code> gives a cheap, approximate picture:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">approximate and cheap</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select relname, n_live_tup, n_dead_tup, n_mod_since_analyze,
+       last_autovacuum, autovacuum_count
+from pg_stat_user_tables
+where schemaname in ('shop', 'analytics')
+order by n_dead_tup desc;</code></pre>
+</figure>
+
+<p>
+  <code>n_dead_tup</code> is an <em>estimate</em> that the statistics system maintains as updates happen; it is cleared
+  when a vacuum finishes, and it can briefly disagree with the table (statistics counters arrive a moment after the statement, as in section 3).
+  Use it to find tables worth a look, and use <code>pgstattuple</code> (section 1) when you need the exact number. Do not build
+  alerts that expect it to be exactly zero.
+</p>
+
+<h3>Freezing and transaction-ID age</h3>
+
+<p>
+  Transaction IDs are 32-bit numbers that PostgreSQL hands out in order and compares in a circle: at any moment,
+  about two billion IDs are “in the past” and two billion “in the future”. A row written long ago would eventually look
+  like it comes from the future, and vanish. To prevent this, <code>VACUUM</code> <strong>freezes</strong> old row
+  versions, marking them as “older than every transaction, forever”, so their <code>xmin</code> no longer matters.
+  Each table remembers in <code>relfrozenxid</code> that every row older than that ID is frozen. The function
+  <code>age()</code> turns it into a distance:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">how far is each table from needing a freeze?</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select c.relname,
+       age(c.relfrozenxid) as xid_age,
+       current_setting('autovacuum_freeze_max_age')::int as freeze_max_age
+from pg_class c
+where c.relnamespace in ('shop'::regnamespace, 'analytics'::regnamespace) and c.relkind = 'r'
+order by xid_age desc;</code></pre>
+</figure>
+
+<p>
+  In a fresh course database every age is a few thousand: very young. When a table's age passes
+  <code>autovacuum_freeze_max_age</code> (200 million by default) autovacuum starts an <em>anti-wraparound</em> vacuum on it, even if
+  autovacuum is otherwise switched off.
+  As a last defence, at <code>vacuum_failsafe_age</code> (1.6 billion) vacuum drops its politeness and skips non-essential work.
+  If the counter ever gets within a few million IDs of the limit, PostgreSQL stops accepting new transactions until a vacuum finishes. This
+  is the real reason vacuum is not optional.
+</p>
+
+<div class="note tip">
+  <span class="note-title">Watch the oldest age, per database</span>
+  <p>
+    <code>select datname, age(datfrozenxid) from pg_database order by 2 desc;</code> is the one number worth
+    graphing. It should stay far below 200 million and drop every time an anti-wraparound vacuum completes.
+  </p>
+</div>
+
+<h2 id="when">When to use, when not to</h2>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Situation</th><th class="wrap">✅ Do this</th><th class="wrap">❌ Not this</th></tr></thead>
+  <tbody>
+    <tr><td class="wrap">Routine cleanup</td><td class="wrap">Leave autovacuum on and watch it</td><td class="wrap">Cron jobs running <code>VACUUM FULL</code> every night</td></tr>
+    <tr><td class="wrap">A hot, large table lags behind</td><td class="wrap">Per-table scale factor (0.01 to 0.05) via <code>ALTER TABLE ... SET</code></td><td class="wrap">Disabling autovacuum, or raising the global scale factor</td></tr>
+    <tr><td class="wrap">Table is mostly small updates to non-indexed columns</td><td class="wrap">Lower <code>fillfactor</code> (for example 80) to enable HOT</td><td class="wrap">Lowering it on append-only tables</td></tr>
+    <tr><td class="wrap">Just deleted most of a large table</td><td class="wrap">Plan one <code>VACUUM FULL</code> in a maintenance window, or use <code>pg_repack</code></td><td class="wrap"><code>VACUUM FULL</code> during business hours</td></tr>
+    <tr><td class="wrap">You need an exact bloat figure</td><td class="wrap"><code>pgstattuple</code> on a quiet table</td><td class="wrap">Treating <code>n_dead_tup</code> as exact</td></tr>
+    <tr><td class="wrap">Dropping old data by date</td><td class="wrap">Partition and drop partitions (<a href="20-partitioning.html">lesson 20</a>)</td><td class="wrap">Huge <code>DELETE</code> followed by a repair</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="inspect">Inspect it</h2>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">the three questions to ask about vacuum</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>-- 1. Which tables have dead rows, and when were they last vacuumed?
+select relname, n_live_tup, n_dead_tup, last_vacuum, last_autovacuum
+from pg_stat_user_tables
+where schemaname in ('shop', 'analytics')
+order by relname;
+
+-- 2. Is any transaction holding the cleanup line back?
+select pid, state, xact_start, left(query, 40) as query
+from pg_stat_activity
+where xact_start is not null and pid &lt;&gt; pg_backend_pid()
+order by xact_start;
+
+-- 3. How close is the database to wraparound work?
+select datname, age(datfrozenxid) as xid_age from pg_database order by 2 desc;</code></pre>
+</figure>
+
+<h2 id="exercises">Your turn</h2>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 1</span><span class="grow"></span><span class="lvl">basic</span></div>
+  <div class="ex-body">
+    <p>
+      For every ordinary table in the schemas <code>shop</code> and <code>analytics</code>, compute the number of dead rows
+      it needs before autovacuum visits it. Return two columns exactly named <code>table_name</code> (schema-qualified) and
+      <code>vacuum_trigger</code> (a whole number).
+    </p>
+    <p>Open <code>exercises/17/1.sql</code>, write your answer, then run <code>./pg check 17 1</code>.</p>
+  </div>
+  <figure class="code" data-lang="sql">
+  <figcaption><span class="path">exercises/17/1.sql</span><span class="grow"></span><span class="lang">your starting file</span></figcaption>
+<pre><code>-- For every ordinary table in the schemas shop and analytics, show how many
+-- dead rows it needs before autovacuum visits it, using the settings in force
+-- in your session: threshold + scale_factor * reltuples (the planner's row
+-- estimate from pg_class), rounded to a whole number.
+-- Return two columns: table_name (schema-qualified, e.g. shop.orders) and
+-- vacuum_trigger (bigint). Run ./pg check 17 1 when you are done.</code></pre>
+</figure>
+  <details><summary>Hint</summary><p>The rule is in section 4. Read the two settings with <code>current_setting()</code>, which returns text, so cast to <code>numeric</code>. <code>pg_class.reltuples</code> is a <code>real</code>.</p></details>
+  <details class="solution"><summary>Show a model solution for exercise 1 (try first!)</summary>
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">solutions/17/1.sql</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select format('%I.%I', n.nspname, c.relname) as table_name,
+       round(current_setting('autovacuum_vacuum_threshold')::numeric
+           + current_setting('autovacuum_vacuum_scale_factor')::numeric * c.reltuples)::bigint as vacuum_trigger
+from pg_class c
+join pg_namespace n on n.oid = c.relnamespace
+where n.nspname in ('shop', 'analytics') and c.relkind = 'r'
+order by 1;</code></pre>
+</figure>
+</details>
+</section>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 2</span><span class="grow"></span><span class="lvl">intermediate</span></div>
+  <div class="ex-body">
+    <p>
+      Create <code>public.lab_vac_demo</code> with 1000 rows, edit 300 of them so 300 dead versions exist, then clean up with a
+      plain <code>VACUUM</code>. The task is described in the file. The check uses <code>pgstattuple</code> to look
+      inside the table.
+    </p>
+    <p>Open <code>exercises/17/2.sql</code>, write your answer, then run <code>./pg check 17 2</code>.</p>
+  </div>
+  <figure class="code" data-lang="sql">
+  <figcaption><span class="path">exercises/17/2.sql</span><span class="grow"></span><span class="lang">your starting file</span></figcaption>
+<pre><code>-- Create the table public.lab_vac_demo (id integer primary key, note text) and
+-- put 1000 rows in it (note = 'row 1' ... 'row 1000'). Then append the text
+-- ' (edited)' to the note of the first 300 rows (id 1..300), which leaves 300
+-- dead row versions behind. Finally run a plain VACUUM (not VACUUM FULL) on the
+-- table. Run ./pg check 17 2 when you are done.</code></pre>
+</figure>
+  <details><summary>Hint</summary><p><code>generate_series(1, 1000)</code> gives the ids. <code>VACUUM</code> cannot run inside a transaction block, so do not wrap the script in <code>begin</code>/<code>commit</code>.</p></details>
+  <details class="solution"><summary>Show a model solution for exercise 2 (try first!)</summary>
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">solutions/17/2.sql</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create table public.lab_vac_demo (id integer primary key, note text);
+insert into public.lab_vac_demo select g, 'row ' || g from generate_series(1, 1000) g;
+update public.lab_vac_demo set note = note || ' (edited)' where id &lt;= 300;
+vacuum public.lab_vac_demo;</code></pre>
+</figure>
+</details>
+</section>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 3</span><span class="grow"></span><span class="lvl">challenge</span></div>
+  <div class="ex-body">
+    <p>
+      <code>shop.products</code> receives many small stock updates. Tune just that table: fillfactor 80, an autovacuum
+      scale factor of 0.02, and an autovacuum threshold of 20. Do it with storage parameters, not server settings, and
+      leave every other table alone.
+    </p>
+    <p>Open <code>exercises/17/3.sql</code>, write your answer, then run <code>./pg check 17 3</code>.</p>
+  </div>
+  <figure class="code" data-lang="sql">
+  <figcaption><span class="path">exercises/17/3.sql</span><span class="grow"></span><span class="lang">your starting file</span></figcaption>
+<pre><code>-- shop.products gets many small stock updates. Using storage parameters on the
+-- table only (no server settings), make three changes: fillfactor 80, an
+-- autovacuum scale factor of 0.02 and an autovacuum threshold of 20 dead rows.
+-- Change no other table. Run ./pg check 17 3 when you are done.</code></pre>
+</figure>
+  <details><summary>Hint</summary><p>All three parameters can go into one <code>ALTER TABLE ... SET (...)</code>. Their names are in sections 3 and 4.</p></details>
+  <details class="solution"><summary>Show a model solution for exercise 3 (try first!)</summary>
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">solutions/17/3.sql</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>alter table shop.products set (
+  fillfactor = 80,
+  autovacuum_vacuum_scale_factor = 0.02,
+  autovacuum_vacuum_threshold = 20
+);</code></pre>
+</figure>
+</details>
+</section>
+
+<h2 id="summary">Summary</h2>
+<ul>
+  <li><code>UPDATE</code> and <code>DELETE</code> leave dead row versions in the table; collected waste is bloat.</li>
+  <li>Plain <code>VACUUM</code> makes dead space reusable without blocking; it rarely shrinks the file. <code>VACUUM FULL</code> rewrites the table under an exclusive lock.</li>
+  <li>HOT updates skip the indexes when no indexed column changes and the page has room; <code>fillfactor</code> leaves that room.</li>
+  <li>Autovacuum starts when dead rows exceed <code>threshold + scale_factor * reltuples</code>; tune hot tables with per-table storage parameters, never by switching it off.</li>
+  <li>Old open transactions stop vacuum from cleaning. <code>n_dead_tup</code> is an estimate; <code>pgstattuple</code> is exact.</li>
+  <li>Freezing keeps the 32-bit transaction counter safe. Watch <code>age(datfrozenxid)</code>.</li>
+</ul>
+
+<h2 id="next">Looking ahead</h2>
+<p>
+  So far the logic has lived in your application. <a href="18-views-and-functions.html">Lesson 18</a> moves some of it into the
+  database: views, materialized views, functions and procedures.
+</p>
+<div class="lesson-done" data-lesson="17-vacuum-and-bloat"></div>
+<nav class="pager"><a class="prev" href="../lessons/16-locking.html"><span class="dir">Previous</span><span class="lbl">16 · Locking and concurrency</span></a><a class="next" href="../lessons/18-views-and-functions.html"><span class="dir">Next</span><span class="lbl">18 · Views, functions and procedures</span></a></nav>
+</main>
+<aside class="toc" aria-label="On this page"></aside>
+</div>
+</div>
+<script src="../assets/js/search-index.js"></script>
+<script src="../assets/js/mini-seed.js"></script>
+<script src="../assets/js/course.js"></script>
+</body>
+</html>

@@ -1,0 +1,668 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Configuration and tuning &mdash; Learning PostgreSQL</title>
+<meta name="description" content="How settings are layered, the ten that matter, memory sizing, ALTER SYSTEM and per-role settings.">
+<link rel="stylesheet" href="../assets/css/course.css">
+</head>
+<body data-root="../" data-page="21-configuration">
+<a class="skip-link" href="#content">Skip to content</a>
+<header class="topbar">
+  <button class="icon-btn menu-btn" type="button" aria-label="Toggle navigation" aria-expanded="false" aria-controls="sidebar">&#9776;</button>
+  <a class="brand" href="../index.html"><span class="mark pgm">PG</span> Learning PostgreSQL <span class="sub">PostgreSQL 18</span></a>
+  <span class="spacer"></span>
+  <div class="search" role="search">
+    <span class="glyph" aria-hidden="true">&#9906;</span>
+    <input type="search" placeholder="Search the course&#8230;" aria-label="Search the course" autocomplete="off" spellcheck="false">
+    <kbd>/</kbd>
+    <div class="search-results" role="listbox"></div>
+  </div>
+  <nav class="topbar-links">
+    <a class="hide-sm" href="../appendices/d-glossary.html">Glossary</a>
+    <a class="hide-sm" href="../appendices/b-psql.html">psql</a>
+  </nav>
+  <button class="icon-btn theme-btn" type="button" aria-label="Toggle theme">&#9790;</button>
+</header>
+<div class="scrim"></div>
+<div class="shell">
+<nav class="sidebar" id="sidebar" aria-label="Course contents">
+  <h4>Start here</h4>
+  <ol>
+    <li><a href="../start/setup.html" data-page="setup"><span class="n">00</span><span>Set up your lab</span></a></li>
+  </ol>
+  <h4>Part 1 — Foundations: the server, databases, schemas and roles</h4>
+  <ol>
+    <li><a href="../lessons/01-architecture.html" data-page="01-architecture"><span class="n">01</span><span>How PostgreSQL is built</span></a></li>
+    <li><a href="../lessons/02-databases-and-schemas.html" data-page="02-databases-and-schemas"><span class="n">02</span><span>Databases and schemas</span></a></li>
+    <li><a href="../lessons/03-roles-and-users.html" data-page="03-roles-and-users"><span class="n">03</span><span>Roles and users</span></a></li>
+    <li><a href="../lessons/04-privileges-and-grants.html" data-page="04-privileges-and-grants"><span class="n">04</span><span>Privileges and grants</span></a></li>
+    <li><a href="../lessons/05-security-and-rls.html" data-page="05-security-and-rls"><span class="n">05</span><span>Hardening and row-level security</span></a></li>
+  </ol>
+  <h4>Part 2 — Modelling and SQL in depth</h4>
+  <ol>
+    <li><a href="../lessons/06-data-types.html" data-page="06-data-types"><span class="n">06</span><span>Data types</span></a></li>
+    <li><a href="../lessons/07-constraints-and-design.html" data-page="07-constraints-and-design"><span class="n">07</span><span>Constraints and schema design</span></a></li>
+    <li><a href="../lessons/08-advanced-queries.html" data-page="08-advanced-queries"><span class="n">08</span><span>Advanced queries</span></a></li>
+    <li><a href="../lessons/09-changing-data.html" data-page="09-changing-data"><span class="n">09</span><span>Changing data safely</span></a></li>
+    <li><a href="../lessons/10-json-and-arrays.html" data-page="10-json-and-arrays"><span class="n">10</span><span>JSONB and arrays</span></a></li>
+    <li><a href="../lessons/11-text-search.html" data-page="11-text-search"><span class="n">11</span><span>Text search and pattern matching</span></a></li>
+  </ol>
+  <h4>Part 3 — Performance</h4>
+  <ol>
+    <li><a href="../lessons/12-indexes.html" data-page="12-indexes"><span class="n">12</span><span>Indexes</span></a></li>
+    <li><a href="../lessons/13-explain-and-planner.html" data-page="13-explain-and-planner"><span class="n">13</span><span>EXPLAIN and the planner</span></a></li>
+    <li><a href="../lessons/14-query-tuning.html" data-page="14-query-tuning"><span class="n">14</span><span>A query-tuning workflow</span></a></li>
+  </ol>
+  <h4>Part 4 — Transactions and concurrency</h4>
+  <ol>
+    <li><a href="../lessons/15-transactions-and-mvcc.html" data-page="15-transactions-and-mvcc"><span class="n">15</span><span>Transactions and MVCC</span></a></li>
+    <li><a href="../lessons/16-locking.html" data-page="16-locking"><span class="n">16</span><span>Locking and concurrency</span></a></li>
+    <li><a href="../lessons/17-vacuum-and-bloat.html" data-page="17-vacuum-and-bloat"><span class="n">17</span><span>Vacuum, bloat and autovacuum</span></a></li>
+  </ol>
+  <h4>Part 5 — Programming the database</h4>
+  <ol>
+    <li><a href="../lessons/18-views-and-functions.html" data-page="18-views-and-functions"><span class="n">18</span><span>Views, functions and procedures</span></a></li>
+    <li><a href="../lessons/19-triggers-and-events.html" data-page="19-triggers-and-events"><span class="n">19</span><span>Triggers, LISTEN/NOTIFY and audit</span></a></li>
+    <li><a href="../lessons/20-partitioning.html" data-page="20-partitioning"><span class="n">20</span><span>Partitioning</span></a></li>
+  </ol>
+  <h4>Part 6 — Operating PostgreSQL</h4>
+  <ol>
+    <li><a href="../lessons/21-configuration.html" data-page="21-configuration"><span class="n">21</span><span>Configuration and tuning</span></a></li>
+    <li><a href="../lessons/22-wal-and-durability.html" data-page="22-wal-and-durability"><span class="n">22</span><span>WAL, checkpoints and durability</span></a></li>
+    <li><a href="../lessons/23-backup-and-recovery.html" data-page="23-backup-and-recovery"><span class="n">23</span><span>Backup, restore and PITR</span></a></li>
+    <li><a href="../lessons/24-replication.html" data-page="24-replication"><span class="n">24</span><span>Replication and high availability</span></a></li>
+    <li><a href="../lessons/25-monitoring.html" data-page="25-monitoring"><span class="n">25</span><span>Monitoring and diagnostics</span></a></li>
+    <li><a href="../lessons/26-connections-and-upgrades.html" data-page="26-connections-and-upgrades"><span class="n">26</span><span>Connections, pooling, extensions and upgrades</span></a></li>
+  </ol>
+  <h4>Part 7 — Putting it together</h4>
+  <ol>
+    <li><a href="../lessons/27-capstone.html" data-page="27-capstone"><span class="n">27</span><span>Capstone project</span></a></li>
+  </ol>
+  <h4>Annexes</h4>
+  <ol>
+    <li><a href="../appendices/a1-select-basics.html" data-page="a1-select-basics"><span class="n">A1</span><span>SELECT, filtering and sorting</span></a></li>
+    <li><a href="../appendices/a2-joins.html" data-page="a2-joins"><span class="n">A2</span><span>Joins and combining tables</span></a></li>
+    <li><a href="../appendices/a3-aggregation.html" data-page="a3-aggregation"><span class="n">A3</span><span>Aggregation and grouping</span></a></li>
+    <li><a href="../appendices/a4-subqueries-and-ctes.html" data-page="a4-subqueries-and-ctes"><span class="n">A4</span><span>Subqueries and CTEs</span></a></li>
+    <li><a href="../appendices/a5-ddl-and-dml.html" data-page="a5-ddl-and-dml"><span class="n">A5</span><span>Creating and changing things</span></a></li>
+    <li><a href="../appendices/b-psql.html" data-page="b-psql"><span class="n">B</span><span>psql cheat sheet</span></a></li>
+    <li><a href="../appendices/c-catalog-queries.html" data-page="c-catalog-queries"><span class="n">C</span><span>Catalog and diagnostic queries</span></a></li>
+    <li><a href="../appendices/d-glossary.html" data-page="d-glossary"><span class="n">D</span><span>Glossary</span></a></li>
+    <li><a href="../appendices/e-troubleshooting.html" data-page="e-troubleshooting"><span class="n">E</span><span>Troubleshooting</span></a></li>
+    <li><a href="../appendices/f-whats-next.html" data-page="f-whats-next"><span class="n">F</span><span>What to learn next</span></a></li>
+  </ol>
+</nav>
+<div class="main">
+<main class="content" id="content">
+<p class="eyebrow">Lesson 21 &middot; Part 6</p>
+<h1>Configuration and tuning</h1>
+<div class="meta-row"><span class="tag">lesson 21</span><span class="tag">Docker exercises</span><span class="tag">live playground</span></div>
+<p class="lede">
+  PostgreSQL has about 350 settings, and the defaults are chosen to start on almost any machine, not to run well on yours.
+  This lesson shows where a setting's value comes from (it can be set in six places), how to find out which place won,
+  which settings can change without a restart, and the ten that are worth your attention first.
+</p>
+
+<h2 id="goals">Learning goals</h2>
+<ul>
+  <li>List the layers a setting can come from and say which one wins.</li>
+  <li>Read <code>pg_settings</code> to find a setting's current value, its <code>source</code> and its <code>context</code>.</li>
+  <li>Say what a restart, a reload and a plain <code>SET</code> each can change, from the <code>context</code> column.</li>
+  <li>Use <code>SET</code>, <code>SET LOCAL</code>, <code>ALTER ROLE</code>, <code>ALTER DATABASE</code> and <code>ALTER SYSTEM</code> for the right job.</li>
+  <li>Explain what each of the ten settings that matter does and what happens when it is too small or too large.</li>
+  <li>Attach a setting to a single function so that it applies only while the function runs.</li>
+</ul>
+
+<h2 id="lab">Set up for this lesson</h2>
+<p>
+  Use the <code>shop</code> database. Everything here is safe to run on it: the examples change settings only for your
+  own session, and the lesson never asks you to run <code>ALTER SYSTEM</code> on the course container. (Those commands are
+  explained, and their output was captured on a separate throwaway server.) The playgrounds run a real PostgreSQL
+  in your browser. It shows the same <code>pg_settings</code> view, but it is a single-process build, so a few values
+  differ from the Docker database. Where that matters, the text says so.
+</p>
+
+<figure class="code" data-lang="bash">
+  <figcaption><span class="path">terminal</span><span class="grow"></span><span class="lang">bash</span></figcaption>
+<pre><code>./pg psql
+show work_mem;
+show config_file;</code></pre>
+</figure>
+
+<div class="note info">
+  <span class="note-title">What the course container changes</span>
+  <p>
+    <code>docker-compose.yml</code> starts the server with a few options on the command line:
+    <code>shared_preload_libraries=pg_stat_statements</code>, <code>pg_stat_statements.track=all</code>,
+    <code>log_min_duration_statement=500</code>, <code>log_lock_waits=on</code> and <code>track_io_timing=on</code>. The last one is why
+    the timing columns in later lessons are filled in. Everything else is the Docker image's defaults, including
+    <code>shared_buffers = 128MB</code>. Those numbers suit a laptop, not a server.
+  </p>
+</div>
+
+<h2 id="layers">1. The layers: where a value can come from</h2>
+
+<p>
+  When PostgreSQL starts a session it builds each setting from several sources, applying them in this order. Later ones
+  override earlier ones:
+</p>
+
+<ol>
+  <li><strong>Built-in default</strong>, compiled into the server. <code>pg_settings.boot_val</code> shows it.</li>
+  <li><strong><code>postgresql.conf</code></strong>, the main configuration file, edited by hand.</li>
+  <li><strong><code>postgresql.auto.conf</code></strong>, a second file that <code>ALTER SYSTEM</code> writes. It is read after the first, so it wins over it.</li>
+  <li><strong>The server command line</strong> (<code>postgres -c name=value</code>, which is what Docker's <code>command:</code> does). It wins over both files.</li>
+  <li><strong><code>ALTER DATABASE ... SET</code> and <code>ALTER ROLE ... SET</code></strong>, stored in the catalog and applied when a session starts. A setting for one role in one database beats a role-wide one, which beats a database-wide one.</li>
+  <li><strong>The session</strong>: <code>SET name = value</code>, or <code>SET LOCAL</code> for the current transaction only.</li>
+</ol>
+
+<p>
+  The column <code>pg_settings.source</code> tells you which layer produced the current value:
+  <code>default</code>, <code>configuration file</code>, <code>command line</code>, <code>database</code>, <code>user</code>,
+  <code>database user</code>, <code>session</code>. This is the first thing to look at when a setting “is not what I configured”.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">session settings: SET changes the source to “session”</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select name, setting, unit, source from pg_settings where name = 'work_mem';   -- default
+
+set work_mem = '64MB';
+
+select name, setting, unit, source, reset_val from pg_settings where name = 'work_mem';</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  The playground shows the result of the last query only: <code>work_mem</code> is now 65536 kB, the source is <code>session</code>, and
+  <code>reset_val</code> still says 4096, the value you get back with <code>RESET work_mem</code>. On the Docker database,
+  the first query reports source <code>default</code> and the value 4096 kB (4 MB).
+</p>
+
+<h3>SET versus SET LOCAL</h3>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">SET LOCAL lasts until the end of the transaction</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">set work_mem = '64MB';
+begin;
+set local work_mem = '256MB';
+select current_setting('work_mem') as inside_transaction;
+commit;
+select current_setting('work_mem') as after_commit;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  Inside the transaction the value is 256MB; after <code>COMMIT</code> it is back to the session's 64MB. <code>SET LOCAL</code> is the
+  safe way to give one query a bigger sort area: nothing is left behind if the code forgets to undo it. That matters with connection
+  pools, where a plain <code>SET</code> would leak to the next user of the same connection.
+</p>
+
+<div class="note warn">
+  <span class="note-title">A plain SET follows the connection, not the request</span>
+  <p>
+    Behind a connection pool (<a href="26-connections-and-upgrades.html">lesson 26</a>), the next request may reuse your connection and
+    inherit your <code>SET</code>. Use <code>SET LOCAL</code> inside a transaction, or put the setting on the role.
+  </p>
+</div>
+
+<h2 id="context">2. What needs a restart: the context column</h2>
+
+<p>
+  Each setting has a <strong>context</strong> that says when and by whom it can change. This is the most useful column in
+  <code>pg_settings</code> after <code>setting</code> itself:
+</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th><code>context</code></th><th>Can be changed</th><th>Example</th></tr></thead>
+  <tbody>
+    <tr><td><code>internal</code></td><td class="wrap">Never; fixed when the cluster was built or created</td><td class="wrap"><code>wal_segment_size</code>, <code>data_checksums</code></td></tr>
+    <tr><td><code>postmaster</code></td><td class="wrap">Only by <strong>restarting the server</strong></td><td class="wrap"><code>shared_buffers</code>, <code>max_connections</code></td></tr>
+    <tr><td><code>sighup</code></td><td class="wrap">By editing the config and <strong>reloading</strong> (<code>select pg_reload_conf();</code> or <code>pg_ctl reload</code>); no restart</td><td class="wrap"><code>checkpoint_timeout</code>, <code>max_wal_size</code></td></tr>
+    <tr><td><code>superuser</code></td><td class="wrap">By a superuser in a session; also per role and database</td><td class="wrap"><code>log_min_duration_statement</code></td></tr>
+    <tr><td><code>user</code></td><td class="wrap">By any user in a session; also per role and database</td><td class="wrap"><code>work_mem</code>, <code>random_page_cost</code></td></tr>
+    <tr><td><code>backend</code>, <code>superuser-backend</code></td><td class="wrap">Only before a connection is made (for example in the connection string)</td><td class="wrap"><code>ignore_system_indexes</code></td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>
+  Try to change two settings from a normal session. Both fail on purpose, and the messages are different because the context is:
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">this one fails on purpose</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">set shared_buffers = '1GB';</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  <em>parameter "shared_buffers" cannot be changed without restarting the server.</em> On the Docker database,
+  <code>set max_connections = 10</code> gives the same message, and <code>set checkpoint_timeout = '10min'</code> says
+  <em>cannot be changed now</em>: that one can be changed, but only in the config file and by a reload. Count the contexts on your server:
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">how many settings of each kind</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select context, count(*) as settings from pg_settings group by context order by settings desc;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  Most settings (151 in PostgreSQL 18.6 on Docker) can be changed per session. About 70 need a restart.
+</p>
+
+<h2 id="alter-system">3. ALTER SYSTEM, reload and pending restart</h2>
+
+<p>
+  Editing <code>postgresql.conf</code> by hand is fine, but you need file access to the server host. <code>ALTER SYSTEM</code>
+  does the same from SQL, for a superuser: it writes the value to <code>postgresql.auto.conf</code>, a file you should not edit by hand.
+  It does <em>not</em> apply the value; a reload or a restart does. This is what happened on a separate throwaway
+  PostgreSQL 18 server (not the course container):
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">on a throwaway server, never on one you care about</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>alter system set work_mem = '12MB';
+alter system set shared_buffers = '256MB';
+alter system set max_wal_size = '2GB';
+
+select name, setting, applied, error from pg_file_settings where sourcefile like '%auto.conf';</code></pre>
+</figure>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">output</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code>      name      | setting | applied |            error
+----------------+---------+---------+------------------------------
+ work_mem       | 12MB    | t       |
+ shared_buffers | 256MB   | f       | setting could not be applied
+ max_wal_size   | 2GB     | t       |</code></pre>
+</figure>
+
+<p>
+  <code>pg_file_settings</code> shows what is in the files and whether a reload would take it. Here <code>shared_buffers</code> cannot be
+  applied without a restart. After <code>select pg_reload_conf();</code> the running server shows:
+</p>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">after pg_reload_conf()</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code>      name      | setting | unit |       source       | pending_restart
+----------------+---------+------+--------------------+-----------------
+ max_wal_size   | 2048    | MB   | configuration file | f
+ shared_buffers | 16384   | 8kB  | configuration file | t
+ work_mem       | 12288   | kB   | configuration file | f
+</code></pre>
+</figure>
+
+<p>
+  <code>work_mem</code> and <code>max_wal_size</code> are live. <code>shared_buffers</code> still has its old value, and
+  <code>pending_restart = t</code> flags that a restart is waiting to pick up the new one. <code>ALTER SYSTEM RESET name</code> removes the
+  line again. Note that the source is reported as <code>configuration file</code> for both files.
+</p>
+
+<div class="note danger">
+  <span class="note-title">Do not ALTER SYSTEM on the shared course container</span>
+  <p>
+    The change survives restarts and affects every database on the server, including the template the checker clones. If you want to
+    practise, start a separate server (for example <code>docker run --rm -e POSTGRES_PASSWORD=x postgres:18</code>) and throw it away afterwards.
+    Some managed services block <code>ALTER SYSTEM</code> and give you a parameter-group screen instead.
+  </p>
+</div>
+
+<h2 id="scope">4. Settings for one role, one database or one function</h2>
+
+<p>
+  You can bind a setting to a role or a database instead of the whole server. It is stored in the catalog
+  (<code>pg_db_role_setting</code>) and applied when a new session starts. This is the right tool to give a reporting role a
+  bigger <code>work_mem</code> or a statement timeout without touching anyone else:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">per database and per role (scratch objects)</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create role lab_21_dev login;
+create database lab_21_demo;
+
+alter database lab_21_demo set work_mem = '32MB';
+alter role lab_21_dev set work_mem = '16MB';
+alter role lab_21_dev in database lab_21_demo set work_mem = '8MB';
+
+-- connect as each role to each database and ask:
+select current_user, current_database(), current_setting('work_mem') as work_mem,
+       (select source from pg_settings where name = 'work_mem') as source;</code></pre>
+</figure>
+
+<p>Connecting four ways gave these results on the Docker server (the role and database were scratch objects and were dropped afterwards):</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Connected as</th><th>to database</th><th><code>work_mem</code></th><th><code>source</code></th></tr></thead>
+  <tbody>
+    <tr><td><code>postgres</code></td><td><code>shop</code></td><td>4MB</td><td><code>default</code></td></tr>
+    <tr><td><code>postgres</code></td><td><code>lab_21_demo</code></td><td>32MB</td><td><code>database</code></td></tr>
+    <tr><td><code>lab_21_dev</code></td><td><code>shop</code></td><td>16MB</td><td><code>user</code></td></tr>
+    <tr><td><code>lab_21_dev</code></td><td><code>lab_21_demo</code></td><td>8MB</td><td><code>database user</code></td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>
+  The most specific setting wins: role-in-database beats role, and role beats database. Settings stored this way only apply to
+  <em>new</em> sessions. To see all of them: <code>select * from pg_db_role_setting;</code> or <code>\drds</code> in psql.
+</p>
+
+<h3>A setting on a function</h3>
+
+<p>
+  A function can carry its own settings with <code>SET</code> in its definition. They apply while the function runs and are put back
+  afterwards. This is the same mechanism you used in <a href="18-views-and-functions.html">lesson 18</a> to pin
+  <code>search_path</code>:
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">work_mem is 128MB only inside the function</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">create function public.lab_sort_mem() returns text
+language sql stable
+set work_mem = '128MB'
+as $$ select current_setting('work_mem') $$;
+
+set work_mem = '10MB';
+select current_setting('work_mem') as caller, public.lab_sort_mem() as inside_function;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<h2 id="ten">5. The ten settings that matter</h2>
+
+<p>
+  Most of the rest can stay at their defaults for a long time. These ten are where tuning starts. The values in the table are
+  what the course container reports, and “typical start” is a common rule of thumb for a dedicated database server, not
+  a promise: measure before and after.
+</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Setting</th><th>Context</th><th>Course value</th><th class="wrap">What it does</th><th class="wrap">Typical start for a dedicated server</th></tr></thead>
+  <tbody>
+    <tr><td><code>shared_buffers</code></td><td>postmaster</td><td>128MB</td><td class="wrap">PostgreSQL's own page cache (<a href="01-architecture.html">lesson 1</a>)</td><td class="wrap">About 25% of RAM</td></tr>
+    <tr><td><code>work_mem</code></td><td>user</td><td>4MB</td><td class="wrap">Memory for <em>one</em> sort or hash node in <em>one</em> query, before it spills to disk</td><td class="wrap">16 to 64 MB, then raise per query or role</td></tr>
+    <tr><td><code>maintenance_work_mem</code></td><td>user</td><td>64MB</td><td class="wrap">Memory for <code>CREATE INDEX</code>, <code>VACUUM</code>, <code>ALTER TABLE</code></td><td class="wrap">256MB to 2GB</td></tr>
+    <tr><td><code>effective_cache_size</code></td><td>user</td><td>4GB</td><td class="wrap">A <em>hint</em> to the planner for how much data the OS and PostgreSQL together can cache; allocates nothing</td><td class="wrap">50 to 75% of RAM</td></tr>
+    <tr><td><code>max_connections</code></td><td>postmaster</td><td>100</td><td class="wrap">Most simultaneous sessions. Each one costs memory</td><td class="wrap">Keep it modest and use a pooler (<a href="26-connections-and-upgrades.html">lesson 26</a>)</td></tr>
+    <tr><td><code>random_page_cost</code></td><td>user</td><td>4</td><td class="wrap">Planner's cost of a non-sequential page read, relative to a sequential read (1.0)</td><td class="wrap">1.1 on SSD or NVMe</td></tr>
+    <tr><td><code>effective_io_concurrency</code></td><td>user</td><td>16</td><td class="wrap">How many reads PostgreSQL may issue ahead of time, for example for bitmap scans</td><td class="wrap">Leave the default 16 on SSD; lower on spinning disks</td></tr>
+    <tr><td><code>checkpoint_timeout</code></td><td>sighup</td><td>5min</td><td class="wrap">Longest time between checkpoints (<a href="22-wal-and-durability.html">lesson 22</a>)</td><td class="wrap">15min for write-heavy servers</td></tr>
+    <tr><td><code>max_wal_size</code></td><td>sighup</td><td>1GB</td><td class="wrap">How much WAL may build up before a checkpoint is forced</td><td class="wrap">Several GB for write-heavy servers</td></tr>
+    <tr><td><code>log_min_duration_statement</code></td><td>superuser</td><td>500ms (container)</td><td class="wrap">Log every statement slower than this. -1 is off, 0 logs everything</td><td class="wrap">A threshold you will actually read, such as 250 to 1000ms</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>
+  An eleventh setting, <code>track_io_timing</code> (default <code>off</code>, switched on in the course container), is worth knowing too: it records how long I/O waits
+  take, so <code>EXPLAIN (ANALYZE, BUFFERS)</code> and <code>pg_stat_io</code> can show times, not just counts. It costs a little on
+  systems with a slow clock.
+</p>
+
+<h3>work_mem is per operation, not per connection</h3>
+
+<p>
+  A query with three sort or hash steps can use three times <code>work_mem</code>, and ten such queries at once use thirty times.
+  That is why the default is small. Here is the same sort, with too little memory and with enough, on the 20,000-row customers table
+  (<code>EXPLAIN ANALYZE</code> without timings, so the output is stable):
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">a sort that spills to disk, and one that does not</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>set work_mem = '64kB';
+explain (analyze, costs off, timing off, summary off, buffers off)
+select * from shop.customers order by full_name, id;
+
+set work_mem = '64MB';
+explain (analyze, costs off, timing off, summary off, buffers off)
+select * from shop.customers order by full_name, id;</code></pre>
+</figure>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">output (the Sort lines)</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code>   Sort Method: external merge  Disk: 2920kB     -- work_mem = 64kB
+
+   Sort Method: quicksort  Memory: 3776kB        -- work_mem = 64MB (about 3.5 to 3.8 MB in repeated runs)</code></pre>
+</figure>
+
+<p>
+  <code>external merge Disk</code> means the sort did not fit and wrote temporary files. The in-memory sort needed about 3.7 MB, just under the 4MB default, so
+  at the default this query already fits (at 64kB it clearly does not). Look for <code>Disk:</code> in plans before you raise
+  <code>work_mem</code>; if nothing spills, raising it buys nothing.
+</p>
+
+<h3>random_page_cost changes plans, not the disk</h3>
+
+<p>
+  The planner thinks a random page read is four times as expensive as a sequential one. On an SSD that is untrue. Lowering the setting
+  makes it choose index scans more eagerly. With an index on <code>analytics.events (customer_id)</code>, the same query changes plan
+  when only <code>random_page_cost</code> changes:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">same query, two settings (in a scratch database, after creating the index)</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create index on analytics.events (customer_id);
+analyze analytics.events;
+
+explain (costs off) select * from analytics.events where customer_id between 1 and 5000;   -- default 4
+set random_page_cost = 1.1;
+explain (costs off) select * from analytics.events where customer_id between 1 and 5000;</code></pre>
+</figure>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">output</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code>Bitmap Heap Scan on events                                  -- random_page_cost = 4
+  ->  Bitmap Index Scan on events_customer_id_idx
+
+Index Scan using events_customer_id_idx on events           -- random_page_cost = 1.1</code></pre>
+</figure>
+
+<p>
+  Whether the second plan is actually faster depends on your disk and cache, so compare with <code>EXPLAIN (ANALYZE)</code> before you
+  make it permanent. It does not change what is stored; it only changes the planner's guess.
+</p>
+
+<h2 id="pitfalls">6. Pitfalls</h2>
+
+<div class="note warn">
+  <span class="note-title">A bigger value is not a better value</span>
+  <p>
+    <code>work_mem</code> multiplied by concurrent sort steps can exceed RAM and get the server killed by the operating system.
+    A very large <code>shared_buffers</code> leaves less memory for the operating system's cache, which PostgreSQL also relies on.
+    <code>max_connections = 1000</code> costs memory even for idle sessions. Change one setting at a time and measure.
+  </p>
+</div>
+
+<div class="note warn">
+  <span class="note-title">The file says one thing, the server does another</span>
+  <p>
+    Editing <code>postgresql.conf</code> does nothing until you reload or restart, and a mistake in the file can make a reload skip some or all of your changes. Always check what is live: <code>select name, setting, source, pending_restart from pg_settings where name = '...';</code>
+    and what the files say: <code>select * from pg_file_settings where error is not null;</code>.
+  </p>
+</div>
+
+<div class="note info">
+  <span class="note-title">Units</span>
+  <p>
+    <code>pg_settings.setting</code> is in the base unit shown in <code>unit</code> (<code>work_mem</code> in kB, <code>shared_buffers</code> in 8 kB pages), while
+    <code>show</code> and <code>current_setting()</code> give a friendly string such as <code>4MB</code>. To convert, use
+    <code>pg_size_bytes(current_setting('work_mem'))</code>. Do not apply it to <code>shared_buffers</code> through the <code>setting</code> column,
+    which counts pages.
+  </p>
+</div>
+
+<h2 id="when">When to use, when not to</h2>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Situation</th><th class="wrap">✅ Do this</th><th class="wrap">❌ Not this</th></tr></thead>
+  <tbody>
+    <tr><td class="wrap">One report needs a big sort</td><td class="wrap"><code>SET LOCAL work_mem</code> in its transaction</td><td class="wrap">Raise <code>work_mem</code> for the whole server</td></tr>
+    <tr><td class="wrap">A role needs different defaults (timeouts, memory)</td><td class="wrap"><code>ALTER ROLE ... SET</code></td><td class="wrap">Every application calling <code>SET</code> on connect</td></tr>
+    <tr><td class="wrap">A server-wide change that needs no restart</td><td class="wrap">Config file or <code>ALTER SYSTEM</code>, then <code>pg_reload_conf()</code>, then check <code>pg_settings</code></td><td class="wrap">Assuming the edit took effect</td></tr>
+    <tr><td class="wrap">Changing <code>shared_buffers</code> or <code>max_connections</code></td><td class="wrap">Plan a restart and check <code>pending_restart</code></td><td class="wrap">Expecting a reload to apply it</td></tr>
+    <tr><td class="wrap">Slow queries on SSD with seq scans everywhere</td><td class="wrap">Check <code>random_page_cost</code> and the statistics, then measure</td><td class="wrap">Disabling a plan type with <code>enable_seqscan = off</code> in production</td></tr>
+    <tr><td class="wrap">You do not know what a setting does</td><td class="wrap">Leave it at the default and read the documentation</td><td class="wrap">Pasting a tuning blog's whole config</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="inspect">Inspect it</h2>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">everything that is not a default, and where it came from</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select name, setting, unit, source, context
+from pg_settings
+where source not in ('default', 'override')
+order by source, name;
+
+select name, setting, applied, error from pg_file_settings where error is not null;   -- problems in the files
+select name, setting from pg_settings where pending_restart;                            -- waiting for a restart</code></pre>
+</figure>
+
+<p>
+  On the course container this lists the command-line options from <code>docker-compose.yml</code> (<code>command line</code>), the image's
+  <code>postgresql.conf</code> values such as <code>shared_buffers</code> and <code>max_wal_size</code> (<code>configuration file</code>), and
+  your psql session's <code>application_name</code> (<code>client</code>). Nothing is pending a restart.
+</p>
+
+<h2 id="exercises">Your turn</h2>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 1</span><span class="grow"></span><span class="lvl">basic</span></div>
+  <div class="ex-body">
+    <p>
+      Query <code>pg_settings</code> for the ten settings listed in the file and return <code>name</code>, <code>setting</code>,
+      <code>unit</code>, <code>context</code> and a boolean <code>needs_restart</code>. Order by name.
+    </p>
+    <p>Open <code>exercises/21/1.sql</code>, write your answer, then run <code>./pg check 21 1</code>.</p>
+  </div>
+  <figure class="code" data-lang="sql">
+  <figcaption><span class="path">exercises/21/1.sql</span><span class="grow"></span><span class="lang">your starting file</span></figcaption>
+<pre><code>-- For these ten settings, return name, setting (as text), unit and context
+-- (all from pg_settings):
+--   shared_buffers, work_mem, maintenance_work_mem, effective_cache_size,
+--   max_connections, random_page_cost, effective_io_concurrency,
+--   checkpoint_timeout, max_wal_size, log_min_duration_statement
+-- plus one extra column needs_restart (boolean): true when changing the
+-- setting requires a server restart (context = 'postmaster').
+-- Order by name. Run ./pg check 21 1 when you are done.</code></pre>
+</figure>
+  <details><summary>Hint</summary><p>A setting needs a restart exactly when its <code>context</code> is <code>postmaster</code>. The row order does not matter to the checker unless the model solution says so, but sorting by name makes your output easy to read.</p></details>
+  <details class="solution"><summary>Show a model solution for exercise 1 (try first!)</summary>
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">solutions/21/1.sql</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>-- ordered
+select name, setting, unit, context, (context = 'postmaster') as needs_restart
+from pg_settings
+where name in ('shared_buffers', 'work_mem', 'maintenance_work_mem', 'effective_cache_size',
+               'max_connections', 'random_page_cost', 'effective_io_concurrency',
+               'checkpoint_timeout', 'max_wal_size', 'log_min_duration_statement')
+order by name;</code></pre>
+</figure>
+</details>
+</section>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 2</span><span class="grow"></span><span class="lvl">intermediate</span></div>
+  <div class="ex-body">
+    <p>
+      Create the login role <code>lab_21_reports</code> and store two defaults on it: <code>work_mem = 64MB</code> and
+      <code>statement_timeout = 30s</code>. They must apply to every new session of that role, in every database.
+    </p>
+    <p>Open <code>exercises/21/2.sql</code>, write your answer, then run <code>./pg check 21 2</code>.</p>
+  </div>
+  <figure class="code" data-lang="sql">
+  <figcaption><span class="path">exercises/21/2.sql</span><span class="grow"></span><span class="lang">your starting file</span></figcaption>
+<pre><code>-- Create a login role lab_21_reports and give it its own defaults, stored on
+-- the role (not in postgresql.conf, and not with SET in your session):
+--   work_mem          64MB
+--   statement_timeout 30s
+-- Every new session of that role should then start with those values.
+-- Run ./pg check 21 2 when you are done.</code></pre>
+</figure>
+  <details><summary>Hint</summary><p><code>ALTER ROLE name SET parameter = value</code>, once per setting. Section 4 shows the catalog table that stores them.</p></details>
+  <details class="solution"><summary>Show a model solution for exercise 2 (try first!)</summary>
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">solutions/21/2.sql</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create role lab_21_reports login password 'lab-only';
+alter role lab_21_reports set work_mem = '64MB';
+alter role lab_21_reports set statement_timeout = '30s';</code></pre>
+</figure>
+</details>
+</section>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 3</span><span class="grow"></span><span class="lvl">challenge</span></div>
+  <div class="ex-body">
+    <p>
+      Write <code>public.lab_sort_mem()</code>, returning the <code>work_mem</code> value as seen inside the function, always
+      <code>128MB</code>, whatever the caller has set. Attach the setting to the function; do not call <code>SET</code> in its body. The caller's own
+      value must be unchanged afterwards.
+    </p>
+    <p>Open <code>exercises/21/3.sql</code>, write your answer, then run <code>./pg check 21 3</code>.</p>
+  </div>
+  <figure class="code" data-lang="sql">
+  <figcaption><span class="path">exercises/21/3.sql</span><span class="grow"></span><span class="lang">your starting file</span></figcaption>
+<pre><code>-- Some functions need a lot of sort memory only while they run.
+-- Create a function public.lab_sort_mem() that returns text: the value of
+-- work_mem as seen from inside the function. Make it always 128MB there, no
+-- matter what the caller has set, by attaching the setting to the function
+-- itself (not by calling SET inside the body). Outside the function, the
+-- caller's own work_mem must be left alone.
+-- Run ./pg check 21 3 when you are done.</code></pre>
+</figure>
+  <details><summary>Hint</summary><p>Put a <code>SET work_mem = '128MB'</code> clause between <code>LANGUAGE</code> and <code>AS</code>, as in section 4. The body is <code>select current_setting('work_mem')</code>.</p></details>
+  <details class="solution"><summary>Show a model solution for exercise 3 (try first!)</summary>
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">solutions/21/3.sql</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create function public.lab_sort_mem() returns text
+language sql
+stable
+set work_mem = '128MB'
+as $$ select current_setting('work_mem') $$;</code></pre>
+</figure>
+</details>
+</section>
+
+<h2 id="summary">Summary</h2>
+<ul>
+  <li>A setting's value comes from the default, <code>postgresql.conf</code>, <code>postgresql.auto.conf</code>, the command line, database and role settings, or the session, in that order. <code>pg_settings.source</code> says which won.</li>
+  <li><code>context</code> tells you how to change a setting: <code>postmaster</code> needs a restart, <code>sighup</code> a reload, <code>user</code> and <code>superuser</code> a plain <code>SET</code>.</li>
+  <li><code>ALTER SYSTEM</code> writes <code>postgresql.auto.conf</code>; <code>pg_reload_conf()</code> applies it; <code>pending_restart</code> flags what still waits.</li>
+  <li>Use <code>SET LOCAL</code>, <code>ALTER ROLE</code> or a function-level <code>SET</code> to scope a change instead of changing the whole server.</li>
+  <li>The ten that matter: <code>shared_buffers</code>, <code>work_mem</code>, <code>maintenance_work_mem</code>, <code>effective_cache_size</code>, <code>max_connections</code>, <code>random_page_cost</code>, <code>effective_io_concurrency</code>, <code>checkpoint_timeout</code>, <code>max_wal_size</code> and <code>log_min_duration_statement</code>.</li>
+  <li>Change one thing at a time and measure. Defaults are safe; guesses are not.</li>
+</ul>
+
+<h2 id="next">Looking ahead</h2>
+<p>
+  Two of the ten settings, <code>checkpoint_timeout</code> and <code>max_wal_size</code>, belong to the write-ahead log. <a href="22-wal-and-durability.html">Lesson 22</a>
+  explains what the WAL is, what a checkpoint does, and what <code>fsync</code> and <code>synchronous_commit</code> trade away for speed.
+</p>
+<div class="lesson-done" data-lesson="21-configuration"></div>
+<nav class="pager"><a class="prev" href="../lessons/20-partitioning.html"><span class="dir">Previous</span><span class="lbl">20 · Partitioning</span></a><a class="next" href="../lessons/22-wal-and-durability.html"><span class="dir">Next</span><span class="lbl">22 · WAL, checkpoints and durability</span></a></nav>
+</main>
+<aside class="toc" aria-label="On this page"></aside>
+</div>
+</div>
+<script src="../assets/js/search-index.js"></script>
+<script src="../assets/js/mini-seed.js"></script>
+<script src="../assets/js/course.js"></script>
+</body>
+</html>

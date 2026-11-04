@@ -1,0 +1,109 @@
+name: "Build and publish the course"
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: "Generated pages and links"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The committed pages are generated from outline.py and _src/. If someone edits a
+      # fragment or an exercise without rebuilding, the published page silently goes stale.
+      - name: "Generated files are up to date"
+        run: python3 tools/build_docs.py --check
+
+      - name: "Required entry points exist"
+        run: |
+          for f in index.html start/setup.html lessons/01-architecture.html lessons/03-roles-and-users.html \
+                   lessons/04-privileges-and-grants.html lessons/02-databases-and-schemas.html \
+                   appendices/d-glossary.html; do
+            [ -f "$f" ] || { echo "missing entry point: $f" >&2; exit 1; }
+          done
+
+      # Fail the build rather than publish dead links or missing anchors.
+      - name: "Verify links, anchors and assets"
+        run: python3 tools/check_links.py .
+
+  exercises:
+    name: "Exercises: solutions pass, stubs fail"
+    runs-on: ubuntu-latest
+    needs: check
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The same database the reader runs locally, in the same container image.
+      - name: "Start PostgreSQL 18 with the course seed"
+        run: ./pg up
+
+      - name: "Every model solution passes and every unedited stub fails"
+        run: ./pg verify
+
+      - name: "Show the database log on failure"
+        if: failure()
+        run: docker compose logs --tail=200 db
+
+      - name: "Stop the database"
+        if: always()
+        run: ./pg down
+
+  publish:
+    name: "Publish to GitHub Pages"
+    if: github.event_name != 'pull_request'
+    needs: [check, exercises]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+
+      - name: "Stage site"
+        run: |
+          mkdir -p _site
+          rsync -a \
+            --exclude '.git' \
+            --exclude '.github' \
+            --exclude '_site' \
+            --exclude '.DS_Store' \
+            --exclude 'docker' \
+            --exclude 'docker-compose.yml' \
+            --exclude 'exercises' \
+            --exclude 'solutions' \
+            --exclude 'checks' \
+            --exclude '_src' \
+            --exclude 'tools' \
+            --exclude 'pg' \
+            --exclude 'CLAUDE.md' \
+            ./ _site/
+          # GitHub Pages otherwise runs the tree through Jekyll, which drops
+          # paths beginning with an underscore.
+          touch _site/.nojekyll
+
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: _site
+
+      - id: deployment
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0

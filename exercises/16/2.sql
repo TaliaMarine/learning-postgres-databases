@@ -1,0 +1,7 @@
+-- Build a tiny job queue in the shop database.
+-- 1. Create table shop.lab_jobs(id integer identity primary key, payload text not null,
+--    claimed_at timestamptz) and insert five jobs with payloads job-1 ... job-5.
+-- 2. Create function shop.lab_claim_job() returning integer. Each call claims the
+--    unclaimed job with the lowest id (sets claimed_at) and returns its id, or returns
+--    NULL when nothing is left. It must be safe to call from many workers at once.
+-- Then run ./pg check 16 2.

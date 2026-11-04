@@ -1,0 +1,5 @@
+-- Write a function public.lab_plan_nodes(q text) that returns setof text:
+-- the distinct "Node Type" values of the plan PostgreSQL chooses for the query q,
+-- one per row, sorted alphabetically. It must only plan the query (no EXPLAIN ANALYZE).
+-- Example: lab_plan_nodes('select * from shop.orders where id = 5') returns one row,
+-- 'Index Scan'. Then run ./pg check 13 3.

@@ -1,0 +1,6 @@
+-- For every value the planner stores as "most common" for analytics.events.kind,
+-- return three columns: kind, estimated_rows and actual_rows.
+--   estimated_rows = the table's row estimate (pg_class.reltuples) multiplied by that
+--                    value's frequency from pg_stats, rounded to an integer
+--   actual_rows    = the real count(*) for that kind
+-- Order the result by kind.

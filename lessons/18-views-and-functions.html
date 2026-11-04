@@ -1,0 +1,720 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Views, functions and procedures &mdash; Learning PostgreSQL</title>
+<meta name="description" content="Views, materialized views, SQL and PL/pgSQL functions, procedures, volatility.">
+<link rel="stylesheet" href="../assets/css/course.css">
+</head>
+<body data-root="../" data-page="18-views-and-functions">
+<a class="skip-link" href="#content">Skip to content</a>
+<header class="topbar">
+  <button class="icon-btn menu-btn" type="button" aria-label="Toggle navigation" aria-expanded="false" aria-controls="sidebar">&#9776;</button>
+  <a class="brand" href="../index.html"><span class="mark pgm">PG</span> Learning PostgreSQL <span class="sub">PostgreSQL 18</span></a>
+  <span class="spacer"></span>
+  <div class="search" role="search">
+    <span class="glyph" aria-hidden="true">&#9906;</span>
+    <input type="search" placeholder="Search the course&#8230;" aria-label="Search the course" autocomplete="off" spellcheck="false">
+    <kbd>/</kbd>
+    <div class="search-results" role="listbox"></div>
+  </div>
+  <nav class="topbar-links">
+    <a class="hide-sm" href="../appendices/d-glossary.html">Glossary</a>
+    <a class="hide-sm" href="../appendices/b-psql.html">psql</a>
+  </nav>
+  <button class="icon-btn theme-btn" type="button" aria-label="Toggle theme">&#9790;</button>
+</header>
+<div class="scrim"></div>
+<div class="shell">
+<nav class="sidebar" id="sidebar" aria-label="Course contents">
+  <h4>Start here</h4>
+  <ol>
+    <li><a href="../start/setup.html" data-page="setup"><span class="n">00</span><span>Set up your lab</span></a></li>
+  </ol>
+  <h4>Part 1 — Foundations: the server, databases, schemas and roles</h4>
+  <ol>
+    <li><a href="../lessons/01-architecture.html" data-page="01-architecture"><span class="n">01</span><span>How PostgreSQL is built</span></a></li>
+    <li><a href="../lessons/02-databases-and-schemas.html" data-page="02-databases-and-schemas"><span class="n">02</span><span>Databases and schemas</span></a></li>
+    <li><a href="../lessons/03-roles-and-users.html" data-page="03-roles-and-users"><span class="n">03</span><span>Roles and users</span></a></li>
+    <li><a href="../lessons/04-privileges-and-grants.html" data-page="04-privileges-and-grants"><span class="n">04</span><span>Privileges and grants</span></a></li>
+    <li><a href="../lessons/05-security-and-rls.html" data-page="05-security-and-rls"><span class="n">05</span><span>Hardening and row-level security</span></a></li>
+  </ol>
+  <h4>Part 2 — Modelling and SQL in depth</h4>
+  <ol>
+    <li><a href="../lessons/06-data-types.html" data-page="06-data-types"><span class="n">06</span><span>Data types</span></a></li>
+    <li><a href="../lessons/07-constraints-and-design.html" data-page="07-constraints-and-design"><span class="n">07</span><span>Constraints and schema design</span></a></li>
+    <li><a href="../lessons/08-advanced-queries.html" data-page="08-advanced-queries"><span class="n">08</span><span>Advanced queries</span></a></li>
+    <li><a href="../lessons/09-changing-data.html" data-page="09-changing-data"><span class="n">09</span><span>Changing data safely</span></a></li>
+    <li><a href="../lessons/10-json-and-arrays.html" data-page="10-json-and-arrays"><span class="n">10</span><span>JSONB and arrays</span></a></li>
+    <li><a href="../lessons/11-text-search.html" data-page="11-text-search"><span class="n">11</span><span>Text search and pattern matching</span></a></li>
+  </ol>
+  <h4>Part 3 — Performance</h4>
+  <ol>
+    <li><a href="../lessons/12-indexes.html" data-page="12-indexes"><span class="n">12</span><span>Indexes</span></a></li>
+    <li><a href="../lessons/13-explain-and-planner.html" data-page="13-explain-and-planner"><span class="n">13</span><span>EXPLAIN and the planner</span></a></li>
+    <li><a href="../lessons/14-query-tuning.html" data-page="14-query-tuning"><span class="n">14</span><span>A query-tuning workflow</span></a></li>
+  </ol>
+  <h4>Part 4 — Transactions and concurrency</h4>
+  <ol>
+    <li><a href="../lessons/15-transactions-and-mvcc.html" data-page="15-transactions-and-mvcc"><span class="n">15</span><span>Transactions and MVCC</span></a></li>
+    <li><a href="../lessons/16-locking.html" data-page="16-locking"><span class="n">16</span><span>Locking and concurrency</span></a></li>
+    <li><a href="../lessons/17-vacuum-and-bloat.html" data-page="17-vacuum-and-bloat"><span class="n">17</span><span>Vacuum, bloat and autovacuum</span></a></li>
+  </ol>
+  <h4>Part 5 — Programming the database</h4>
+  <ol>
+    <li><a href="../lessons/18-views-and-functions.html" data-page="18-views-and-functions"><span class="n">18</span><span>Views, functions and procedures</span></a></li>
+    <li><a href="../lessons/19-triggers-and-events.html" data-page="19-triggers-and-events"><span class="n">19</span><span>Triggers, LISTEN/NOTIFY and audit</span></a></li>
+    <li><a href="../lessons/20-partitioning.html" data-page="20-partitioning"><span class="n">20</span><span>Partitioning</span></a></li>
+  </ol>
+  <h4>Part 6 — Operating PostgreSQL</h4>
+  <ol>
+    <li><a href="../lessons/21-configuration.html" data-page="21-configuration"><span class="n">21</span><span>Configuration and tuning</span></a></li>
+    <li><a href="../lessons/22-wal-and-durability.html" data-page="22-wal-and-durability"><span class="n">22</span><span>WAL, checkpoints and durability</span></a></li>
+    <li><a href="../lessons/23-backup-and-recovery.html" data-page="23-backup-and-recovery"><span class="n">23</span><span>Backup, restore and PITR</span></a></li>
+    <li><a href="../lessons/24-replication.html" data-page="24-replication"><span class="n">24</span><span>Replication and high availability</span></a></li>
+    <li><a href="../lessons/25-monitoring.html" data-page="25-monitoring"><span class="n">25</span><span>Monitoring and diagnostics</span></a></li>
+    <li><a href="../lessons/26-connections-and-upgrades.html" data-page="26-connections-and-upgrades"><span class="n">26</span><span>Connections, pooling, extensions and upgrades</span></a></li>
+  </ol>
+  <h4>Part 7 — Putting it together</h4>
+  <ol>
+    <li><a href="../lessons/27-capstone.html" data-page="27-capstone"><span class="n">27</span><span>Capstone project</span></a></li>
+  </ol>
+  <h4>Annexes</h4>
+  <ol>
+    <li><a href="../appendices/a1-select-basics.html" data-page="a1-select-basics"><span class="n">A1</span><span>SELECT, filtering and sorting</span></a></li>
+    <li><a href="../appendices/a2-joins.html" data-page="a2-joins"><span class="n">A2</span><span>Joins and combining tables</span></a></li>
+    <li><a href="../appendices/a3-aggregation.html" data-page="a3-aggregation"><span class="n">A3</span><span>Aggregation and grouping</span></a></li>
+    <li><a href="../appendices/a4-subqueries-and-ctes.html" data-page="a4-subqueries-and-ctes"><span class="n">A4</span><span>Subqueries and CTEs</span></a></li>
+    <li><a href="../appendices/a5-ddl-and-dml.html" data-page="a5-ddl-and-dml"><span class="n">A5</span><span>Creating and changing things</span></a></li>
+    <li><a href="../appendices/b-psql.html" data-page="b-psql"><span class="n">B</span><span>psql cheat sheet</span></a></li>
+    <li><a href="../appendices/c-catalog-queries.html" data-page="c-catalog-queries"><span class="n">C</span><span>Catalog and diagnostic queries</span></a></li>
+    <li><a href="../appendices/d-glossary.html" data-page="d-glossary"><span class="n">D</span><span>Glossary</span></a></li>
+    <li><a href="../appendices/e-troubleshooting.html" data-page="e-troubleshooting"><span class="n">E</span><span>Troubleshooting</span></a></li>
+    <li><a href="../appendices/f-whats-next.html" data-page="f-whats-next"><span class="n">F</span><span>What to learn next</span></a></li>
+  </ol>
+</nav>
+<div class="main">
+<main class="content" id="content">
+<p class="eyebrow">Lesson 18 &middot; Part 5</p>
+<h1>Views, functions and procedures</h1>
+<div class="meta-row"><span class="tag">lesson 18</span><span class="tag">Docker exercises</span><span class="tag">live playground</span></div>
+<p class="lede">
+  A view gives a query a name. A materialized view stores the query's result. A function or procedure runs logic
+  next to the data. This lesson shows when each one helps, the keywords that change how PostgreSQL treats them
+  (<code>STABLE</code>, <code>SECURITY DEFINER</code>, <code>CONCURRENTLY</code>), and the one security mistake
+  that turns a helpful function into a hole.
+</p>
+
+<h2 id="goals">Learning goals</h2>
+<ul>
+  <li>Create a view, read its stored definition, and explain why a simple view can be updated through.</li>
+  <li>Create a materialized view, refresh it, and say why <code>REFRESH ... CONCURRENTLY</code> needs a unique index.</li>
+  <li>Write a SQL function and a PL/pgSQL function, with parameters, defaults and errors.</li>
+  <li>Choose the right volatility (<code>IMMUTABLE</code>, <code>STABLE</code>, <code>VOLATILE</code>) for a function.</li>
+  <li>Write a procedure, run it with <code>CALL</code>, and use <code>COMMIT</code> inside it to work in batches.</li>
+  <li>Explain <code>SECURITY INVOKER</code> versus <code>SECURITY DEFINER</code>, and pin <code>search_path</code> in definer functions.</li>
+</ul>
+
+<h2 id="lab">Set up for this lesson</h2>
+<p>
+  Use the <code>shop</code> database. The playgrounds on this page run in your browser against a small copy of the
+  shop and share one database, so run them in order; press <em>Reset data</em> to start over. The exercises
+  create a view, a function and a procedure in the <code>shop</code> schema of a fresh copy that the checker makes for
+  you, so your own <code>shop</code> stays as it is.
+</p>
+
+<figure class="code" data-lang="bash">
+  <figcaption><span class="path">terminal</span><span class="grow"></span><span class="lang">bash</span></figcaption>
+<pre><code>./pg psql
+\dv shop.*      -- views (none yet)
+\df shop.*      -- functions and procedures (none yet)</code></pre>
+</figure>
+
+<h2 id="views">1. Views: a stored query</h2>
+
+<p>
+  A <strong>view</strong> is a named <code>SELECT</code>. It stores no data: each time you query it, PostgreSQL
+  substitutes the view's query into yours and plans the whole thing together. Use views to give a complicated join
+  one name, to hide columns, or to present a stable interface while the tables underneath change.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">a view of revenue per customer</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">create view shop.v_customer_orders as
+select c.id as customer_id, c.full_name,
+       count(o.id) as orders,
+       coalesce(sum(o.total), 0) as revenue
+from shop.customers c
+left join shop.orders o on o.customer_id = c.id and o.status in ('shipped', 'delivered')
+group by c.id, c.full_name;
+
+select * from shop.v_customer_orders order by revenue desc, customer_id;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  PostgreSQL stores the view as a parsed query, not as your text. <code>select pg_get_viewdef('shop.v_customer_orders'::regclass, true);</code>
+  prints it back, rewritten: <code>IN (...)</code> becomes <code>= ANY (ARRAY[...])</code> and every name is resolved. One
+  consequence: if you later add a column to <code>shop.customers</code>, a view written with <code>select c.*</code> does
+  <em>not</em> gain it. The column list was fixed when the view was created.
+</p>
+
+<h3>Updatable views and WITH CHECK OPTION</h3>
+
+<p>
+  A view over a single table with no aggregates, <code>DISTINCT</code> or joins is <em>automatically updatable</em>:
+  <code>INSERT</code>, <code>UPDATE</code> and <code>DELETE</code> on it change the table underneath. Add
+  <code>WITH CHECK OPTION</code> and PostgreSQL also refuses changes that would make a row fall outside the view.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">step 1: update a table through a view</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">create view shop.v_active_products as
+select id, sku, name, price, active from shop.products where active
+with check option;
+
+update shop.v_active_products set price = 52.00 where sku = 'SKU-00001';
+select sku, price from shop.products where sku = 'SKU-00001';</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>The price changed in <code>shop.products</code>. Now try to hide a product through the same view:</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">step 2: this update fails on purpose</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">update shop.v_active_products set active = false where sku = 'SKU-00001';</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  The error <em>new row violates check option for view "v_active_products"</em> is the point of the example: the row would
+  no longer match the view's <code>where active</code>, so <code>WITH CHECK OPTION</code> refuses the change.
+</p>
+
+<div class="note info">
+  <span class="note-title">Views and privileges</span>
+  <p>
+    By default a view reads its tables with the privileges of the view's <em>owner</em>, so you can grant
+    <code>SELECT</code> on a view without granting it on the tables. Create the view <code>with (security_invoker = true)</code> if
+    you want the caller's privileges (and row-level security policies) to apply instead. <a href="05-security-and-rls.html">Lesson 5</a>
+    covers why that matters with row-level security.
+  </p>
+</div>
+
+<h2 id="matviews">2. Materialized views: a stored result</h2>
+
+<p>
+  A <strong>materialized view</strong> runs its query once and stores the rows, like a table. Reading it is fast; the price is
+  that it is out of date until you run <code>REFRESH MATERIALIZED VIEW</code>. It suits expensive summaries that
+  may lag: dashboards, daily reports, search facets.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">step 1: build a daily summary</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">create materialized view shop.mv_daily_sales as
+select ordered_at::date as day, count(*) as orders, sum(total) as revenue
+from shop.orders
+where status in ('shipped', 'delivered')
+group by 1;
+
+select * from shop.mv_daily_sales order by day;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">step 2: new data does not appear until you refresh</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">insert into shop.orders (customer_id, status, ordered_at, shipping_country, total)
+values (1, 'delivered', '2025-08-01 10:00+00', 'NL', 100);
+
+select count(*) as days_before_refresh from shop.mv_daily_sales;   -- still 8
+refresh materialized view shop.mv_daily_sales;
+select count(*) as days_after_refresh from shop.mv_daily_sales;    -- now 9</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  The playground shows only the last result (9). Run the script up to the first <code>select</code> to see the 8.
+  A plain <code>REFRESH</code> rebuilds the result and locks the materialized view against reads while it works. On a big
+  summary that means readers wait. <code>REFRESH MATERIALIZED VIEW CONCURRENTLY</code> builds the new result on the side,
+  compares it with the old one and applies only the differences, so readers keep reading. To compare rows it must be able
+  to identify each one, so it requires a <strong>unique index</strong> (on plain columns, without a <code>WHERE</code> clause):
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">CONCURRENTLY needs a unique index</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>refresh materialized view concurrently shop.mv_daily_sales;
+-- ERROR:  cannot refresh materialized view "shop.mv_daily_sales" concurrently
+-- HINT:  Create a unique index with no WHERE clause on one or more columns of the materialized view.
+
+create unique index on shop.mv_daily_sales (day);
+refresh materialized view concurrently shop.mv_daily_sales;   -- works</code></pre>
+</figure>
+
+<div class="note warn">
+  <span class="note-title">Nothing refreshes a materialized view for you</span>
+  <p>
+    PostgreSQL has no automatic refresh. Schedule one (a cron job, the <code>pg_cron</code> extension, or your
+    application's job runner), and show the age of the data to whoever reads it. A <code>CONCURRENTLY</code> refresh does
+    more work overall than a plain one; it is cheaper only for the readers.
+  </p>
+</div>
+
+<h2 id="functions">3. Functions in SQL and PL/pgSQL</h2>
+
+<p>
+  A function takes arguments and returns a value (or a set of rows), and you call it inside a query. The
+  simplest kind is written in SQL: its body is one or more SQL statements and it returns the result of the last one.
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">two SQL functions</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create function shop.order_total(p_order_id integer) returns numeric
+language sql stable
+as $$
+  select coalesce(sum(quantity * unit_price), 0)
+  from shop.order_items where order_id = p_order_id
+$$;
+
+-- the SQL-standard body form; p_rate has a default
+create function shop.price_with_vat(p_price numeric, p_rate numeric default 0.21) returns numeric
+language sql immutable
+return round(p_price * (1 + p_rate), 2);
+
+select shop.order_total(1), shop.price_with_vat(100), shop.price_with_vat(100, 0.09);</code></pre>
+</figure>
+
+<p>
+  The <code>$$ ... $$</code> is <em>dollar quoting</em>: a string literal that needs no escaping of single quotes inside it.
+  When the logic needs variables, <code>IF</code>, loops or error handling, use <strong>PL/pgSQL</strong>, the procedural language
+  that ships with PostgreSQL:
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">a PL/pgSQL function with checks</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">create function shop.restock(p_product_id integer, p_qty integer) returns integer
+language plpgsql
+as $$
+declare
+  new_stock integer;
+begin
+  if p_qty <= 0 then
+    raise exception 'quantity must be positive, got %', p_qty;
+  end if;
+
+  update shop.products set stock = stock + p_qty
+  where id = p_product_id
+  returning stock into new_stock;
+
+  if not found then
+    raise exception 'no product with id %', p_product_id;
+  end if;
+  return new_stock;
+end;
+$$;
+
+select shop.restock(1, 10) as new_stock;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  Product 1 had 120 in stock, so the function returns 130. Now try <code>select shop.restock(999, 1);</code>: it fails with
+  <em>no product with id 999</em>. <code>RAISE EXCEPTION</code> aborts the statement and the transaction around it, exactly like a
+  constraint violation, so the caller sees a normal error. <code>FOUND</code> is a built-in variable that tells you whether the last
+  statement touched a row.
+</p>
+
+<h2 id="volatility">4. Volatility: what the planner may assume</h2>
+
+<p>
+  Each function declares how its result behaves. The planner trusts the declaration and does not check it.
+</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Category</th><th>Promise</th><th>Example</th><th>What the planner may do</th></tr></thead>
+  <tbody>
+    <tr><td><code>IMMUTABLE</code></td><td class="wrap">Same arguments, same result, forever. Reads no tables.</td><td class="wrap"><code>price_with_vat</code>, <code>lower()</code></td><td class="wrap">Compute it once at plan time; use it in an index expression</td></tr>
+    <tr><td><code>STABLE</code></td><td class="wrap">Same result within one statement. May read tables.</td><td class="wrap"><code>order_total</code>, <code>now()</code></td><td class="wrap">Call it once per scan and use it for an index lookup</td></tr>
+    <tr><td><code>VOLATILE</code> (default)</td><td class="wrap">Anything goes: may change data or return a new value each call.</td><td class="wrap"><code>restock</code>, <code>random()</code></td><td class="wrap">Call it for every row, in order, every time</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>
+  You can read the declaration back from <code>pg_proc.provolatile</code> (<code>i</code>, <code>s</code> or <code>v</code>).
+  Leaving a read-only function at the default <code>VOLATILE</code> is safe but slow: it can stop the planner from using an
+  index on <code>where id = my_function()</code>.
+</p>
+
+<div class="note danger">
+  <span class="note-title">Do not lie about volatility</span>
+  <p>
+    Marking a function <code>IMMUTABLE</code> when it reads a table, or depends on a setting such as <code>TimeZone</code>,
+    gives wrong results. Results get cached in plans, and an index built on it holds stale values. When in doubt, choose
+    <code>STABLE</code>.
+  </p>
+</div>
+
+<h2 id="procedures">5. Procedures and transaction control</h2>
+
+<p>
+  A <strong>procedure</strong> looks like a function but returns nothing, and you run it with <code>CALL</code>, not
+  <code>SELECT</code>. Its special power is that it may <code>COMMIT</code> or <code>ROLLBACK</code> part-way through. That
+  lets one call work through a big job in small transactions, so locks are held briefly and an interruption loses
+  at most one batch.
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">archive cancelled orders, 6000 at a time</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create table shop.archive_orders (like shop.orders);
+
+create procedure shop.archive_cancelled(p_batch integer default 5000)
+language plpgsql
+as $$
+declare
+  moved integer;
+begin
+  loop
+    with doomed as (
+      select id from shop.orders where status = 'cancelled' order by id limit p_batch for update
+    ), items as (
+      delete from shop.order_items where order_id in (select id from doomed)
+    ), gone as (
+      delete from shop.orders where id in (select id from doomed) returning *
+    )
+    insert into shop.archive_orders select * from gone;
+
+    get diagnostics moved = row_count;
+    exit when moved = 0;
+    commit;                                   -- end this batch's transaction
+    raise notice 'archived % orders', moved;
+  end loop;
+end;
+$$;
+
+call shop.archive_cancelled(6000);</code></pre>
+</figure>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">output on the Docker database</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code>NOTICE:  archived 6000 orders
+NOTICE:  archived 6000 orders
+NOTICE:  archived 2197 orders
+CALL</code></pre>
+</figure>
+
+<p>
+  Try it in a scratch database rather than in <code>shop</code>, since it really moves 14,197 orders. Two rules come with transaction control:
+</p>
+<ul>
+  <li><code>select shop.archive_cancelled();</code> fails with <em>is a procedure</em> and the hint <em>To call a procedure, use CALL</em>.</li>
+  <li><code>COMMIT</code> inside a procedure only works when the <code>CALL</code> itself is not inside an explicit transaction. After <code>begin;</code>, the first <code>commit</code> in the procedure fails with <em>invalid transaction termination</em>.</li>
+</ul>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">a small procedure, called with CALL</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">create procedure shop.close_old_pending(p_before timestamptz)
+language plpgsql
+as $$
+begin
+  update shop.orders set status = 'cancelled'
+  where status = 'pending' and ordered_at < p_before;
+end;
+$$;
+
+call shop.close_old_pending('2025-06-01');
+select status, count(*) from shop.orders group by status order by status;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  The single pending order (from April 2025) is now cancelled. The playground runs each statement on its own, like <code>psql</code>, so a
+  procedure that commits works there too when you <code>CALL</code> it outside <code>BEGIN</code>. Inside a
+  <code>BEGIN</code> block it fails with <em>invalid transaction termination</em>. The batch example above needs the
+  Docker database for the volume of data it works through.
+</p>
+
+<h2 id="security">6. SECURITY INVOKER, SECURITY DEFINER and search_path</h2>
+
+<p>
+  By default a function runs with the privileges of the role that <em>calls</em> it (<code>SECURITY INVOKER</code>).
+  Declare it <code>SECURITY DEFINER</code> and it runs with the privileges of the role that <em>owns</em> it, like a
+  setuid program. That is how you give a role one narrow ability, “look up a customer id by e-mail”, without granting
+  it the table.
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">the same query, two security modes (run in a scratch database)</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create role lab_18_app login;
+grant usage on schema shop to lab_18_app;
+
+create function shop.customer_count_definer() returns bigint
+language sql security definer
+as $$ select count(*) from shop.customers $$;
+create function shop.customer_count_invoker() returns bigint
+language sql
+as $$ select count(*) from shop.customers $$;
+
+set role lab_18_app;
+select shop.customer_count_definer();   -- 20000: runs as the owner
+select shop.customer_count_invoker();   -- ERROR:  permission denied for table customers
+reset role;</code></pre>
+</figure>
+
+<p>
+  Every function is executable by <code>PUBLIC</code> by default. For a definer function, run
+  <code>revoke execute on function ... from public</code> and grant it only to the roles that need it.
+</p>
+
+<h3>The search_path trap</h3>
+
+<p>
+  A definer function that uses an <em>unqualified</em> name (<code>clean_email(...)</code> instead of
+  <code>shop.clean_email(...)</code>) looks that name up through the <em>caller's</em> <code>search_path</code>. A caller who can
+  create objects in any schema can put a function with the same name first on their path, and the owner's privileges run
+  the caller's code. This was tested on the Docker database:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">a definer function that trusts search_path (do not copy)</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create function shop.clean_email(p text) returns text
+language sql immutable as $$ select lower(trim(p)) $$;
+
+create function shop.find_customer(p_email text) returns integer
+language plpgsql security definer
+as $$
+declare wanted text := clean_email(p_email);   -- no schema: found via search_path
+begin
+  return (select id from shop.customers where email = wanted);
+end;
+$$;
+grant execute on function shop.clean_email(text), shop.find_customer(text) to lab_18_app;
+
+-- the caller owns a schema and plants a look-alike
+create schema lab_18_evil authorization lab_18_app;
+set role lab_18_app;
+create function lab_18_evil.clean_email(p text) returns text language plpgsql
+as $$ begin raise notice 'this code runs as %', current_user; return lower(trim(p)); end $$;
+set search_path = lab_18_evil, shop;
+select shop.find_customer('chloe.visser2@shop.test');
+-- NOTICE:  this code runs as postgres
+reset role;
+reset search_path;</code></pre>
+</figure>
+
+<p>
+  The caller's function ran as <code>postgres</code>, the owner of <code>find_customer</code>. The fix is to pin
+  <code>search_path</code> on the function (and to qualify names anyway):
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">the safe version</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create or replace function shop.find_customer(p_email text) returns integer
+language plpgsql security definer
+set search_path = pg_catalog, shop
+as $$
+declare wanted text := shop.clean_email(p_email);
+begin
+  return (select id from shop.customers where email = wanted);
+end;
+$$;
+
+select proname, proconfig from pg_proc where proname = 'find_customer';
+-- find_customer | {"search_path=pg_catalog, shop"}</code></pre>
+</figure>
+
+<div class="note danger">
+  <span class="note-title">Every SECURITY DEFINER function needs SET search_path</span>
+  <p>
+    Put <code>set search_path = pg_catalog, &lt;your schema&gt;</code> on the function (or <code>= ''</code> and
+    qualify every name), never include a schema that untrusted roles can write to, and revoke <code>EXECUTE</code> from
+    <code>PUBLIC</code>. A definer function owned by a superuser and missing these is a privilege escalation waiting to happen.
+  </p>
+</div>
+
+<h2 id="when">When to use, when not to</h2>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Situation</th><th class="wrap">✅ Do this</th><th class="wrap">❌ Not this</th></tr></thead>
+  <tbody>
+    <tr><td class="wrap">The same join appears in ten queries</td><td class="wrap">A view</td><td class="wrap">Copy-pasting the join</td></tr>
+    <tr><td class="wrap">An expensive report that may be an hour old</td><td class="wrap">A materialized view with a unique index, refreshed <code>CONCURRENTLY</code> on a schedule</td><td class="wrap">Running the full aggregate on every page view</td></tr>
+    <tr><td class="wrap">Data must be exactly current</td><td class="wrap">A plain view, plus indexes for its query</td><td class="wrap">A materialized view</td></tr>
+    <tr><td class="wrap">A rule every writer must obey (e.g. valid price)</td><td class="wrap">A constraint first; a function or procedure if it needs logic</td><td class="wrap">Trusting each application to check</td></tr>
+    <tr><td class="wrap">A long batch job</td><td class="wrap">A procedure that commits every N rows</td><td class="wrap">One giant transaction</td></tr>
+    <tr><td class="wrap">Give a role one narrow ability on a table</td><td class="wrap"><code>SECURITY DEFINER</code> with <code>SET search_path</code> and a narrow <code>GRANT EXECUTE</code></td><td class="wrap">Granting the whole table, or a definer function with no fixed path</td></tr>
+    <tr><td class="wrap">Business logic that changes weekly and needs unit tests</td><td class="wrap">Keep it in the application</td><td class="wrap">Hundreds of lines of PL/pgSQL nobody reviews</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="inspect">Inspect it</h2>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">every view, function and procedure you own, with its key properties</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select n.nspname as schema, p.proname as name,
+       case p.prokind when 'f' then 'function' when 'p' then 'procedure' else p.prokind::text end as kind,
+       p.provolatile as volatility, p.prosecdef as security_definer, p.proconfig as settings
+from pg_proc p
+join pg_namespace n on n.oid = p.pronamespace
+where n.nspname not in ('pg_catalog', 'information_schema')
+order by 1, 2;
+
+select schemaname, viewname from pg_views where schemaname = 'shop'
+union all
+select schemaname, matviewname || ' (materialized)' from pg_matviews where schemaname = 'shop'
+order by 1, 2;</code></pre>
+</figure>
+
+<p>In psql, <code>\dv</code>, <code>\dm</code> and <code>\df+</code> show the same things, and <code>\sf shop.restock</code> prints a function's source.</p>
+
+<h2 id="exercises">Your turn</h2>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 1</span><span class="grow"></span><span class="lvl">basic</span></div>
+  <div class="ex-body">
+    <p>
+      Create the view <code>shop.v_country_revenue</code> with exactly the columns <code>country</code>, <code>orders</code> and
+      <code>revenue</code>: one row per customer country, counting only shipped and delivered orders.
+    </p>
+    <p>Open <code>exercises/18/1.sql</code>, write your answer, then run <code>./pg check 18 1</code>.</p>
+  </div>
+  <figure class="code" data-lang="sql">
+  <figcaption><span class="path">exercises/18/1.sql</span><span class="grow"></span><span class="lang">your starting file</span></figcaption>
+<pre><code>-- Create a view shop.v_country_revenue with one row per customer country and
+-- three columns: country, orders (the number of orders) and revenue (the sum
+-- of orders.total). Count only orders whose status is 'shipped' or
+-- 'delivered'. Run ./pg check 18 1 when you are done.</code></pre>
+</figure>
+  <details><summary>Hint</summary><p>Join <code>shop.orders</code> to <code>shop.customers</code>, filter on <code>status in (...)</code>, and group by <code>c.country</code>. Use column aliases to get the names right.</p></details>
+  <details class="solution"><summary>Show a model solution for exercise 1 (try first!)</summary>
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">solutions/18/1.sql</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create view shop.v_country_revenue as
+select c.country, count(*) as orders, sum(o.total) as revenue
+from shop.orders o
+join shop.customers c on c.id = o.customer_id
+where o.status in ('shipped', 'delivered')
+group by c.country;</code></pre>
+</figure>
+</details>
+</section>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 2</span><span class="grow"></span><span class="lvl">intermediate</span></div>
+  <div class="ex-body">
+    <p>
+      Write the function <code>shop.customer_lifetime_value(p_customer_id integer)</code> returning <code>numeric</code>: the
+      total of that customer's shipped and delivered orders, or 0 if there are none. Declare the right volatility.
+    </p>
+    <p>Open <code>exercises/18/2.sql</code>, write your answer, then run <code>./pg check 18 2</code>.</p>
+  </div>
+  <figure class="code" data-lang="sql">
+  <figcaption><span class="path">exercises/18/2.sql</span><span class="grow"></span><span class="lang">your starting file</span></figcaption>
+<pre><code>-- Write a function shop.customer_lifetime_value(p_customer_id integer)
+-- returning numeric: the sum of orders.total for that customer, counting only
+-- orders whose status is 'shipped' or 'delivered'. A customer with no such
+-- orders must get 0, not NULL. It only reads data, so mark it STABLE.
+-- Run ./pg check 18 2 when you are done.</code></pre>
+</figure>
+  <details><summary>Hint</summary><p>A SQL function is enough. <code>sum()</code> over no rows returns NULL, so wrap it in <code>coalesce(..., 0)</code>. It reads a table, so it cannot be <code>IMMUTABLE</code>.</p></details>
+  <details class="solution"><summary>Show a model solution for exercise 2 (try first!)</summary>
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">solutions/18/2.sql</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create function shop.customer_lifetime_value(p_customer_id integer)
+returns numeric
+language sql
+stable
+as $$
+  select coalesce(sum(total), 0)
+  from shop.orders
+  where customer_id = p_customer_id
+    and status in ('shipped', 'delivered')
+$$;</code></pre>
+</figure>
+</details>
+</section>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 3</span><span class="grow"></span><span class="lvl">challenge</span></div>
+  <div class="ex-body">
+    <p>
+      Write the PL/pgSQL procedure <code>shop.set_price(p_sku text, p_price numeric)</code>. It sets the price of one
+      product, and raises an error for a price that is not above 0 or for an unknown sku. Then <code>CALL</code> it to
+      set <code>SKU-00001</code> to 59.90. The check calls your procedure with bad input and expects errors.
+    </p>
+    <p>Open <code>exercises/18/3.sql</code>, write your answer, then run <code>./pg check 18 3</code>.</p>
+  </div>
+  <figure class="code" data-lang="sql">
+  <figcaption><span class="path">exercises/18/3.sql</span><span class="grow"></span><span class="lang">your starting file</span></figcaption>
+<pre><code>-- Write a PL/pgSQL procedure shop.set_price(p_sku text, p_price numeric) that
+-- sets the price of the product with that sku. It must raise an error when
+-- p_price is not greater than 0, and also when no product has that sku.
+-- Then use it (with CALL) to set the price of SKU-00001 to 59.90.
+-- Run ./pg check 18 3 when you are done.</code></pre>
+</figure>
+  <details><summary>Hint</summary><p>Copy the shape of <code>shop.restock</code> from section 3: an <code>IF ... RAISE EXCEPTION</code> before the update and an <code>IF NOT FOUND</code> after it. A procedure has no <code>RETURNS</code> clause.</p></details>
+  <details class="solution"><summary>Show a model solution for exercise 3 (try first!)</summary>
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">solutions/18/3.sql</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create procedure shop.set_price(p_sku text, p_price numeric)
+language plpgsql
+as $$
+begin
+  if p_price is null or p_price &lt;= 0 then
+    raise exception 'price must be greater than 0, got %', p_price;
+  end if;
+  update shop.products set price = p_price where sku = p_sku;
+  if not found then
+    raise exception 'no product with sku %', p_sku;
+  end if;
+end;
+$$;
+
+call shop.set_price('SKU-00001', 59.90);</code></pre>
+</figure>
+</details>
+</section>
+
+<h2 id="summary">Summary</h2>
+<ul>
+  <li>A view is a stored query, expanded into yours at plan time. Simple views are updatable; <code>WITH CHECK OPTION</code> keeps rows inside the view.</li>
+  <li>A materialized view stores a result and is stale until refreshed. <code>CONCURRENTLY</code> keeps readers going and needs a unique index.</li>
+  <li>SQL functions suit one query; PL/pgSQL adds variables, control flow and <code>RAISE</code>.</li>
+  <li>Declare volatility honestly: <code>IMMUTABLE</code> reads nothing, <code>STABLE</code> may read, <code>VOLATILE</code> is the default.</li>
+  <li>Procedures run with <code>CALL</code> and may <code>COMMIT</code> between batches, but not inside an outer transaction.</li>
+  <li>Functions run as the caller by default. <code>SECURITY DEFINER</code> runs as the owner, and always needs <code>SET search_path</code> and a narrow <code>GRANT EXECUTE</code>.</li>
+</ul>
+
+<h2 id="next">Looking ahead</h2>
+<p>
+  Functions run when someone calls them. <a href="19-triggers-and-events.html">Lesson 19</a> attaches functions to events instead:
+  triggers that fire on every insert or update, audit tables, event triggers for DDL, and <code>LISTEN</code>/<code>NOTIFY</code>.
+</p>
+<div class="lesson-done" data-lesson="18-views-and-functions"></div>
+<nav class="pager"><a class="prev" href="../lessons/17-vacuum-and-bloat.html"><span class="dir">Previous</span><span class="lbl">17 · Vacuum, bloat and autovacuum</span></a><a class="next" href="../lessons/19-triggers-and-events.html"><span class="dir">Next</span><span class="lbl">19 · Triggers, LISTEN/NOTIFY and audit</span></a></nav>
+</main>
+<aside class="toc" aria-label="On this page"></aside>
+</div>
+</div>
+<script src="../assets/js/search-index.js"></script>
+<script src="../assets/js/mini-seed.js"></script>
+<script src="../assets/js/course.js"></script>
+</body>
+</html>

@@ -1,0 +1,843 @@
+<p class="lede">
+  Reading data is the easy half of SQL. This lesson is about writing it well: inserting rows that might
+  already exist, getting back what the database generated, updating one table from another, merging a feed
+  into a table, loading a file, and wrapping a multi-step change so that it either happens completely or not
+  at all. Every example uses the shop tables.
+</p>
+
+<h2 id="goals">Learning goals</h2>
+<ul>
+  <li>Write <code>INSERT ... ON CONFLICT</code> with <code>DO NOTHING</code> and <code>DO UPDATE</code>, and explain why the conflict target must match a unique index.</li>
+  <li>Use <code>RETURNING</code> to read generated values, and <code>old</code> and <code>new</code> to see a row before and after a change.</li>
+  <li>Update or delete rows based on another table with <code>UPDATE ... FROM</code> and <code>DELETE ... USING</code>.</li>
+  <li>Chain several writes in one statement with data-modifying CTEs.</li>
+  <li>Write a <code>MERGE</code> with several <code>WHEN</code> branches and read its result with <code>merge_action()</code>.</li>
+  <li>Load and export data with <code>COPY</code> and <code>\copy</code>, and know what the in-browser playground cannot do.</li>
+  <li>Protect yourself from the classic mistakes: <code>UPDATE</code> without <code>WHERE</code>, and duplicates in a table with no key.</li>
+</ul>
+
+<h2 id="lab">Set up for this lesson</h2>
+<p>
+  Use the <code>shop</code> database. Most examples change data, so run them between <code>begin;</code> and
+  <code>rollback;</code>. A <em>transaction</em> is a group of statements that succeed or fail together
+  (<a href="15-transactions-and-mvcc.html">lesson 15</a> goes deep); <code>rollback</code> throws every change
+  in the group away, so your data stays as the course seeded it. The exercises work on a fresh copy of the
+  database, so you can change <code>shop</code> freely there.
+</p>
+
+<figure class="code" data-lang="bash">
+  <figcaption><span class="path">terminal</span><span class="grow"></span><span class="lang">bash</span></figcaption>
+<pre><code>./pg psql
+select version();</code></pre>
+</figure>
+
+<div class="note info">
+  <span class="note-title">Playground and Docker give different numbers</span>
+  <p>
+    The in-browser playground has the small shop (8 products, 12 orders), the Docker database has 500 products
+    and 200 000 orders. The same statement can print different ids and prices in the two places. The outputs
+    quoted in this lesson say which one they came from. Playground boxes on this page share one database, so run
+    them from top to bottom, and use “Reset data” to start over.
+  </p>
+</div>
+
+<h2 id="insert-returning">1. Insert, and get back what the database made</h2>
+
+<p>
+  <code>INSERT</code> accepts many rows in one statement, and one statement is faster and safer than many: it
+  is one round trip and it is atomic (all rows go in, or none). Add <code>RETURNING</code> and the statement
+  also returns rows, using any expression over the inserted row. That is how you learn the ids the database
+  generated without a second query.
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">two rows in, two rows back (Docker)</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>begin;
+insert into shop.categories (name, parent_id)
+values ('Garden', (select id from shop.categories where name = 'Outdoor')),
+       ('Toys', null)
+returning id, name, parent_id;
+rollback;</code></pre>
+</figure>
+
+<p>On a fresh course database this prints:</p>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">output</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code> id |  name  | parent_id
+----+--------+-----------
+ 14 | Garden |         4
+ 15 | Toys   |
+(2 rows)</code></pre>
+</figure>
+
+<p>
+  The ids 14 and 15 come from the <em>identity</em> column of <code>shop.categories</code>: PostgreSQL keeps a
+  counter and hands out the next value. Remember this detail, because the counter does not go backwards.
+  Run the same block again after the <code>rollback</code> and you get 16 and 17, not 14 and 15. A counter that
+  could be rolled back would make concurrent inserts wait for each other.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">insert two categories and read their ids back</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">insert into shop.categories (name, parent_id)
+values ('Garden', 4), ('Toys', null)
+returning id, name, parent_id;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  In the playground the new ids are 10 and 11, because the small shop starts with nine categories. Keep these
+  two rows: the next playground uses them.
+</p>
+
+<h2 id="on-conflict">2. INSERT ... ON CONFLICT</h2>
+
+<p>
+  What should an insert do when the row already exists? By default it fails with a unique violation. With
+  <code>ON CONFLICT</code> you choose. A <em>conflict</em> means: the new row would break a unique index or
+  primary key. Inserting a row that does not exist and updating one that does is called an <em>upsert</em>.
+</p>
+
+<h3>DO NOTHING: skip the duplicates</h3>
+
+<p>
+  <code>DO NOTHING</code> silently skips the conflicting rows and inserts the rest. <code>RETURNING</code> only
+  returns the rows that were really inserted, which makes it easy to see what happened.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">'Garden' already exists after the last box, 'Pets' does not</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">insert into shop.categories (name)
+values ('Garden'), ('Pets')
+on conflict (name) do nothing
+returning id, name;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  Only <code>Pets</code> comes back, with id 13, not 12. Id 12 was handed out to the skipped
+  <code>Garden</code> row and then thrown away: the counter moved even though nothing was stored. Gaps in
+  identity numbers are normal; never build logic that expects them to be consecutive.
+</p>
+
+<h3>DO UPDATE: insert or change</h3>
+
+<p>
+  <code>DO UPDATE</code> changes the existing row instead. Inside it, <code>excluded</code> is the row you
+  tried to insert, and the table name (or its alias) is the row already stored. A price feed is the classic
+  case: new SKUs are added, known SKUs get their price refreshed.
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">upsert a price feed (Docker)</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>begin;
+insert into shop.products (sku, name, description, category_id, price, stock, created_at)
+values
+  ('SKU-00001', 'Premium tent', 'A tent', 5, 54.99, 120, '2025-01-01'),
+  ('SKU-90001', 'Desk fan', 'A quiet desk fan', 6, 39.00, 25, '2025-01-01')
+on conflict (sku) do update
+  set price = excluded.price
+returning sku, old.price as old_price, new.price as new_price, (old.sku is null) as inserted;
+rollback;</code></pre>
+</figure>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">output</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code>    sku    | old_price | new_price | inserted
+-----------+-----------+-----------+----------
+ SKU-00001 |     45.80 |     54.99 | f
+ SKU-90001 |           |     39.00 | t
+(2 rows)</code></pre>
+</figure>
+
+<p>
+  The existing row kept its name, stock and category: only the columns in <code>SET</code> changed. The
+  <code>old</code> and <code>new</code> aliases in <code>RETURNING</code> are explained in section 3; here they
+  also tell inserted rows from updated ones, because a freshly inserted row has no old version.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">the same upsert on the small shop</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">insert into shop.products (sku, name, description, category_id, price, stock, created_at)
+values
+  ('SKU-00001', 'Compact speaker', 'A compact speaker for everyday use.', 5, 54.99, 120, '2025-01-01'),
+  ('SKU-90001', 'Desk fan',        'A quiet desk fan.',                   6, 39.00,  25, '2025-01-01')
+on conflict (sku) do update
+  set price = excluded.price
+returning sku, old.price as old_price, new.price as new_price, (old.sku is null) as inserted;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<h3>The conflict target must match a unique index</h3>
+
+<p>
+  <code>ON CONFLICT (sku)</code> is not a filter, it is a pointer to a unique index or constraint. PostgreSQL
+  uses that index to detect the conflict and to lock the existing row, which is what makes the upsert safe when
+  two sessions run it at the same time. If no unique index matches the columns you named, the statement is
+  rejected:
+</p>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">on conflict (name) on shop.products, which has no unique index on name</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code>ERROR:  there is no unique or exclusion constraint matching the ON CONFLICT specification</code></pre>
+</figure>
+
+<p>
+  You can also name the constraint, <code>ON CONFLICT ON CONSTRAINT products_sku_key</code>, or omit the target
+  with <code>DO NOTHING</code> to skip a conflict on <em>any</em> unique index. Omitting it is convenient and
+  hides which rule fired, so prefer an explicit target.
+</p>
+
+<h3>Partial unique indexes need their predicate</h3>
+
+<p>
+  A <em>partial</em> index only covers rows that satisfy a <code>WHERE</code> condition. If a unique index is
+  partial, the conflict target must repeat the same condition. Here a coupon code must be unique among active
+  coupons only:
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">a partial unique index and the matching conflict target</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">create table shop.coupons (code text not null, active boolean not null default true);
+create unique index coupons_one_active on shop.coupons (code) where active;
+
+insert into shop.coupons (code) values ('SPRING');
+insert into shop.coupons (code) values ('SPRING')
+on conflict (code) where active do nothing;
+
+select count(*) as coupons from shop.coupons;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  The second insert is skipped, so one coupon remains. Now leave out the <code>where active</code>. This next
+  box fails <strong>on purpose</strong>, with the same “no unique or exclusion constraint matching” error as
+  above. The index exists, but it does not cover every row, so it cannot answer “does this code exist?”:
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">expected error: the target does not match the partial index</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">insert into shop.coupons (code) values ('SPRING')
+on conflict (code) do nothing;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<div class="note warn">
+  <span class="note-title">One source row, one target row</span>
+  <p>
+    If the same statement proposes two rows with the same key and you use <code>DO UPDATE</code>, PostgreSQL
+    refuses: <em>ON CONFLICT DO UPDATE command cannot affect row a second time</em>. It cannot decide which of
+    your two versions wins. Remove the duplicates from the input first (<code>DISTINCT ON</code> or an
+    aggregate). <code>DO NOTHING</code> does not have this problem.
+  </p>
+</div>
+
+<div class="note tip">
+  <span class="note-title">Update only when something changed</span>
+  <p>
+    <code>DO UPDATE ... WHERE shop.products.price IS DISTINCT FROM excluded.price</code> skips rows whose value
+    is already right. An update that changes nothing still writes a new row version, which costs I/O and, later,
+    vacuum work (<a href="17-vacuum-and-bloat.html">lesson 17</a>). On the Docker shop, upserting
+    <code>SKU-00001</code> at its current price 45.80 with this <code>WHERE</code> returns zero rows.
+  </p>
+</div>
+
+<h2 id="returning-from">3. RETURNING, old and new, and changing rows based on other tables</h2>
+
+<h3>Old and new values</h3>
+
+<p>
+  <code>RETURNING</code> works on <code>INSERT</code>, <code>UPDATE</code>, <code>DELETE</code> and
+  <code>MERGE</code>. Since PostgreSQL 18 you can write <code>old.column</code> and <code>new.column</code>
+  to get the value before and after the change. Before 18, <code>UPDATE ... RETURNING</code> gave you only the
+  new values, and you needed a trick to see the old ones. For an insert, <code>old</code> is null; for a delete,
+  <code>new</code> is null.
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">raise two prices by 10 percent and see both versions (Docker)</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>begin;
+update shop.products
+set price = round(price * 1.10, 2)
+where sku in ('SKU-00001', 'SKU-00002')
+returning sku, old.price as old_price, new.price as new_price;
+rollback;</code></pre>
+</figure>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">output</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code>    sku    | old_price | new_price
+-----------+-----------+-----------
+ SKU-00001 |     45.80 |     50.38
+ SKU-00002 |     69.68 |     76.65
+(2 rows)</code></pre>
+</figure>
+
+<h3>UPDATE ... FROM: join inside an update</h3>
+
+<p>
+  To change a table using values from another table, list the other table in <code>FROM</code> and join it in
+  <code>WHERE</code>. The target table is not repeated in <code>FROM</code>. The order totals in
+  <code>shop.orders</code> are a stored copy of the sum of the lines; if they ever drift, one statement repairs
+  them.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">break three totals, then repair them from the order lines</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">-- Break three order totals on purpose, then repair them from the line items.
+update shop.orders set total = 0 where id <= 3;
+
+update shop.orders o
+set total = s.line_sum
+from (
+  select order_id, sum(quantity * unit_price) as line_sum
+  from shop.order_items
+  group by order_id
+) s
+where s.order_id = o.id
+  and o.total is distinct from s.line_sum
+returning o.id, old.total as old_total, new.total as new_total;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  Only the three damaged orders are touched, because the extra <code>IS DISTINCT FROM</code> condition skips
+  rows that are already right. <code>IS DISTINCT FROM</code> is a comparison that treats null as an ordinary
+  value, so it works when either side could be null.
+</p>
+
+<div class="note danger">
+  <span class="note-title">A join that matches twice is silently wrong</span>
+  <p>
+    If a target row matches several rows in the <code>FROM</code> table, <code>UPDATE ... FROM</code> picks
+    <em>one</em> of them without telling you which, and without an error. Make sure the joined source has at
+    most one row per target row (group it, as above, or join on a unique key). <code>MERGE</code>, in
+    section 5, refuses this situation instead.
+  </p>
+</div>
+
+<h3>DELETE ... USING</h3>
+
+<p>
+  <code>DELETE</code> has the same idea with <code>USING</code>. This removes the lines of cancelled orders and
+  lists what it removed:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">delete lines of cancelled orders (Docker, rolled back)</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>begin;
+delete from shop.order_items oi
+using shop.orders o
+where o.id = oi.order_id
+  and o.status = 'cancelled'
+  and o.id &lt;= 100
+returning oi.order_id, oi.line_no;
+rollback;</code></pre>
+</figure>
+
+<p>On the Docker shop it returns 24 rows, and psql prints the command tag <code>DELETE 24</code> after them.</p>
+
+<h2 id="cte">4. Several writes in one statement: data-modifying CTEs</h2>
+
+<p>
+  A <code>WITH</code> query (a <em>CTE</em>, common table expression; see
+  <a href="08-advanced-queries.html">lesson 8</a>) may contain <code>INSERT</code>, <code>UPDATE</code> or
+  <code>DELETE ... RETURNING</code>. The rows it returns feed the next step. The whole statement is atomic. Here
+  is a new order and its lines created together, using the id the first insert generated:
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">create an order and its lines in one statement</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">with new_order as (
+  insert into shop.orders (customer_id, status, ordered_at, shipping_country)
+  values (1, 'pending', '2025-08-01 10:00+00', 'NL')
+  returning id
+), new_items as (
+  insert into shop.order_items (order_id, line_no, product_id, quantity, unit_price)
+  select n.id, v.line_no, p.id, v.qty, p.price
+  from new_order n
+  cross join (values (1, 'SKU-00001', 2), (2, 'SKU-00003', 1)) as v(line_no, sku, qty)
+  join shop.products p on p.sku = v.sku
+  returning order_id, quantity * unit_price as line_total
+)
+select order_id, sum(line_total) as total
+from new_items
+group by order_id;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  The same pattern moves rows from one table to another without a window where a row is in both or in neither:
+  <code>WITH moved AS (DELETE FROM a WHERE ... RETURNING *) INSERT INTO b SELECT * FROM moved</code>. Exercise 3
+  uses it.
+</p>
+
+<div class="note warn">
+  <span class="note-title">All parts of a statement see the same snapshot</span>
+  <p>
+    The sub-statements of one <code>WITH</code> run against the data as it was when the statement began. They do
+    not see each other's changes to the tables. In a test on the Docker shop, an <code>UPDATE</code> that tried to
+    find an order inserted by a CTE in the same statement, by looking it up in <code>shop.orders</code>, updated
+    zero rows. The only way to hand data between steps is <code>RETURNING</code> and the CTE name, as above.
+  </p>
+</div>
+
+<h2 id="merge">5. MERGE</h2>
+
+<p>
+  <code>MERGE</code> compares a source of rows with a target table and applies a different action to each
+  group of rows: those found in both, those only in the source, and those only in the target. It arrived in
+  PostgreSQL 15; <code>WHEN NOT MATCHED BY SOURCE</code> and <code>RETURNING</code> with
+  <code>merge_action()</code> were added in 17, and <code>old</code>/<code>new</code> in <code>RETURNING</code> in 18.
+  All three work in this course database.
+</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Branch</th><th>Rows it applies to</th><th>Allowed actions</th></tr></thead>
+  <tbody>
+    <tr><td><code>WHEN MATCHED</code></td><td class="wrap">Source row and target row have the same join key</td><td class="wrap"><code>UPDATE</code>, <code>DELETE</code>, <code>DO NOTHING</code></td></tr>
+    <tr><td><code>WHEN NOT MATCHED</code></td><td class="wrap">Source row with no target row (also written <code>BY TARGET</code>)</td><td class="wrap"><code>INSERT</code>, <code>DO NOTHING</code></td></tr>
+    <tr><td><code>WHEN NOT MATCHED BY SOURCE</code></td><td class="wrap">Target row with no source row</td><td class="wrap"><code>UPDATE</code>, <code>DELETE</code>, <code>DO NOTHING</code></td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>
+  Each branch can have an extra <code>AND condition</code>, and PostgreSQL uses the first branch whose
+  condition is true for each row. A stocktake is a natural fit: the warehouse counted some products. Counted
+  products get their stock set, unknown SKUs are added, and products in one category that were not counted at
+  all are switched off.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">MERGE a stocktake and read what happened to every row</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">with changes as (
+  merge into shop.products p
+  using (values ('SKU-00001', 118), ('SKU-00002', 41), ('SKU-90002', 15)) as d(sku, counted)
+  on p.sku = d.sku
+  when matched then
+    update set stock = d.counted
+  when not matched then
+    insert (sku, name, description, category_id, price, stock, created_at)
+    values (d.sku, 'Unnamed product', 'Added by stocktake', 6, 9.99, d.counted, '2025-01-01')
+  when not matched by source and p.category_id = 6 then
+    update set active = false
+  returning merge_action() as action, p.sku, old.stock as old_stock, new.stock as new_stock, new.active
+)
+select * from changes order by sku;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  <code>merge_action()</code> returns <code>INSERT</code>, <code>UPDATE</code> or <code>DELETE</code> for each
+  row. Here the rows for <code>SKU-00001</code> and <code>SKU-00002</code> were matched, <code>SKU-90002</code>
+  was inserted, and the other products of category 6 were deactivated by the “not matched by source” branch.
+  Without the extra <code>AND p.category_id = 6</code> that branch would have switched off <em>every</em>
+  product that was not in the list.
+</p>
+
+<div class="note warn">
+  <span class="note-title">MERGE is not a safer ON CONFLICT</span>
+  <p>
+    <code>MERGE</code> checks for a matching row first and inserts afterwards, so two sessions can both decide
+    that a row is missing and both insert it; one of them then fails with a unique violation. <code>INSERT ...
+    ON CONFLICT</code> is built to avoid that race. Use <code>ON CONFLICT</code> for a plain insert-or-update on
+    one key under concurrent load. Use <code>MERGE</code> when you need several different actions, deletes, or
+    conditions per row. Also note that <code>MERGE</code> raises <em>MERGE command cannot affect row a second
+    time</em> when two source rows match one target row, which is the safe answer to the
+    <code>UPDATE ... FROM</code> trap in section 3.
+  </p>
+</div>
+
+<h2 id="copy">6. COPY: bulk in and out</h2>
+
+<p>
+  <code>COPY</code> moves many rows between a table (or a query) and a file or stream, much faster than a
+  series of <code>INSERT</code> statements. There are two ways to run it, and the difference matters.
+</p>
+
+<ul>
+  <li><strong><code>COPY</code></strong> (the SQL command) runs <em>on the server</em>. A file path means a file on the server's disk, and reading or writing server files needs special privileges.</li>
+  <li><strong><code>\copy</code></strong> (a psql command) runs <em>in the client</em>: psql reads or writes the file on your machine and streams it to the server through <code>COPY ... FROM STDIN</code> or <code>TO STDOUT</code>. This is what you want from your laptop.</li>
+</ul>
+
+<p>
+  Because the course database runs in a container, a server-side file path points inside the container, where
+  you have nothing to read. The simple, portable way is to use <code>STDIN</code> and <code>STDOUT</code>.
+  A SQL file can carry its own data after a <code>FROM STDIN</code> line, ending with a line holding
+  <code>\.</code>:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">feed.sql: load three rows from the file itself, run with ./pg run feed.sql</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create temp table price_feed (sku text primary key, price numeric(10,2) not null);
+
+copy price_feed from stdin with (format csv, header);
+sku,price
+SKU-00001,54.99
+SKU-00002,70.10
+SKU-90001,39.00
+\.
+
+select * from price_feed order by sku;</code></pre>
+</figure>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">output</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code>CREATE TABLE
+COPY 3
+    sku    | price
+-----------+-------
+ SKU-00001 | 54.99
+ SKU-00002 | 70.10
+ SKU-90001 | 39.00
+(3 rows)</code></pre>
+</figure>
+
+<p>
+  The tag <code>COPY 3</code> is the number of rows loaded. A temporary table (<code>create temp table</code>)
+  lives only for your session, which is why it is a good staging area: load the raw file into it, check it with
+  SQL, then use <code>INSERT ... SELECT</code> or <code>MERGE</code> to move the good rows into the real table.
+</p>
+
+<p>
+  To export, <code>COPY (query) TO STDOUT</code> sends rows to your terminal, and the shell redirect turns that
+  into a file on your machine:
+</p>
+
+<figure class="code" data-lang="bash">
+  <figcaption><span class="path">terminal</span><span class="grow"></span><span class="lang">bash</span></figcaption>
+<pre><code>echo "copy (select sku, price from shop.products where id &lt;= 3 order by id) to stdout with (format csv, header);" &gt; export.sql
+./pg run export.sql &gt; prices.csv
+cat prices.csv</code></pre>
+</figure>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">prices.csv</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code>sku,price
+SKU-00001,45.80
+SKU-00002,69.68
+SKU-00003,7.19</code></pre>
+</figure>
+
+<p>
+  With an ordinary <code>psql</code> on your own machine, the same idea is
+  <code>\copy price_feed from 'prices.csv' with (format csv, header)</code>: one line, and the file is read
+  from the directory you started psql in.
+</p>
+
+<h3>Bad rows: ON_ERROR</h3>
+
+<p>
+  By default one bad line aborts the whole <code>COPY</code> and nothing is loaded. Since PostgreSQL 17,
+  <code>ON_ERROR ignore</code> skips lines whose values cannot be converted to the column type (for example text
+  in a number column) and loads the rest. <code>LOG_VERBOSITY verbose</code> reports each skipped line:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">skip a line that is not a number (Docker)</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create temp table feed2 (sku text, price numeric(10,2));
+copy feed2 from stdin with (format csv, header, on_error ignore, log_verbosity verbose);
+sku,price
+A,1.00
+B,not-a-number
+C,3.00
+\.
+select * from feed2 order by sku;</code></pre>
+</figure>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">output</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code>COPY 2
+NOTICE:  skipping row due to data type incompatibility at line 3 for column "price": "not-a-number"
+NOTICE:  1 row was skipped due to data type incompatibility
+ sku | price
+-----+-------
+ A   |  1.00
+ C   |  3.00
+(2 rows)</code></pre>
+</figure>
+
+<div class="note warn">
+  <span class="note-title">COPY in the playground</span>
+  <p>
+    The browser playground cannot do what this section shows. There is no terminal and no file on your machine
+    for it to read, so <code>COPY ... FROM STDIN</code> has no input to wait for (in a test run it simply
+    waited), and <code>\copy</code> is a psql command that the playground does not have. Do this section in
+    Docker with <code>./pg run</code> or <code>./pg psql</code>. In the playground, use
+    <code>INSERT ... SELECT</code> and <code>generate_series</code> (next section) to make rows.
+  </p>
+</div>
+
+<div class="note danger">
+  <span class="note-title">Server-side COPY is a privilege, not a convenience</span>
+  <p>
+    <code>COPY ... FROM '/path'</code>, <code>TO '/path'</code> and especially <code>FROM PROGRAM</code> run as
+    the operating-system user of the database server. Only superusers and members of
+    <code>pg_read_server_files</code>, <code>pg_write_server_files</code> or <code>pg_execute_server_program</code> may use
+    them. Do not grant these to an application role (<a href="05-security-and-rls.html">lesson 5</a>).
+  </p>
+</div>
+
+<h2 id="bulk">7. Loading a lot of rows</h2>
+
+<p>
+  When you need many rows, work with sets, not loops. The simplest bulk source is <code>generate_series</code>,
+  a function that returns the numbers from one value to another:
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">generate a thousand rows in one statement</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">create table shop.import_demo (id integer primary key, sku text not null, qty integer not null);
+
+insert into shop.import_demo (id, sku, qty)
+select g, 'SKU-' || lpad(g::text, 5, '0'), 1 + g % 7
+from generate_series(1, 1000) g;
+
+select count(*) as rows_loaded, sum(qty) as total_qty from shop.import_demo;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>Rules of thumb for loading real data:</p>
+
+<ul>
+  <li><strong>Prefer COPY to INSERT</strong> for files. If you must use <code>INSERT</code>, send many rows per statement (hundreds to a few thousand) rather than one row per round trip.</li>
+  <li><strong>Batch, do not load a billion rows in one transaction.</strong> A very large transaction holds locks and leaves a lot of work for vacuum if it fails. Batches of 10 000 to 100 000 rows are a common size. Measure on your own data.</li>
+  <li><strong>Load into a staging table, then move.</strong> Validate with SQL before the rows reach the real table.</li>
+  <li><strong>Indexes slow loading down</strong>, because every index is updated for every row. For a one-time initial load into an empty table, creating the indexes after the load is often faster. Whether that is acceptable on a table that is in use is an operations decision, because the table has no index (and no unique protection) until the build finishes.</li>
+  <li>After a big load, run <code>ANALYZE</code> on the table so the planner knows the new data (<a href="13-explain-and-planner.html">lesson 13</a>).</li>
+</ul>
+
+<h2 id="safety">8. Making changes safe</h2>
+
+<h3>Wrap related changes in a transaction</h3>
+
+<p>
+  A transaction ends with <code>commit</code> (keep everything) or <code>rollback</code> (discard everything).
+  If any statement inside it fails, PostgreSQL marks the whole transaction as failed and only accepts
+  <code>rollback</code>. Group steps that must succeed together: the order and its lines, or the archive and the
+  delete.
+</p>
+
+<h3>UPDATE and DELETE without WHERE</h3>
+
+<p>
+  The most common data accident is a statement that touches every row. In a transaction you can see the damage
+  and undo it:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">the cheapest safety net (Docker)</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>begin;
+update shop.orders set status = 'cancelled';      -- forgot the WHERE
+select status, count(*) from shop.orders group by status;
+rollback;</code></pre>
+</figure>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">output</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code>UPDATE 200000
+  status   | count
+-----------+--------
+ cancelled | 200000
+(1 row)</code></pre>
+</figure>
+
+<p>
+  The row count in the command tag, <code>UPDATE 200000</code>, is the number to look at before you type
+  <code>commit</code>. If it is not the number you expected, <code>rollback</code>. The playground shows the same
+  habit on the small shop:
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">a mistake you can undo</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">begin;
+update shop.products set stock = 0;
+select count(*) filter (where stock = 0) as zero_stock, count(*) as products from shop.products;
+rollback;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<div class="note tip">
+  <span class="note-title">Habit: write the SELECT first</span>
+  <p>
+    Before a risky <code>UPDATE</code> or <code>DELETE</code>, run the same <code>WHERE</code> as a
+    <code>SELECT count(*)</code>. Then run the write inside <code>begin</code> and compare the row count in the
+    command tag. <code>psql</code> has no “undo”; <code>rollback</code> is the undo.
+  </p>
+</div>
+
+<h3>INSERT ... SELECT and tables without a key</h3>
+
+<p>
+  <code>INSERT INTO t SELECT * FROM s</code> copies rows. If the target table has no primary key or unique
+  index, running it twice quietly stores everything twice. The database cannot call the second copy a duplicate,
+  because you never told it what “the same row” means.
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">a copy with no key (Docker, rolled back)</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>begin;
+create table shop.products_copy as select * from shop.products;   -- copies the data, not the keys
+insert into shop.products_copy select * from shop.products;       -- runs happily a second time
+select count(*) as row_count, count(distinct id) as distinct_ids from shop.products_copy;
+rollback;</code></pre>
+</figure>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">output</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code> row_count | distinct_ids
+-----------+--------------
+      1000 |           500
+(1 row)</code></pre>
+</figure>
+
+<p>
+  <code>CREATE TABLE ... AS</code> copies the rows but not the primary key, which is why this works at all.
+  <code>CREATE TABLE shop.products_keyed (LIKE shop.products INCLUDING CONSTRAINTS INCLUDING INDEXES)</code>
+  copies the primary key and the unique index on <code>sku</code> too. With it, the second insert fails with
+  <em>duplicate key value violates unique constraint "products_keyed_pkey"</em>, or inserts zero rows if you add
+  <code>ON CONFLICT DO NOTHING</code>. (Avoid <code>INCLUDING ALL</code> for this copy: it also copies the
+  <code>GENERATED ALWAYS</code> identity, and then <code>INSERT ... SELECT *</code> is rejected because it supplies
+  the <code>id</code> values itself.)
+  Giving every table a key is the cheapest data-quality tool you have
+  (<a href="07-constraints-and-design.html">lesson 7</a>).
+</p>
+
+<div class="note warn">
+  <span class="note-title">Autocommit means every statement is final</span>
+  <p>
+    Outside <code>begin</code>, psql runs each statement in its own transaction and commits it immediately.
+    There is no confirmation prompt for <code>DELETE FROM shop.orders</code>. If you work in a production
+    database, open a transaction by habit, and consider <code>\set AUTOCOMMIT off</code> in your psql session.
+  </p>
+</div>
+
+<h2 id="when">When to use, when not to</h2>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Situation</th><th class="wrap">✅ Do this</th><th class="wrap">❌ Not this</th></tr></thead>
+  <tbody>
+    <tr><td class="wrap">Insert a row that may already exist, one key, concurrent writers</td><td class="wrap"><code>INSERT ... ON CONFLICT (key) DO UPDATE</code> or <code>DO NOTHING</code></td><td class="wrap">Select first, then insert or update in application code</td></tr>
+    <tr><td class="wrap">Sync a table from a feed with inserts, updates and deletes</td><td class="wrap"><code>MERGE</code> with explicit <code>WHEN</code> branches</td><td class="wrap">Delete everything and reinsert in a loop</td></tr>
+    <tr><td class="wrap">You need the generated id of a new row</td><td class="wrap"><code>INSERT ... RETURNING id</code></td><td class="wrap">Insert, then <code>select max(id)</code> (wrong under concurrency)</td></tr>
+    <tr><td class="wrap">Update a table from values in another table</td><td class="wrap"><code>UPDATE ... FROM</code> with a source that has one row per target row</td><td class="wrap">One <code>UPDATE</code> per row from application code</td></tr>
+    <tr><td class="wrap">Load a file with a million rows</td><td class="wrap"><code>\copy</code> or <code>COPY ... FROM STDIN</code> into a staging table, in batches if it is huge</td><td class="wrap">A million single-row <code>INSERT</code> statements</td></tr>
+    <tr><td class="wrap">Move rows between tables</td><td class="wrap"><code>WITH moved AS (DELETE ... RETURNING *) INSERT ...</code> in one statement</td><td class="wrap">Copy, then delete in a separate step with no transaction</td></tr>
+    <tr><td class="wrap">An <code>UPDATE</code> that must not touch unchanged rows</td><td class="wrap">Add <code>WHERE old IS DISTINCT FROM new</code></td><td class="wrap">Rewrite every row to the same value</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="inspect">Inspect it</h2>
+
+<p>
+  Whether an upsert is possible, and what its conflict target can be, depends on the unique indexes of the
+  table. List them before you write <code>ON CONFLICT</code>:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">unique indexes of shop.products</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select indexrelid::regclass as index_name, indisunique as is_unique, indpred is not null as is_partial
+from pg_index
+where indrelid = 'shop.products'::regclass
+order by 1;</code></pre>
+</figure>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">output (Docker)</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code>      index_name       | is_unique | is_partial
+-----------------------+-----------+------------
+ shop.products_pkey    | t         | f
+ shop.products_sku_key | t         | f
+(2 rows)</code></pre>
+</figure>
+
+<p>
+  Two unique indexes: the primary key on <code>id</code> and the unique constraint on <code>sku</code>. Those
+  are the only valid conflict targets on this table. In psql, <code>\d shop.products</code> shows the same
+  information and the row-level constraints.
+</p>
+
+<h2 id="exercises">Your turn</h2>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 1</span><span class="grow"></span><span class="lvl">basic</span></div>
+  <div class="ex-body">
+    <p>
+      With one <code>INSERT</code> statement, update the price of the existing product <code>SKU-00001</code> to
+      49.00 and add the new product <code>SKU-90001</code> (details are in the file). The old row must keep its name,
+      stock and category. Check it with <code>./pg check 09 1</code>.
+    </p>
+  </div>
+  {{stub 09 1}}
+  <details><summary>Hint</summary><p>Use <code>on conflict (sku) do update set price = excluded.price</code>. Columns you leave out of <code>SET</code> are not touched.</p></details>
+  {{solution 09 1}}
+</section>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 2</span><span class="grow"></span><span class="lvl">intermediate</span></div>
+  <div class="ex-body">
+    <p>
+      Cancel every <code>pending</code> order that belongs to a customer whose status is <code>closed</code>, with
+      one <code>UPDATE ... FROM</code>. Change nothing else. Check it with <code>./pg check 09 2</code>.
+    </p>
+  </div>
+  {{stub 09 2}}
+  <details><summary>Hint</summary><p>Put <code>shop.customers c</code> in <code>FROM</code>, join it in <code>WHERE</code>, and filter on both statuses. First count the rows with a <code>SELECT</code> using the same conditions.</p></details>
+  {{solution 09 2}}
+</section>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 3</span><span class="grow"></span><span class="lvl">challenge</span></div>
+  <div class="ex-body">
+    <p>
+      Create two archive tables and move the cancelled orders with <code>id &lt;= 2000</code>, together with their
+      order lines, into them using one statement for the move. Check it with <code>./pg check 09 3</code>.
+    </p>
+  </div>
+  {{stub 09 3}}
+  <details><summary>Hint</summary><p>Chain data-modifying CTEs: delete the orders and return them, delete the lines of the returned orders with <code>USING</code> and return them, then insert both result sets into the archive tables. A data-modifying CTE runs even if no later part reads it, so the last step can be a plain <code>INSERT ... SELECT</code>. <code>create table ... (like shop.orders including defaults)</code> makes a table with the same columns.</p></details>
+  {{solution 09 3}}
+</section>
+
+<h2 id="summary">Summary</h2>
+<ul>
+  <li><code>ON CONFLICT (key)</code> needs a unique index on exactly that key (with the same <code>WHERE</code> for a partial index). <code>DO NOTHING</code> skips, <code>DO UPDATE</code> changes the stored row, and <code>excluded</code> is the row you proposed.</li>
+  <li><code>RETURNING</code> gives back generated ids and, since PostgreSQL 18, <code>old</code> and <code>new</code> values for <code>INSERT</code>, <code>UPDATE</code>, <code>DELETE</code> and <code>MERGE</code>.</li>
+  <li><code>UPDATE ... FROM</code> and <code>DELETE ... USING</code> join other tables; make sure the source has one row per target row.</li>
+  <li>Data-modifying CTEs chain several writes in one atomic statement, passing rows with <code>RETURNING</code>.</li>
+  <li><code>MERGE</code> handles matched, not matched and (from 17) not matched by source rows, and <code>merge_action()</code> tells you what it did. For simple concurrent upserts, <code>ON CONFLICT</code> is the safer tool.</li>
+  <li><code>COPY</code> loads fast. Use <code>\copy</code> or <code>STDIN</code>/<code>STDOUT</code> from a client, stage the data first, and batch very large loads.</li>
+  <li>Put risky changes in a transaction and read the row count before you commit. A table without a key will happily store duplicates.</li>
+</ul>
+
+<h2 id="next">Looking ahead</h2>
+<p>
+  You can now change data in every common way. <a href="10-json-and-arrays.html">Lesson 10</a> looks at columns
+  that hold structured values inside a single cell: <code>jsonb</code> documents and arrays, how to query them,
+  and when a normal column would have been the better choice.
+</p>

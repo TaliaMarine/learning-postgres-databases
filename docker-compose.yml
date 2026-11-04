@@ -1,0 +1,38 @@
+# Local PostgreSQL 18 for the course exercises.
+#   ./pg up        start it (first start seeds the "shop" database, ~30 s)
+#   ./pg psql      open a psql session
+#   ./pg reset     throw the volume away and start from a clean cluster
+name: pgcourse
+services:
+  db:
+    image: postgres:18
+    environment:
+      POSTGRES_PASSWORD: course
+      POSTGRES_DB: shop
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    ports:
+      # 55432 on the host so it never collides with a Postgres you already run.
+      - "127.0.0.1:${PG_PORT:-55432}:5432"
+    volumes:
+      # PG 18 images keep data under /var/lib/postgresql/<major>; mount the parent.
+      - pgdata:/var/lib/postgresql
+      - ./docker/initdb:/docker-entrypoint-initdb.d:ro
+    command:
+      - postgres
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+      - -c
+      - pg_stat_statements.track=all
+      - -c
+      - log_min_duration_statement=500
+      - -c
+      - log_lock_waits=on
+      - -c
+      - track_io_timing=on
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d shop && psql -U postgres -d shop -Atc \"select 1 from course.ready\" | grep -q 1"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+volumes:
+  pgdata:

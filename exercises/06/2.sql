@@ -1,0 +1,7 @@
+-- Create the table shop.coupons:
+--   id            a uuid primary key that fills itself in (gen_random_uuid())
+--   code          text, required, 4 to 20 characters long
+--   discount      numeric(5,2), required, more than 0 and at most 100
+--   valid_during  a daterange, required
+-- Two coupon codes that differ only in upper/lower case must count as duplicates.
+-- Run ./pg check 06 2 when you are done.

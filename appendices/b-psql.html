@@ -1,0 +1,594 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>B. psql cheat sheet &mdash; Learning PostgreSQL</title>
+<meta name="description" content="Every meta-command and setting you will actually use, with examples.">
+<link rel="stylesheet" href="../assets/css/course.css">
+</head>
+<body data-root="../" data-page="b-psql">
+<a class="skip-link" href="#content">Skip to content</a>
+<header class="topbar">
+  <button class="icon-btn menu-btn" type="button" aria-label="Toggle navigation" aria-expanded="false" aria-controls="sidebar">&#9776;</button>
+  <a class="brand" href="../index.html"><span class="mark pgm">PG</span> Learning PostgreSQL <span class="sub">PostgreSQL 18</span></a>
+  <span class="spacer"></span>
+  <div class="search" role="search">
+    <span class="glyph" aria-hidden="true">&#9906;</span>
+    <input type="search" placeholder="Search the course&#8230;" aria-label="Search the course" autocomplete="off" spellcheck="false">
+    <kbd>/</kbd>
+    <div class="search-results" role="listbox"></div>
+  </div>
+  <nav class="topbar-links">
+    <a class="hide-sm" href="../appendices/d-glossary.html">Glossary</a>
+    <a class="hide-sm" href="../appendices/b-psql.html">psql</a>
+  </nav>
+  <button class="icon-btn theme-btn" type="button" aria-label="Toggle theme">&#9790;</button>
+</header>
+<div class="scrim"></div>
+<div class="shell">
+<nav class="sidebar" id="sidebar" aria-label="Course contents">
+  <h4>Start here</h4>
+  <ol>
+    <li><a href="../start/setup.html" data-page="setup"><span class="n">00</span><span>Set up your lab</span></a></li>
+  </ol>
+  <h4>Part 1 — Foundations: the server, databases, schemas and roles</h4>
+  <ol>
+    <li><a href="../lessons/01-architecture.html" data-page="01-architecture"><span class="n">01</span><span>How PostgreSQL is built</span></a></li>
+    <li><a href="../lessons/02-databases-and-schemas.html" data-page="02-databases-and-schemas"><span class="n">02</span><span>Databases and schemas</span></a></li>
+    <li><a href="../lessons/03-roles-and-users.html" data-page="03-roles-and-users"><span class="n">03</span><span>Roles and users</span></a></li>
+    <li><a href="../lessons/04-privileges-and-grants.html" data-page="04-privileges-and-grants"><span class="n">04</span><span>Privileges and grants</span></a></li>
+    <li><a href="../lessons/05-security-and-rls.html" data-page="05-security-and-rls"><span class="n">05</span><span>Hardening and row-level security</span></a></li>
+  </ol>
+  <h4>Part 2 — Modelling and SQL in depth</h4>
+  <ol>
+    <li><a href="../lessons/06-data-types.html" data-page="06-data-types"><span class="n">06</span><span>Data types</span></a></li>
+    <li><a href="../lessons/07-constraints-and-design.html" data-page="07-constraints-and-design"><span class="n">07</span><span>Constraints and schema design</span></a></li>
+    <li><a href="../lessons/08-advanced-queries.html" data-page="08-advanced-queries"><span class="n">08</span><span>Advanced queries</span></a></li>
+    <li><a href="../lessons/09-changing-data.html" data-page="09-changing-data"><span class="n">09</span><span>Changing data safely</span></a></li>
+    <li><a href="../lessons/10-json-and-arrays.html" data-page="10-json-and-arrays"><span class="n">10</span><span>JSONB and arrays</span></a></li>
+    <li><a href="../lessons/11-text-search.html" data-page="11-text-search"><span class="n">11</span><span>Text search and pattern matching</span></a></li>
+  </ol>
+  <h4>Part 3 — Performance</h4>
+  <ol>
+    <li><a href="../lessons/12-indexes.html" data-page="12-indexes"><span class="n">12</span><span>Indexes</span></a></li>
+    <li><a href="../lessons/13-explain-and-planner.html" data-page="13-explain-and-planner"><span class="n">13</span><span>EXPLAIN and the planner</span></a></li>
+    <li><a href="../lessons/14-query-tuning.html" data-page="14-query-tuning"><span class="n">14</span><span>A query-tuning workflow</span></a></li>
+  </ol>
+  <h4>Part 4 — Transactions and concurrency</h4>
+  <ol>
+    <li><a href="../lessons/15-transactions-and-mvcc.html" data-page="15-transactions-and-mvcc"><span class="n">15</span><span>Transactions and MVCC</span></a></li>
+    <li><a href="../lessons/16-locking.html" data-page="16-locking"><span class="n">16</span><span>Locking and concurrency</span></a></li>
+    <li><a href="../lessons/17-vacuum-and-bloat.html" data-page="17-vacuum-and-bloat"><span class="n">17</span><span>Vacuum, bloat and autovacuum</span></a></li>
+  </ol>
+  <h4>Part 5 — Programming the database</h4>
+  <ol>
+    <li><a href="../lessons/18-views-and-functions.html" data-page="18-views-and-functions"><span class="n">18</span><span>Views, functions and procedures</span></a></li>
+    <li><a href="../lessons/19-triggers-and-events.html" data-page="19-triggers-and-events"><span class="n">19</span><span>Triggers, LISTEN/NOTIFY and audit</span></a></li>
+    <li><a href="../lessons/20-partitioning.html" data-page="20-partitioning"><span class="n">20</span><span>Partitioning</span></a></li>
+  </ol>
+  <h4>Part 6 — Operating PostgreSQL</h4>
+  <ol>
+    <li><a href="../lessons/21-configuration.html" data-page="21-configuration"><span class="n">21</span><span>Configuration and tuning</span></a></li>
+    <li><a href="../lessons/22-wal-and-durability.html" data-page="22-wal-and-durability"><span class="n">22</span><span>WAL, checkpoints and durability</span></a></li>
+    <li><a href="../lessons/23-backup-and-recovery.html" data-page="23-backup-and-recovery"><span class="n">23</span><span>Backup, restore and PITR</span></a></li>
+    <li><a href="../lessons/24-replication.html" data-page="24-replication"><span class="n">24</span><span>Replication and high availability</span></a></li>
+    <li><a href="../lessons/25-monitoring.html" data-page="25-monitoring"><span class="n">25</span><span>Monitoring and diagnostics</span></a></li>
+    <li><a href="../lessons/26-connections-and-upgrades.html" data-page="26-connections-and-upgrades"><span class="n">26</span><span>Connections, pooling, extensions and upgrades</span></a></li>
+  </ol>
+  <h4>Part 7 — Putting it together</h4>
+  <ol>
+    <li><a href="../lessons/27-capstone.html" data-page="27-capstone"><span class="n">27</span><span>Capstone project</span></a></li>
+  </ol>
+  <h4>Annexes</h4>
+  <ol>
+    <li><a href="../appendices/a1-select-basics.html" data-page="a1-select-basics"><span class="n">A1</span><span>SELECT, filtering and sorting</span></a></li>
+    <li><a href="../appendices/a2-joins.html" data-page="a2-joins"><span class="n">A2</span><span>Joins and combining tables</span></a></li>
+    <li><a href="../appendices/a3-aggregation.html" data-page="a3-aggregation"><span class="n">A3</span><span>Aggregation and grouping</span></a></li>
+    <li><a href="../appendices/a4-subqueries-and-ctes.html" data-page="a4-subqueries-and-ctes"><span class="n">A4</span><span>Subqueries and CTEs</span></a></li>
+    <li><a href="../appendices/a5-ddl-and-dml.html" data-page="a5-ddl-and-dml"><span class="n">A5</span><span>Creating and changing things</span></a></li>
+    <li><a href="../appendices/b-psql.html" data-page="b-psql"><span class="n">B</span><span>psql cheat sheet</span></a></li>
+    <li><a href="../appendices/c-catalog-queries.html" data-page="c-catalog-queries"><span class="n">C</span><span>Catalog and diagnostic queries</span></a></li>
+    <li><a href="../appendices/d-glossary.html" data-page="d-glossary"><span class="n">D</span><span>Glossary</span></a></li>
+    <li><a href="../appendices/e-troubleshooting.html" data-page="e-troubleshooting"><span class="n">E</span><span>Troubleshooting</span></a></li>
+    <li><a href="../appendices/f-whats-next.html" data-page="f-whats-next"><span class="n">F</span><span>What to learn next</span></a></li>
+  </ol>
+</nav>
+<div class="main">
+<main class="content" id="content">
+<p class="eyebrow">Annex</p>
+<h1>B. psql cheat sheet</h1>
+<p class="lede">
+  <code>psql</code> is PostgreSQL's command-line client. Besides sending SQL, it has its own commands that start
+  with a backslash, called <em>meta-commands</em>, and settings you can change on the fly. This page lists the
+  ones you will actually use, each with an example. Every command here was run against the course's PostgreSQL 18
+  container.
+</p>
+
+<h2 id="start">Start and stop</h2>
+<p>
+  In the course, <code>./pg psql</code> opens <code>psql</code> inside the container, connected to the
+  <code>shop</code> database as the superuser <code>postgres</code>. <code>./pg psql other_db</code> picks another
+  database. Quit with <code>\q</code> (or Ctrl-D).
+</p>
+
+<figure class="code" data-lang="bash">
+  <figcaption><span class="path">terminal</span><span class="grow"></span><span class="lang">bash</span></figcaption>
+<pre><code>./pg psql                          # interactive, database shop
+./pg sql "select 1"                # one statement, then exit
+./pg run my_file.sql               # run a file
+./pg exec psql -X -U postgres -d shop -c "select 1"   # psql directly, one command</code></pre>
+</figure>
+
+<div class="note info">
+  <span class="note-title">Scripting backslash commands</span>
+  <p>
+    For several backslash commands, put them in a file and use <code>./pg run file.psql</code>, or pass them on
+    standard input. Inside the container:
+    <code>./pg exec bash -c "printf '\\\\dn\\n' | psql -X -U postgres -d shop"</code>. Both forms were tested for this page.
+  </p>
+</div>
+
+<div class="note warn">
+  <span class="note-title">A semicolon ends SQL, not a meta-command</span>
+  <p>
+    A meta-command ends at the end of the line. SQL needs <code>;</code>. If a prompt shows
+    <code>shop-#</code> instead of <code>shop=#</code>, psql is still waiting for the rest of a statement: type
+    <code>;</code> or press Ctrl-C to throw the buffer away.
+  </p>
+</div>
+
+<h2 id="help">Help: \? and \h</h2>
+<ul>
+  <li><code>\?</code> lists every meta-command. <code>\? variables</code> lists the settings you can <code>\set</code>.</li>
+  <li><code>\h</code> lists SQL commands; <code>\h drop table</code> shows the syntax of one.</li>
+</ul>
+<figure class="code" data-lang="psql">
+  <figcaption><span class="path">psql</span><span class="grow"></span><span class="lang">psql</span></figcaption>
+<pre><code>\h drop table
+Command:     DROP TABLE
+Description: remove a table
+Syntax:
+DROP TABLE [ IF EXISTS ] name [, ...] [ CASCADE | RESTRICT ]
+
+URL: https://www.postgresql.org/docs/18/sql-droptable.html</code></pre>
+</figure>
+
+<h2 id="connect">Connect and look around</h2>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Command</th><th class="wrap">What it does</th><th class="wrap">Example</th></tr></thead>
+  <tbody>
+    <tr><td><code>\l</code></td><td class="wrap">List databases, with owner, encoding and access privileges</td><td><code>\l</code></td></tr>
+    <tr><td><code>\c db</code></td><td class="wrap">Connect to another database (also <code>\c db role</code>)</td><td><code>\c shop</code></td></tr>
+    <tr><td><code>\conninfo</code></td><td class="wrap">Who and where am I connected as?</td><td><code>\conninfo</code></td></tr>
+    <tr><td><code>\dn</code></td><td class="wrap">List schemas (<code>\dn+</code> adds privileges and descriptions)</td><td><code>\dn+ shop</code></td></tr>
+    <tr><td><code>\dt</code></td><td class="wrap">List tables (<code>\dt+</code> adds size)</td><td><code>\dt shop.*</code></td></tr>
+    <tr><td><code>\dv</code></td><td class="wrap">List views</td><td><code>\dv shop.*</code></td></tr>
+    <tr><td><code>\di</code></td><td class="wrap">List indexes</td><td><code>\di shop.*</code></td></tr>
+    <tr><td><code>\df</code></td><td class="wrap">List functions</td><td><code>\df shop.*</code></td></tr>
+    <tr><td><code>\d name</code></td><td class="wrap">Describe a table, view or index: columns, indexes, keys</td><td><code>\d shop.orders</code></td></tr>
+    <tr><td><code>\d+ name</code></td><td class="wrap">As <code>\d</code>, with storage, stats target and descriptions</td><td><code>\d+ shop.orders</code></td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>
+  Most listing commands take a <em>pattern</em> that accepts <code>*</code> (any run of characters) and
+  <code>?</code> (one character), and a <code>schema.name</code> form. Without a pattern they show only objects in
+  schemas on your <code>search_path</code>, which is why <code>\dt</code> alone shows nothing for the shop tables until
+  you add <code>shop.*</code> or change the path (<a href="../lessons/02-databases-and-schemas.html">lesson 2</a>).
+  Add <code>S</code> to include system objects (<code>\dtS</code>) and <code>+</code> for more detail.
+</p>
+
+<figure class="code" data-lang="psql">
+  <figcaption><span class="path">\dt+ shop.*</span><span class="grow"></span><span class="lang">psql</span></figcaption>
+<pre><code>shop=# \dt+ shop.*
+                                    List of tables
+ Schema |    Name     | Type  |  Owner   | Persistence | Access method |  Size   | Description
+--------+-------------+-------+----------+-------------+---------------+---------+-------------
+ shop   | categories  | table | postgres | permanent   | heap          | 16 kB   |
+ shop   | customers   | table | postgres | permanent   | heap          | 3688 kB |
+ shop   | order_items | table | postgres | permanent   | heap          | 30 MB   |
+ shop   | orders      | table | postgres | permanent   | heap          | 36 MB   |
+ shop   | products    | table | postgres | permanent   | heap          | 160 kB  |
+(5 rows)</code></pre>
+</figure>
+
+<p>
+  <code>\d shop.orders</code> is the command you will type most. Its output ends with the indexes, the foreign
+  keys it has and the foreign keys that point at it (<code>Referenced by:</code>). <code>\d+</code> adds the
+  not-null constraints and storage details.
+</p>
+
+<figure class="code" data-lang="psql">
+  <figcaption><span class="path">\d shop.categories</span><span class="grow"></span><span class="lang">psql</span></figcaption>
+<pre><code>shop=# \d shop.categories
+                          Table "shop.categories"
+  Column   |  Type   | Collation | Nullable |           Default
+-----------+---------+-----------+----------+------------------------------
+ id        | integer |           | not null | generated always as identity
+ name      | text    |           | not null |
+ parent_id | integer |           |          |
+Indexes:
+    "categories_pkey" PRIMARY KEY, btree (id)
+    "categories_name_key" UNIQUE CONSTRAINT, btree (name)
+Foreign-key constraints:
+    "categories_parent_id_fkey" FOREIGN KEY (parent_id) REFERENCES shop.categories(id)
+Referenced by:
+    TABLE "shop.categories" CONSTRAINT "categories_parent_id_fkey" FOREIGN KEY (parent_id) REFERENCES shop.categories(id)
+    TABLE "shop.products" CONSTRAINT "products_category_id_fkey" FOREIGN KEY (category_id) REFERENCES shop.categories(id)</code></pre>
+</figure>
+
+<h2 id="roles">Roles and privileges: \du, \dg, \dp, \ddp</h2>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Command</th><th class="wrap">What it shows</th></tr></thead>
+  <tbody>
+    <tr><td><code>\du</code>, <code>\dg</code></td><td class="wrap">Roles and their attributes. They are the same command: <code>\dg</code> is an alias of <code>\du</code>, because PostgreSQL has only roles (<a href="../lessons/03-roles-and-users.html">lesson 3</a>). <code>\du+</code> adds descriptions.</td></tr>
+    <tr><td><code>\dp [pattern]</code></td><td class="wrap">Table, view and sequence privileges, plus column privileges and policies (<a href="../lessons/04-privileges-and-grants.html">lesson 4</a>)</td></tr>
+    <tr><td><code>\ddp</code></td><td class="wrap">Default privileges set with <code>ALTER DEFAULT PRIVILEGES</code></td></tr>
+    <tr><td><code>\dn+</code></td><td class="wrap">Schemas with their privileges</td></tr>
+  </tbody>
+</table>
+</div>
+
+<figure class="code" data-lang="psql">
+  <figcaption><span class="path">\du in a fresh course container</span><span class="grow"></span><span class="lang">psql</span></figcaption>
+<pre><code>shop=# \du
+                             List of roles
+ Role name |                         Attributes
+-----------+------------------------------------------------------------
+ postgres  | Superuser, Create role, Create DB, Replication, Bypass RLS</code></pre>
+</figure>
+
+<p>
+  Reading <code>\dp</code>: the <code>Access privileges</code> column holds entries of the form
+  <code>role=letters/grantor</code>. An empty role name before the equals sign means <code>PUBLIC</code>.
+  The letters are <code>r</code> select, <code>w</code> update, <code>a</code> insert, <code>d</code> delete,
+  <code>D</code> truncate, <code>x</code> references, <code>t</code> trigger, <code>m</code> maintain. An empty
+  column does not mean "nobody": it means the defaults apply, which is only the owner. For a table that has
+  had grants, it looks like this:
+</p>
+
+<figure class="code" data-lang="psql">
+  <figcaption><span class="path">\dp shop.categories, after: grant select on shop.categories to lab_s90_reader</span><span class="grow"></span><span class="lang">psql</span></figcaption>
+<pre><code>                                    Access privileges
+ Schema |    Name    | Type  |     Access privileges      | Column privileges | Policies
+--------+------------+-------+----------------------------+-------------------+----------
+ shop   | categories | table | postgres=arwdDxtm/postgres+|                   |
+        |            |       | lab_s90_reader=r/postgres  |                   |</code></pre>
+</figure>
+
+<h2 id="display">Control how results look: \x, \pset, \timing</h2>
+
+<h3 id="x">\x: expanded display</h3>
+<p>
+  <code>\x</code> toggles between the table layout and one-line-per-column. Use it for wide rows.
+  <code>\x auto</code> switches only when a result is wider than your terminal.
+</p>
+<figure class="code" data-lang="psql">
+  <figcaption><span class="path">\x</span><span class="grow"></span><span class="lang">psql</span></figcaption>
+<pre><code>shop=# \x
+Expanded display is on.
+shop=# select 1 as one, 2 as two;
+-[ RECORD 1 ]
+one | 1
+two | 2</code></pre>
+</figure>
+<p>
+  End any query with <code>\gx</code> instead of <code>;</code> to expand just that result.
+</p>
+
+<h3 id="timing">\timing</h3>
+<p>
+  <code>\timing</code> toggles printing how long each statement took, as seen by the client (it includes the network).
+</p>
+<figure class="code" data-lang="psql">
+  <figcaption><span class="path">\timing</span><span class="grow"></span><span class="lang">psql</span></figcaption>
+<pre><code>shop=# \timing
+Timing is on.
+shop=# select count(*) from shop.orders;
+ count
+--------
+ 200000
+(1 row)
+
+Time: 5.130 ms</code></pre>
+</figure>
+<p>The time you see will differ; it depends on your machine and on what is cached.</p>
+
+<h3 id="pset">\pset: output settings</h3>
+<p>
+  <code>\pset option value</code> sets how results are printed. Options you may want:
+</p>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Setting</th><th class="wrap">Effect</th></tr></thead>
+  <tbody>
+    <tr><td><code>\pset null '(null)'</code></td><td class="wrap">Show NULL as text instead of an empty cell. Strongly recommended.</td></tr>
+    <tr><td><code>\pset border 2</code></td><td class="wrap">Draw a box around the table (0, 1 or 2)</td></tr>
+    <tr><td><code>\pset format csv</code></td><td class="wrap">Print results as CSV (also <code>aligned</code>, <code>unaligned</code>, <code>html</code>, <code>wrapped</code>, <code>latex</code>)</td></tr>
+    <tr><td><code>\pset pager off</code></td><td class="wrap">Never pipe long output to a pager</td></tr>
+    <tr><td><code>\pset footer off</code></td><td class="wrap">Hide the “(N rows)” line</td></tr>
+    <tr><td><code>\pset linestyle unicode</code></td><td class="wrap">Use line-drawing characters</td></tr>
+  </tbody>
+</table>
+</div>
+<figure class="code" data-lang="psql">
+  <figcaption><span class="path">\pset null and \pset border</span><span class="grow"></span><span class="lang">psql</span></figcaption>
+<pre><code>shop=# \pset border 2
+Border style is 2.
+shop=# \pset null '(null)'
+Null display is "(null)".
+shop=# select 1 as a, null::text as b;
++---+--------+
+| a |   b    |
++---+--------+
+| 1 | (null) |
++---+--------+
+(1 row)</code></pre>
+</figure>
+
+<h3 id="crosstab">\crosstabview and \gdesc</h3>
+<p>
+  <code>\crosstabview rowcol colcol</code> turns a three-column result into a pivot table.
+  <code>\gdesc</code> describes the columns a query <em>would</em> return, without running it.
+</p>
+<figure class="code" data-lang="psql">
+  <figcaption><span class="path">\gdesc</span><span class="grow"></span><span class="lang">psql</span></figcaption>
+<pre><code>shop=# select 1 as n, 'a'::text as t \gdesc
+ Column |  Type
+--------+---------
+ n      | integer
+ t      | text</code></pre>
+</figure>
+
+<h2 id="vars">Variables: \set and \echo</h2>
+<p>
+  <code>\set name value</code> defines a psql variable. Use it in SQL as <code>:name</code> (raw text),
+  <code>:'name'</code> (quoted as a string literal) or <code>:"name"</code> (quoted as an identifier).
+  <code>\echo</code> prints text. <code>\set</code> alone lists every variable, including built-in ones such as
+  <code>DBNAME</code>, <code>USER</code>, <code>PORT</code> and <code>SERVER_VERSION_NAME</code>.
+</p>
+<figure class="code" data-lang="psql">
+  <figcaption><span class="path">variables</span><span class="grow"></span><span class="lang">psql</span></figcaption>
+<pre><code>shop=# \set top_n 3
+shop=# select id, full_name from shop.customers order by id limit :top_n;
+ id |  full_name
+----+--------------
+  1 | Chloe Visser
+  2 | Finn Bos
+  3 | Daan Prins
+(3 rows)
+
+shop=# \set who shop
+shop=# select :'who' as schema_name;
+ schema_name
+-------------
+ shop</code></pre>
+</figure>
+<p>
+  <code>\gset</code> runs a query that returns one row and stores each column in a variable named after it.
+  After <code>select count(*) as n \gset</code> (a query with no <code>FROM</code>, so the count is 1),
+  <code>\echo n is :n</code> prints <code>n is 1</code>. <code>\unset name</code> removes a variable.
+</p>
+
+<h3 id="settings">Settings you may want to change</h3>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Variable</th><th class="wrap">Effect</th></tr></thead>
+  <tbody>
+    <tr><td><code>ON_ERROR_STOP</code></td><td class="wrap">When <code>on</code>, a script stops at the first error and psql exits with a non-zero status. Off by default. See below.</td></tr>
+    <tr><td><code>ECHO</code></td><td class="wrap"><code>queries</code> prints each statement before running it; <code>all</code> prints everything read from a script.</td></tr>
+    <tr><td><code>ECHO_HIDDEN</code></td><td class="wrap">When <code>on</code>, shows the SQL behind every <code>\d</code> command. A good way to learn the catalogs.</td></tr>
+    <tr><td><code>ON_ERROR_ROLLBACK</code></td><td class="wrap">When <code>on</code>, an error inside a transaction does not abort the whole transaction in an interactive session.</td></tr>
+    <tr><td><code>QUIET</code></td><td class="wrap">Hide the chatter such as “Timing is on.” and command tags.</td></tr>
+    <tr><td><code>HISTSIZE</code></td><td class="wrap">How many commands the history remembers (500 in this container).</td></tr>
+    <tr><td><code>AUTOCOMMIT</code></td><td class="wrap"><code>on</code> by default: each statement commits by itself unless you write <code>BEGIN</code>.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3 id="on-error-stop">ON_ERROR_STOP</h3>
+<p>
+  By default, psql carries on after an error. In a script that is how half a migration gets applied without anyone
+  noticing. Turn it on, and the script stops and psql exits with status 3. Compare the same two lines with the
+  setting off and on (piped in from standard input):
+</p>
+<figure class="code" data-lang="bash">
+  <figcaption><span class="path">terminal</span><span class="grow"></span><span class="lang">bash</span></figcaption>
+<pre><code>$ printf 'select 1/0;\nselect 2 as ok;\n' | psql -X -U postgres -d shop
+ERROR:  division by zero
+ ok
+----
+  2
+(1 row)
+$ echo $?
+0
+
+$ printf 'select 1/0;\nselect 2 as ok;\n' | psql -X -v ON_ERROR_STOP=1 -U postgres -d shop
+ERROR:  division by zero
+$ echo $?
+3</code></pre>
+</figure>
+<p>
+  The <code>./pg</code> helper already starts <code>psql</code> with <code>ON_ERROR_STOP=1</code> for
+  <code>./pg sql</code> and <code>./pg run</code>. In a script file you can write <code>\set ON_ERROR_STOP on</code>
+  on the first line.
+</p>
+
+<h2 id="files">Files, shell and the editor</h2>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Command</th><th class="wrap">What it does</th></tr></thead>
+  <tbody>
+    <tr><td><code>\i file</code></td><td class="wrap">Run the commands in a file. <code>\ir file</code> resolves the path relative to the current script.</td></tr>
+    <tr><td><code>\o file</code></td><td class="wrap">Send query results to a file. <code>\o</code> with no argument goes back to the screen. <code>\o |command</code> pipes them.</td></tr>
+    <tr><td><code>\copy</code></td><td class="wrap">Load or save a table through the client: a file on <em>your</em> side, not the server's</td></tr>
+    <tr><td><code>\! command</code></td><td class="wrap">Run a shell command</td></tr>
+    <tr><td><code>\e</code></td><td class="wrap">Edit the current query in your <code>$EDITOR</code>; the saved text runs when you exit. <code>\ef func</code> and <code>\ev view</code> edit definitions.</td></tr>
+    <tr><td><code>\p</code>, <code>\r</code></td><td class="wrap">Show, or clear, the query buffer</td></tr>
+    <tr><td><code>\sf func</code>, <code>\sv view</code></td><td class="wrap">Show a function's or view's definition</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="note info">
+  <span class="note-title">Paths are on the machine where psql runs</span>
+  <p>
+    When you use <code>./pg psql</code> or <code>./pg exec psql</code>, psql runs <em>inside the container</em>, so
+    <code>\i</code>, <code>\o</code> and <code>\copy</code> read and write the container's files, not yours.
+    <code>./pg run file.sql</code> is the way to run a file from your machine: it feeds the file to psql's standard input.
+  </p>
+</div>
+
+<figure class="code" data-lang="psql">
+  <figcaption><span class="path">\o, \copy and \!</span><span class="grow"></span><span class="lang">psql</span></figcaption>
+<pre><code>shop=# \o /tmp/products.txt
+shop=# select count(*) as products from shop.products;
+shop=# \o
+shop=# \! cat /tmp/products.txt
+ products
+----------
+      500
+(1 row)
+
+shop=# \copy (select id, name from shop.categories order by id limit 3) to '/tmp/cats.csv' csv header
+COPY 3
+shop=# \! cat /tmp/cats.csv
+id,name
+1,Electronics
+2,Home
+3,Books</code></pre>
+</figure>
+
+<p>
+  <code>\copy ... from</code> works the same way in the other direction. The difference from the SQL command
+  <code>COPY</code> is who reads the file: <code>COPY</code> makes the <em>server</em> read it and needs special
+  privileges; <code>\copy</code> makes the <em>client</em> read it and sends the data over the connection
+  (<a href="../lessons/09-changing-data.html">lesson 9</a>).
+</p>
+<p>
+  <code>\e</code> opens the editor and runs what you save. Set <code>EDITOR</code> in your shell first
+  (for example <code>export EDITOR=nano</code>); the container needs one installed too, so on the course container
+  you will usually edit a file on your own machine and run it with <code>./pg run</code> instead.
+</p>
+
+<h2 id="gexec">\gexec: run the result of a query</h2>
+<p>
+  <code>\gexec</code> sends the query, then runs <em>each value in its result as a SQL statement</em>. It turns
+  SQL into a code generator: write a query that produces statements, end it with <code>\gexec</code>.
+</p>
+<figure class="code" data-lang="psql">
+  <figcaption><span class="path">generate and run statements</span><span class="grow"></span><span class="lang">psql</span></figcaption>
+<pre><code>shop=# select format('analyze %I.%I', schemaname, relname)
+shop-# from pg_stat_user_tables where schemaname = 'course' order by relname;
+            format
+-------------------------------
+ analyze course.baseline_roles
+ analyze course.ready
+(2 rows)
+
+shop=# select 'select 1 as from_gexec' \gexec
+ from_gexec
+------------
+          1
+(1 row)</code></pre>
+</figure>
+<p>
+  The first query only <em>displays</em> its statements (it ends with <code>;</code>). Replace the <code>;</code> with
+  <code>\gexec</code> and psql runs the two <code>ANALYZE</code> commands. Use <code>format('%I')</code> for names and
+  <code>%L</code> for values, so the generated SQL is correctly quoted.
+</p>
+
+<h2 id="watch">\watch: repeat a query</h2>
+<p>
+  <code>\watch</code> re-runs the current query every few seconds until you press Ctrl-C. Give it an interval with
+  <code>i=</code> and a limit with <code>c=</code>. It is the quickest way to watch activity change.
+</p>
+<figure class="code" data-lang="psql">
+  <figcaption><span class="path">\watch</span><span class="grow"></span><span class="lang">psql</span></figcaption>
+<pre><code>shop=# select count(*) as n from shop.categories \watch i=0.2 c=2
+Wed 04 Nov 2026 03:28:44 PM UTC (every 0.2s)
+
+ n
+----
+ 13
+(1 row)
+
+Wed 04 Nov 2026 03:28:45 PM UTC (every 0.2s)
+
+ n
+----
+ 13
+(1 row)</code></pre>
+</figure>
+<p>
+  A typical use: <code>select pid, state, wait_event from pg_stat_activity where datname = 'shop' \watch 2</code>.
+  (<code>\watch 2</code> means every 2 seconds, which is also the default.)
+</p>
+
+<h2 id="psqlrc">~/.psqlrc: your defaults</h2>
+<p>
+  When psql starts it reads <code>~/.psqlrc</code> and runs the commands in it. This is the place for settings you
+  always want. A good start:
+</p>
+<figure class="code" data-lang="psql">
+  <figcaption><span class="path">~/.psqlrc</span><span class="grow"></span><span class="lang">psql</span></figcaption>
+<pre><code>\set QUIET 1
+\pset null '(null)'
+\pset linestyle unicode
+\pset pager off
+\x auto
+\timing on
+\set HISTSIZE 5000
+\set COMP_KEYWORD_CASE upper
+\set QUIET 0</code></pre>
+</figure>
+<p>
+  Two things to know. First, the <code>-X</code> flag tells psql to ignore the file; the course's
+  <code>./pg</code> helper starts psql with <code>-X</code>, so a <code>~/.psqlrc</code> on your own machine does not
+  change course output (and the container has none). The file applies to a <code>psql</code> you start yourself on
+  your host. Second, the variable <code>PSQLRC</code> points psql at a different file. Tested in the container:
+  with <code>PSQLRC=/tmp/annex_rc</code> a <code>\echo</code> in the file ran and <code>\pset linestyle unicode</code>
+  changed the borders; with <code>-X</code> neither happened.
+</p>
+
+<h2 id="cheat">Cheat sheet</h2>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>I want to…</th><th class="wrap">Type</th></tr></thead>
+  <tbody>
+    <tr><td class="wrap">List databases / switch database</td><td><code>\l</code> / <code>\c name</code></td></tr>
+    <tr><td class="wrap">List schemas, tables, views, indexes, functions</td><td><code>\dn</code>, <code>\dt</code>, <code>\dv</code>, <code>\di</code>, <code>\df</code></td></tr>
+    <tr><td class="wrap">Describe one table</td><td><code>\d schema.table</code> or <code>\d+ schema.table</code></td></tr>
+    <tr><td class="wrap">List roles / privileges / default privileges</td><td><code>\du</code> / <code>\dp</code> / <code>\ddp</code></td></tr>
+    <tr><td class="wrap">Read wide rows</td><td><code>\x</code> or <code>\x auto</code></td></tr>
+    <tr><td class="wrap">Time a query</td><td><code>\timing</code></td></tr>
+    <tr><td class="wrap">See NULLs</td><td><code>\pset null '(null)'</code></td></tr>
+    <tr><td class="wrap">Run a file / save output</td><td><code>\i file</code> / <code>\o file</code></td></tr>
+    <tr><td class="wrap">Generate and run SQL</td><td><code>query \gexec</code></td></tr>
+    <tr><td class="wrap">Repeat a query</td><td><code>query \watch 2</code></td></tr>
+    <tr><td class="wrap">Make scripts fail loudly</td><td><code>\set ON_ERROR_STOP on</code></td></tr>
+    <tr><td class="wrap">See the SQL behind <code>\d</code></td><td><code>\set ECHO_HIDDEN on</code></td></tr>
+    <tr><td class="wrap">Forgot a command</td><td><code>\?</code>, <code>\h</code></td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="next">Where to next</h2>
+<p>
+  <code>\d</code> and friends are shortcuts over the system catalogs. When you need more than they show, query the
+  catalogs yourself: <a href="c-catalog-queries.html">annex C</a> has a library of ready-made queries.
+</p>
+<nav class="pager"><a class="prev" href="../appendices/a5-ddl-and-dml.html"><span class="dir">Previous</span><span class="lbl">A5. Creating and changing things</span></a><a class="next" href="../appendices/c-catalog-queries.html"><span class="dir">Next</span><span class="lbl">C. Catalog and diagnostic queries</span></a></nav>
+</main>
+<aside class="toc" aria-label="On this page"></aside>
+</div>
+</div>
+<script src="../assets/js/search-index.js"></script>
+<script src="../assets/js/mini-seed.js"></script>
+<script src="../assets/js/course.js"></script>
+</body>
+</html>

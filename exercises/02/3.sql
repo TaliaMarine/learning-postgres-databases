@@ -1,0 +1,4 @@
+-- Create a login role lab_02_owner. Then create a database named lab_02_copy
+-- that is a full copy of the template database shop_template (so it contains the
+-- shop data), is owned by lab_02_owner, and allows at most 3 simultaneous
+-- connections. Run ./pg check 02 3 when you are done.

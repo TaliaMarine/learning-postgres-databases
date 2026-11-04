@@ -1,0 +1,243 @@
+#!/usr/bin/env bash
+# pg — the one command you need for the course's local PostgreSQL 18.
+#
+#   ./pg up                 start the container (first start seeds the data)
+#   ./pg down               stop it (data is kept)
+#   ./pg reset              stop it AND delete all data, then start clean
+#   ./pg psql [db]          open psql as the superuser "postgres"
+#   ./pg psql-as ROLE [db]  open psql as another role (to test permissions)
+#   ./pg sql "SELECT 1"     run one statement and print the result
+#   ./pg run FILE.sql [db]  run a SQL file against the practice database
+#   ./pg check LESSON [N]   check your exercise(s) — e.g.  ./pg check 04   or  ./pg check 04 2
+#   ./pg solution LESSON N  print the model solution (try first!)
+#   ./pg verify [LESSON]    maintainers: prove every solution passes and every stub fails
+#   ./pg clean-roles        drop the lab_* roles and databases that exercises create
+#   ./pg logs               follow the server log
+#   ./pg exec CMD...        run any command inside the container (e.g. ./pg exec bash)
+#   ./pg status             is it up and ready?
+#
+# PG_INSTANCE=name  runs a second, fully separate copy (own volume, own port).
+# PG_PORT=55433     overrides the host port (default 55432).
+set -euo pipefail
+
+cd "$(dirname "$0")"
+
+export COMPOSE_PROJECT_NAME="pgcourse${PG_INSTANCE:+-$PG_INSTANCE}"
+export PG_PORT="${PG_PORT:-55432}"
+DC=(docker compose)
+DB="${PGDATABASE:-shop}"
+
+c_red=$'\033[31m'; c_grn=$'\033[32m'; c_dim=$'\033[2m'; c_off=$'\033[0m'
+[ -t 1 ] || { c_red=; c_grn=; c_dim=; c_off=; }
+
+die() { echo "${c_red}error:${c_off} $*" >&2; exit 1; }
+
+need_docker() { command -v docker >/dev/null || die "Docker is not installed or not on PATH. See start/setup.html."; }
+
+# Run psql inside the container. -X ignores any psqlrc; ON_ERROR_STOP makes files fail loudly.
+psql_in() { "${DC[@]}" exec -T db psql -X -v ON_ERROR_STOP=1 -U postgres "$@"; }
+psql_tty() { "${DC[@]}" exec db psql -X -U postgres "$@"; }
+
+is_ready() {
+  "${DC[@]}" exec -T db psql -X -U postgres -d shop -Atc "select 1 from course.ready" 2>/dev/null | grep -q 1
+}
+
+wait_ready() {
+  local i
+  for i in $(seq 1 90); do
+    is_ready && return 0
+    sleep 1
+  done
+  die "the database did not become ready in 90 s. Look at: ./pg logs"
+}
+
+cmd_up() {
+  need_docker
+  "${DC[@]}" up -d
+  printf 'waiting for PostgreSQL'
+  local i
+  for i in $(seq 1 120); do
+    if [ -z "$("${DC[@]}" ps -q --status running db 2>/dev/null)" ]; then
+      echo; "${DC[@]}" logs --tail=25 db 2>&1 | grep -E 'ERROR|FATAL|HINT|LINE' | head -8 >&2
+      die "the container stopped while starting (a seed script failed?). Full log: docker compose logs db"
+    fi
+    if is_ready; then
+      echo; echo "${c_grn}ready${c_off}  ->  ./pg psql    (host port ${PG_PORT}, user postgres, password course, database shop)"
+      return 0
+    fi
+    printf '.'; sleep 1
+  done
+  echo; die "not ready after 120 s. Look at: ./pg logs"
+}
+
+cmd_status() {
+  need_docker
+  if is_ready; then echo "${c_grn}ready${c_off} on host port ${PG_PORT}"; else echo "not running or not ready (./pg up)"; exit 1; fi
+}
+
+# ---------------------------------------------------------------- exercises
+
+lesson_dir() { # LESSON -> zero-padded two digits
+  printf '%02d' "$((10#$1))"
+}
+
+list_exercises() { # LESSON -> numbers, one per line
+  local d="solutions/$1"
+  [ -d "$d" ] || die "no exercises for lesson $1 (looked in $d)"
+  ls "$d" | sed -n 's/^\([0-9][0-9]*\)\.sql$/\1/p' | sort -n
+}
+
+# Exercises create roles and databases named lab_* (roles and databases are cluster-wide,
+# not per-database, so they would otherwise survive between checks). Only lab_* objects are
+# ever removed automatically; anything else you create is yours and is never touched.
+LAB_ROLES_SQL="select rolname from pg_roles where rolname like 'lab\\_%' order by 1"
+LAB_DBS_SQL="select datname from pg_database where datname like 'lab\\_%' order by 1"
+
+cmd_clean_roles() { # also drops lab_* databases
+  local quiet="${1:-}" d r
+  for d in $(psql_in -d postgres -Atc "$LAB_DBS_SQL"); do
+    psql_in -d postgres -qc "drop database if exists \"$d\" with (force)" >/dev/null 2>&1 || true
+    [ -n "$quiet" ] || echo "dropped database $d"
+  done
+  local roles; roles=$(psql_in -d postgres -Atc "$LAB_ROLES_SQL")
+  local dbs; dbs=$(psql_in -d postgres -Atc "select datname from pg_database where datallowconn")
+  for r in $roles; do
+    for d in $dbs; do
+      psql_in -d "$d" -qc "drop owned by \"$r\" cascade" >/dev/null 2>&1 || true
+    done
+    psql_in -d postgres -qc "drop role if exists \"$r\"" >/dev/null 2>&1 || true
+    [ -n "$quiet" ] || echo "dropped role $r"
+  done
+}
+
+tidy_roles() { # checks start and end from a clean slate
+  local left; left=$( { psql_in -d postgres -Atc "$LAB_ROLES_SQL"; psql_in -d postgres -Atc "$LAB_DBS_SQL"; } | tr '\n' ' ')
+  if [ -n "$left" ] && [ "${1:-}" = "announce" ]; then
+    echo "${c_dim}note: removing leftover lab_* roles/databases before checking: $left${c_off}"
+  fi
+  cmd_clean_roles quiet
+}
+
+fresh_db() { # NAME -> database cloned from the pristine template
+  psql_in -d postgres -qc "drop database if exists \"$1\" with (force)" >/dev/null
+  psql_in -d postgres -qc "create database \"$1\" template shop_template" >/dev/null
+}
+
+drop_db() { psql_in -d postgres -qc "drop database if exists \"$1\" with (force)" >/dev/null 2>&1 || true; }
+
+# Print the result of running FILE in DBNAME as CSV, errors included, so two runs can be compared.
+run_csv() { # FILE DBNAME
+  psql_in -d "$2" --csv -P pager=off -q < "$1" 2>&1 || true
+}
+
+normalise() { # unordered comparison: keep the header, sort the body
+  awk 'NR==1{print; next} {print | "LC_ALL=C sort"}' 
+}
+
+# check one exercise; echoes PASS/FAIL line; returns 0 on pass
+check_one() { # LESSON N FILE_TO_TEST
+  local L="$1" N="$2" file="$3"
+  local label="lesson $L, exercise $N"
+  local sol="solutions/$L/$N.sql" chk="checks/$L/$N.sql"
+  local work="chk_${L}_${N}_$$"
+  [ -f "$sol" ] || die "no solution file $sol"
+
+  tidy_roles >/dev/null 2>&1 || true
+  fresh_db "$work"
+
+  local out ok=1 detail=""
+  if [ -f "$chk" ]; then
+    # State exercise: run the student's file, then the assertions.
+    local run_out
+    if ! run_out=$(psql_in -d "$work" -q < "$file" 2>&1); then
+      ok=0; detail="your file raised an error:"$'\n'"$run_out"
+    else
+      out=$(psql_in -d "$work" --csv -q < "$chk" 2>&1) || { ok=0; detail="the check itself failed:"$'\n'"$out"; }
+      if [ $ok = 1 ]; then
+        # each row: ok,what  -> any ok other than t is a failure
+        local bad; bad=$(echo "$out" | awk -F, 'NR>1 && $1!="t" {sub(/^[^,]*,/,""); print "  - " $0}')
+        local good; good=$(echo "$out" | awk -F, 'NR>1 && $1=="t"' | wc -l | tr -d ' ')
+        if [ -n "$bad" ]; then ok=0; detail="not yet:"$'\n'"$bad"; fi
+        [ $ok = 1 ] && [ "$good" -eq 0 ] && { ok=0; detail="the check produced no assertions"; }
+      fi
+    fi
+  else
+    # Query exercise: compare the result of your file with the model solution's.
+    local want got
+    want=$(run_csv "$sol" "$work")
+    drop_db "$work"; fresh_db "$work"
+    got=$(run_csv "$file" "$work")
+    if ! grep -q -- '^-- ordered' "$sol"; then
+      want=$(printf '%s\n' "$want" | normalise); got=$(printf '%s\n' "$got" | normalise)
+    fi
+    if [ "$want" != "$got" ]; then
+      ok=0
+      detail="your result differs from the expected one."$'\n'"--- expected (first lines)"$'\n'"$(printf '%s\n' "$want" | head -8)"$'\n'"--- yours (first lines)"$'\n'"$(printf '%s\n' "$got" | head -8)"
+    fi
+  fi
+
+  drop_db "$work"
+  tidy_roles >/dev/null 2>&1 || true
+
+  if [ $ok = 1 ]; then echo "${c_grn}PASS${c_off}  $label"; return 0; fi
+  echo "${c_red}FAIL${c_off}  $label"; [ -n "$detail" ] && echo "$detail" | sed 's/^/      /'
+  return 1
+}
+
+cmd_check() {
+  need_docker; is_ready || die "the database is not running. Start it with: ./pg up"
+  [ $# -ge 1 ] || die "usage: ./pg check LESSON [N]"
+  local L; L=$(lesson_dir "$1"); shift
+  local ns; if [ $# -ge 1 ]; then ns="$1"; else ns=$(list_exercises "$L"); fi
+  tidy_roles announce
+  local fail=0 n
+  for n in $ns; do
+    local f="exercises/$L/$n.sql"
+    [ -f "$f" ] || { echo "${c_red}MISSING${c_off}  $f"; fail=1; continue; }
+    check_one "$L" "$n" "$f" || fail=1
+  done
+  exit $fail
+}
+
+cmd_solution() {
+  [ $# -eq 2 ] || die "usage: ./pg solution LESSON N"
+  local L; L=$(lesson_dir "$1")
+  cat "solutions/$L/$2.sql"
+}
+
+cmd_verify() { # maintainers
+  need_docker; is_ready || die "database not running (./pg up)"
+  local lessons; if [ $# -ge 1 ]; then lessons=$(lesson_dir "$1"); else lessons=$(ls solutions 2>/dev/null | grep -E '^[0-9]+$' | sort); fi
+  local bad=0 L n
+  for L in $lessons; do
+    for n in $(list_exercises "$L"); do
+      [ -f "exercises/$L/$n.sql" ] || { echo "${c_red}MISSING STUB${c_off} exercises/$L/$n.sql"; bad=1; continue; }
+      if check_one "$L" "$n" "solutions/$L/$n.sql" >/tmp/pgv.$$ 2>&1; then echo "${c_grn}ok${c_off}   solution $L/$n passes"; else echo "${c_red}BAD${c_off}  solution $L/$n FAILS"; cat /tmp/pgv.$$; bad=1; fi
+      if check_one "$L" "$n" "exercises/$L/$n.sql" >/tmp/pgv.$$ 2>&1; then echo "${c_red}BAD${c_off}  unedited stub $L/$n PASSES (it must fail until the student answers)"; bad=1; else echo "${c_grn}ok${c_off}   stub $L/$n fails as it should"; fi
+    done
+  done
+  rm -f /tmp/pgv.$$
+  exit $bad
+}
+
+# ------------------------------------------------------------------- dispatch
+
+sub="${1:-help}"; [ $# -gt 0 ] && shift
+case "$sub" in
+  up)         cmd_up ;;
+  down)       need_docker; "${DC[@]}" down ;;
+  reset)      need_docker; "${DC[@]}" down -v; cmd_up ;;
+  status)     cmd_status ;;
+  psql)       need_docker; psql_tty -d "${1:-$DB}" ;;
+  psql-as)    need_docker; [ $# -ge 1 ] || die "usage: ./pg psql-as ROLE [db]"; "${DC[@]}" exec db psql -X -U "$1" -d "${2:-$DB}" ;;
+  sql)        need_docker; [ $# -ge 1 ] || die "usage: ./pg sql \"SELECT 1\" [db]"; psql_in -d "${2:-$DB}" -P pager=off -c "$1" ;;
+  run)        need_docker; [ $# -ge 1 ] || die "usage: ./pg run FILE.sql [db]"; psql_in -d "${2:-$DB}" -P pager=off < "$1" ;;
+  check)      cmd_check "$@" ;;
+  solution)   cmd_solution "$@" ;;
+  verify)     cmd_verify "$@" ;;
+  clean-roles) need_docker; cmd_clean_roles ;;
+  logs)       need_docker; "${DC[@]}" logs -f --tail=100 db ;;
+  exec)       need_docker; "${DC[@]}" exec db "$@" ;;
+  help|-h|--help|"") sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//' ;;
+  *)          die "unknown command '$sub' (try ./pg help)" ;;
+esac

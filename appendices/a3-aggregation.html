@@ -1,0 +1,420 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A3. Aggregation and grouping &mdash; Learning PostgreSQL</title>
+<meta name="description" content="COUNT, SUM, AVG, GROUP BY, HAVING, FILTER and how NULL behaves in each.">
+<link rel="stylesheet" href="../assets/css/course.css">
+</head>
+<body data-root="../" data-page="a3-aggregation">
+<a class="skip-link" href="#content">Skip to content</a>
+<header class="topbar">
+  <button class="icon-btn menu-btn" type="button" aria-label="Toggle navigation" aria-expanded="false" aria-controls="sidebar">&#9776;</button>
+  <a class="brand" href="../index.html"><span class="mark pgm">PG</span> Learning PostgreSQL <span class="sub">PostgreSQL 18</span></a>
+  <span class="spacer"></span>
+  <div class="search" role="search">
+    <span class="glyph" aria-hidden="true">&#9906;</span>
+    <input type="search" placeholder="Search the course&#8230;" aria-label="Search the course" autocomplete="off" spellcheck="false">
+    <kbd>/</kbd>
+    <div class="search-results" role="listbox"></div>
+  </div>
+  <nav class="topbar-links">
+    <a class="hide-sm" href="../appendices/d-glossary.html">Glossary</a>
+    <a class="hide-sm" href="../appendices/b-psql.html">psql</a>
+  </nav>
+  <button class="icon-btn theme-btn" type="button" aria-label="Toggle theme">&#9790;</button>
+</header>
+<div class="scrim"></div>
+<div class="shell">
+<nav class="sidebar" id="sidebar" aria-label="Course contents">
+  <h4>Start here</h4>
+  <ol>
+    <li><a href="../start/setup.html" data-page="setup"><span class="n">00</span><span>Set up your lab</span></a></li>
+  </ol>
+  <h4>Part 1 — Foundations: the server, databases, schemas and roles</h4>
+  <ol>
+    <li><a href="../lessons/01-architecture.html" data-page="01-architecture"><span class="n">01</span><span>How PostgreSQL is built</span></a></li>
+    <li><a href="../lessons/02-databases-and-schemas.html" data-page="02-databases-and-schemas"><span class="n">02</span><span>Databases and schemas</span></a></li>
+    <li><a href="../lessons/03-roles-and-users.html" data-page="03-roles-and-users"><span class="n">03</span><span>Roles and users</span></a></li>
+    <li><a href="../lessons/04-privileges-and-grants.html" data-page="04-privileges-and-grants"><span class="n">04</span><span>Privileges and grants</span></a></li>
+    <li><a href="../lessons/05-security-and-rls.html" data-page="05-security-and-rls"><span class="n">05</span><span>Hardening and row-level security</span></a></li>
+  </ol>
+  <h4>Part 2 — Modelling and SQL in depth</h4>
+  <ol>
+    <li><a href="../lessons/06-data-types.html" data-page="06-data-types"><span class="n">06</span><span>Data types</span></a></li>
+    <li><a href="../lessons/07-constraints-and-design.html" data-page="07-constraints-and-design"><span class="n">07</span><span>Constraints and schema design</span></a></li>
+    <li><a href="../lessons/08-advanced-queries.html" data-page="08-advanced-queries"><span class="n">08</span><span>Advanced queries</span></a></li>
+    <li><a href="../lessons/09-changing-data.html" data-page="09-changing-data"><span class="n">09</span><span>Changing data safely</span></a></li>
+    <li><a href="../lessons/10-json-and-arrays.html" data-page="10-json-and-arrays"><span class="n">10</span><span>JSONB and arrays</span></a></li>
+    <li><a href="../lessons/11-text-search.html" data-page="11-text-search"><span class="n">11</span><span>Text search and pattern matching</span></a></li>
+  </ol>
+  <h4>Part 3 — Performance</h4>
+  <ol>
+    <li><a href="../lessons/12-indexes.html" data-page="12-indexes"><span class="n">12</span><span>Indexes</span></a></li>
+    <li><a href="../lessons/13-explain-and-planner.html" data-page="13-explain-and-planner"><span class="n">13</span><span>EXPLAIN and the planner</span></a></li>
+    <li><a href="../lessons/14-query-tuning.html" data-page="14-query-tuning"><span class="n">14</span><span>A query-tuning workflow</span></a></li>
+  </ol>
+  <h4>Part 4 — Transactions and concurrency</h4>
+  <ol>
+    <li><a href="../lessons/15-transactions-and-mvcc.html" data-page="15-transactions-and-mvcc"><span class="n">15</span><span>Transactions and MVCC</span></a></li>
+    <li><a href="../lessons/16-locking.html" data-page="16-locking"><span class="n">16</span><span>Locking and concurrency</span></a></li>
+    <li><a href="../lessons/17-vacuum-and-bloat.html" data-page="17-vacuum-and-bloat"><span class="n">17</span><span>Vacuum, bloat and autovacuum</span></a></li>
+  </ol>
+  <h4>Part 5 — Programming the database</h4>
+  <ol>
+    <li><a href="../lessons/18-views-and-functions.html" data-page="18-views-and-functions"><span class="n">18</span><span>Views, functions and procedures</span></a></li>
+    <li><a href="../lessons/19-triggers-and-events.html" data-page="19-triggers-and-events"><span class="n">19</span><span>Triggers, LISTEN/NOTIFY and audit</span></a></li>
+    <li><a href="../lessons/20-partitioning.html" data-page="20-partitioning"><span class="n">20</span><span>Partitioning</span></a></li>
+  </ol>
+  <h4>Part 6 — Operating PostgreSQL</h4>
+  <ol>
+    <li><a href="../lessons/21-configuration.html" data-page="21-configuration"><span class="n">21</span><span>Configuration and tuning</span></a></li>
+    <li><a href="../lessons/22-wal-and-durability.html" data-page="22-wal-and-durability"><span class="n">22</span><span>WAL, checkpoints and durability</span></a></li>
+    <li><a href="../lessons/23-backup-and-recovery.html" data-page="23-backup-and-recovery"><span class="n">23</span><span>Backup, restore and PITR</span></a></li>
+    <li><a href="../lessons/24-replication.html" data-page="24-replication"><span class="n">24</span><span>Replication and high availability</span></a></li>
+    <li><a href="../lessons/25-monitoring.html" data-page="25-monitoring"><span class="n">25</span><span>Monitoring and diagnostics</span></a></li>
+    <li><a href="../lessons/26-connections-and-upgrades.html" data-page="26-connections-and-upgrades"><span class="n">26</span><span>Connections, pooling, extensions and upgrades</span></a></li>
+  </ol>
+  <h4>Part 7 — Putting it together</h4>
+  <ol>
+    <li><a href="../lessons/27-capstone.html" data-page="27-capstone"><span class="n">27</span><span>Capstone project</span></a></li>
+  </ol>
+  <h4>Annexes</h4>
+  <ol>
+    <li><a href="../appendices/a1-select-basics.html" data-page="a1-select-basics"><span class="n">A1</span><span>SELECT, filtering and sorting</span></a></li>
+    <li><a href="../appendices/a2-joins.html" data-page="a2-joins"><span class="n">A2</span><span>Joins and combining tables</span></a></li>
+    <li><a href="../appendices/a3-aggregation.html" data-page="a3-aggregation"><span class="n">A3</span><span>Aggregation and grouping</span></a></li>
+    <li><a href="../appendices/a4-subqueries-and-ctes.html" data-page="a4-subqueries-and-ctes"><span class="n">A4</span><span>Subqueries and CTEs</span></a></li>
+    <li><a href="../appendices/a5-ddl-and-dml.html" data-page="a5-ddl-and-dml"><span class="n">A5</span><span>Creating and changing things</span></a></li>
+    <li><a href="../appendices/b-psql.html" data-page="b-psql"><span class="n">B</span><span>psql cheat sheet</span></a></li>
+    <li><a href="../appendices/c-catalog-queries.html" data-page="c-catalog-queries"><span class="n">C</span><span>Catalog and diagnostic queries</span></a></li>
+    <li><a href="../appendices/d-glossary.html" data-page="d-glossary"><span class="n">D</span><span>Glossary</span></a></li>
+    <li><a href="../appendices/e-troubleshooting.html" data-page="e-troubleshooting"><span class="n">E</span><span>Troubleshooting</span></a></li>
+    <li><a href="../appendices/f-whats-next.html" data-page="f-whats-next"><span class="n">F</span><span>What to learn next</span></a></li>
+  </ol>
+</nav>
+<div class="main">
+<main class="content" id="content">
+<p class="eyebrow">Annex</p>
+<h1>A3. Aggregation and grouping</h1>
+<p class="lede">
+  An aggregate function turns many rows into one value: a count, a sum, an average. <code>GROUP BY</code> does
+  that once per group instead of once for the whole table. This annex covers the everyday aggregates, how to
+  filter before and after grouping, and the rules for <code>NULL</code> that make some totals surprising.
+</p>
+
+<h2 id="lab">Set up</h2>
+<p>
+  The playgrounds run PostgreSQL 18 in your browser on a small copy of the shop: 8 customers (four of them have no
+  phone number), 8 products and 12 orders. The same queries run on the Docker database with
+  <code>./pg psql</code>; there the numbers are larger.
+</p>
+
+<h2 id="count">1. COUNT(*) versus COUNT(column)</h2>
+<p>
+  <code>count(*)</code> counts rows. <code>count(column)</code> counts the rows where that column is
+  <em>not NULL</em>. <code>count(distinct column)</code> counts the different non-NULL values.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">three different counts of the same table</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select count(*)                as customers,
+       count(phone)            as with_phone,
+       count(referred_by)      as were_referred,
+       count(distinct country) as countries
+from shop.customers;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  This is the most useful NULL rule in aggregation: <code>count(*) - count(phone)</code> is the number of customers
+  with no phone. <code>count(1)</code> is the same as <code>count(*)</code>; <code>count(*)</code> is the clearer one.
+</p>
+
+<h2 id="sum-avg">2. SUM, AVG, MIN and MAX</h2>
+<p>
+  <code>sum</code> and <code>avg</code> work on numbers. <code>min</code> and <code>max</code> work on anything
+  that can be sorted: numbers, text, dates.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">summary of all orders</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select count(*)                 as orders,
+       sum(total)               as revenue,
+       round(avg(total), 2)     as average_order,
+       min(total)               as smallest,
+       max(total)               as largest,
+       min(ordered_at)::date::text as first_day,
+       max(ordered_at)::date::text as last_day
+from shop.orders;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<div class="note info">
+  <span class="note-title">The result types</span>
+  <p>
+    <code>count</code> returns <code>bigint</code>. <code>sum</code> of an <code>integer</code> column returns
+    <code>bigint</code>, and <code>sum</code> of a <code>numeric</code> column returns <code>numeric</code>, so totals do not
+    overflow easily. <code>avg</code> of an integer column returns <code>numeric</code> with many decimals; wrap it in
+    <code>round(…, 2)</code> to show it.
+  </p>
+</div>
+
+<h2 id="group-by">3. GROUP BY: one result row per group</h2>
+<p>
+  <code>GROUP BY</code> splits the rows into groups that share the same values, then computes each aggregate once
+  per group. Every column in the select list must either be in the <code>GROUP BY</code> or be inside an aggregate.
+  Otherwise PostgreSQL cannot know which of the group's values to show, and it raises an error.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">orders and revenue per status</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select status,
+       count(*)   as orders,
+       sum(total) as revenue
+from shop.orders
+group by status
+order by status;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">the error you get for a column not in GROUP BY</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select status, customer_id, count(*)
+from shop.orders
+group by status;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  The message is <em>column "orders.customer_id" must appear in the GROUP BY clause or be used in an aggregate
+  function</em>. Add the column to <code>GROUP BY</code> (more, smaller groups) or aggregate it
+  (<code>count(distinct customer_id)</code>, <code>min(customer_id)</code>).
+</p>
+<p>
+  You may group by several columns, and by expressions. One exception to the rule above: if you group by a table's
+  primary key, you may select any other column of that table, because the key already decides them.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">group by a join and an expression</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select c.id, c.full_name,                         -- allowed: c.id is the primary key
+       extract(year from o.ordered_at) as year,
+       count(*)                       as orders,
+       sum(o.total)                   as spent
+from shop.customers c
+join shop.orders o on o.customer_id = c.id
+group by c.id, extract(year from o.ordered_at)
+order by c.id, year;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<h2 id="having">4. WHERE versus HAVING</h2>
+<p>
+  Both filter, at different moments. <code>WHERE</code> runs <em>before</em> grouping and removes rows.
+  <code>HAVING</code> runs <em>after</em> grouping and removes whole groups, so it can test aggregates. You cannot
+  put <code>count(*) &gt; 1</code> in <code>WHERE</code>, because the count does not exist yet.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">WHERE removes rows, HAVING removes groups</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select customer_id,
+       count(*)   as orders,
+       sum(total) as spent
+from shop.orders
+where status not in ('cancelled', 'refunded')   -- rows: ignore orders that did not count
+group by customer_id
+having count(*) &gt;= 2                           -- groups: repeat customers only
+order by spent desc;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<div class="note tip">
+  <span class="note-title">Filter in WHERE whenever you can</span>
+  <p>
+    A condition that does not need an aggregate belongs in <code>WHERE</code>. It removes rows before the grouping
+    work, and on a large table that is the difference between grouping a million rows and grouping a thousand.
+  </p>
+</div>
+
+<h2 id="filter">5. FILTER: several conditional aggregates in one pass</h2>
+<p>
+  <code>aggregate(...) FILTER (WHERE condition)</code> feeds only the matching rows to that one aggregate. It lets
+  you compute many counts and sums in one scan, instead of one query per condition.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">a small report per country in one query</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select shipping_country,
+       count(*)                                               as orders,
+       count(*) filter (where status = 'delivered')           as delivered,
+       count(*) filter (where status in ('cancelled','refunded')) as lost,
+       coalesce(sum(total) filter (where status = 'delivered'), 0) as delivered_revenue
+from shop.orders
+group by shipping_country
+order by shipping_country;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  Before <code>FILTER</code> existed, people wrote <code>sum(case when status = 'delivered' then total end)</code>. It
+  gives the same answer; <code>FILTER</code> says what you mean. More grouping tools (<code>ROLLUP</code>,
+  <code>GROUPING SETS</code>, window functions) are in <a href="../lessons/08-advanced-queries.html">lesson 8</a>.
+</p>
+
+<h2 id="null">6. How NULL behaves in aggregates</h2>
+<p>Four rules cover almost every surprise:</p>
+<ol>
+  <li>Every aggregate except <code>count(*)</code> <strong>ignores NULL inputs</strong>.</li>
+  <li>So <code>avg(x)</code> is the sum of the non-NULL values divided by their number, not by the number of rows.</li>
+  <li>An aggregate over <strong>no rows</strong> returns NULL, except <code>count</code>, which returns 0.
+      That is why the example above wraps <code>sum</code> in <code>coalesce(…, 0)</code>.</li>
+  <li><code>GROUP BY</code> puts all NULLs in <strong>one group</strong>, even though <code>NULL = NULL</code> is not true.</li>
+</ol>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">the four rules on four values</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select count(*)  as rows,
+       count(v)  as non_null,
+       sum(v)    as sum,
+       avg(v)    as avg_ignores_null,          -- (10 + 20) / 2, not / 4
+       sum(v) filter (where v &gt; 100) as sum_of_nothing,
+       count(v)  filter (where v &gt; 100) as count_of_nothing
+from (values (10), (20), (null), (null)) t(v);</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">NULLs form a single group</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select referred_by, count(*) as customers
+from shop.customers
+group by referred_by
+order by referred_by nulls first;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<div class="note warn">
+  <span class="note-title">Average of what?</span>
+  <p>
+    If a missing value really means zero, <code>avg(x)</code> gives the wrong answer, because it skips the NULLs.
+    Use <code>avg(coalesce(x, 0))</code> in that case. If missing means unknown, the plain <code>avg</code> is right.
+    Decide which one you mean.
+  </p>
+</div>
+
+<h2 id="agg-lists">7. string_agg and array_agg: collect values</h2>
+<p>
+  <code>string_agg(text, separator)</code> joins a group's values into one string. <code>array_agg(value)</code>
+  collects them into an array. Both accept an <code>ORDER BY</code> inside the parentheses, and without it the
+  order of the values is not defined.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">a list of names per country</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select country,
+       count(*)                                       as customers,
+       string_agg(full_name, ', ' order by full_name) as names,
+       array_agg(id order by id)                      as ids
+from shop.customers
+group by country
+order by country;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">what is in each order, as one line</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select i.order_id,
+       string_agg(i.quantity || ' × ' || p.name, '; ' order by i.line_no) as items,
+       sum(i.quantity * i.unit_price)                               as items_total
+from shop.order_items i
+join shop.products p on p.id = i.product_id
+group by i.order_id
+order by i.order_id;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  The two treat NULL differently. <code>string_agg</code> leaves NULL values out. <code>array_agg</code> keeps them,
+  so <code>array_agg(phone)</code> contains <code>NULL</code> elements. Filter them with
+  <code>array_agg(phone) filter (where phone is not null)</code> if you do not want them.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">NULLs in array_agg and string_agg</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select array_agg(phone order by id)       as phones_array,
+       string_agg(phone, ', ' order by id)  as phones_text
+from shop.customers
+where country = 'NL';</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<h2 id="order">8. Where grouping fits in a query</h2>
+<p>
+  The logical order is <code>FROM</code> → <code>WHERE</code> → <code>GROUP BY</code> → <code>HAVING</code> →
+  <code>SELECT</code> → <code>ORDER BY</code> → <code>LIMIT</code>. Two consequences: <code>ORDER BY</code> can sort by
+  an aggregate or its alias, and a top-N report is just <code>ORDER BY … DESC LIMIT n</code> after the grouping.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">the three best-selling products by quantity</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select p.name, sum(i.quantity) as units
+from shop.order_items i
+join shop.products p on p.id = i.product_id
+group by p.id, p.name
+order by units desc, p.name
+limit 3;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<h2 id="summary">Summary</h2>
+<ul>
+  <li><code>count(*)</code> counts rows; <code>count(col)</code> counts non-NULL values; <code>count(distinct col)</code> counts distinct non-NULL values.</li>
+  <li>Every selected column must be grouped or aggregated (or be functionally determined by a grouped primary key).</li>
+  <li><code>WHERE</code> filters rows before grouping; <code>HAVING</code> filters groups after it.</li>
+  <li><code>FILTER (WHERE …)</code> gives conditional aggregates in a single pass.</li>
+  <li>Aggregates ignore NULL; over zero rows they return NULL (count returns 0). <code>coalesce</code> fixes the display.</li>
+  <li><code>string_agg</code> and <code>array_agg</code> collect values; give them an <code>ORDER BY</code>.</li>
+</ul>
+
+<h2 id="next">Where to next</h2>
+<p>
+  Queries inside queries are in <a href="a4-subqueries-and-ctes.html">annex A4</a>. Window functions, which compute
+  aggregates without collapsing the rows, are in <a href="../lessons/08-advanced-queries.html">lesson 8</a>.
+</p>
+<nav class="pager"><a class="prev" href="../appendices/a2-joins.html"><span class="dir">Previous</span><span class="lbl">A2. Joins and combining tables</span></a><a class="next" href="../appendices/a4-subqueries-and-ctes.html"><span class="dir">Next</span><span class="lbl">A4. Subqueries and CTEs</span></a></nav>
+</main>
+<aside class="toc" aria-label="On this page"></aside>
+</div>
+</div>
+<script src="../assets/js/search-index.js"></script>
+<script src="../assets/js/mini-seed.js"></script>
+<script src="../assets/js/course.js"></script>
+</body>
+</html>

@@ -1,0 +1,23 @@
+-- Build a blocked session and find it. Paste this setup first; it opens a
+-- second connection (with the dblink extension) whose UPDATE has to wait for
+-- the row lock your own open transaction holds:
+--
+--   create extension if not exists dblink;
+--   begin;
+--   update shop.products set stock = stock where id = 1;
+--   do $$
+--   begin
+--     perform dblink_connect('worker', 'dbname=' || current_database() || ' application_name=lab_worker');
+--     perform dblink_send_query('worker', 'update shop.products set stock = stock + 1 where id = 1');
+--     perform pg_sleep(1);
+--   end $$;
+--
+-- Then, still inside the transaction, write ONE query over pg_stat_activity
+-- that returns every session of the current database that is blocked by
+-- another session, with the columns:
+--   application_name, state, wait_event_type, wait_event,
+--   blocked_by_me (boolean: is your session, and only yours, the blocker?),
+--   query
+-- End with:  rollback;  and then  select dblink_disconnect('worker') \gset
+-- Then run ./pg check 25 3.
+

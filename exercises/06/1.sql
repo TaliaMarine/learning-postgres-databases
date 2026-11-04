@@ -1,0 +1,5 @@
+-- For each local calendar day in Amsterdam from 2025-03-01 up to and including
+-- 2025-03-07, count the orders placed that day (shop.orders.ordered_at).
+-- Return the columns day (a date) and orders, one row per day, oldest first.
+-- A day runs from midnight to midnight in Europe/Amsterdam, not in UTC.
+-- Run ./pg check 06 1 when you are done.

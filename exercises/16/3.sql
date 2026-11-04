@@ -1,0 +1,5 @@
+-- Add a foreign key lab_events_customer_fk from analytics.events(customer_id) to
+-- shop.customers(id) the safe way for a big, busy table: in two steps, so the
+-- long check does not block writers. Then create an index named
+-- events_customer_id_idx on analytics.events(customer_id) without blocking writes.
+-- Then run ./pg check 16 3.

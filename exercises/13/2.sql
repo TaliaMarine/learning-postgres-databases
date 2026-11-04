@@ -1,0 +1,6 @@
+-- The planner guesses 5000 rows for
+--   select * from analytics.events where payload ->> 'device' = 'mobile'
+-- but about a third of the table matches. Create extended statistics named
+-- lab_ev_device on the expression (payload ->> 'device') of analytics.events and
+-- gather them, so the estimate becomes close to the real count.
+-- Then run ./pg check 13 2.

@@ -1,0 +1,469 @@
+<p class="lede">
+  A trigger is a function that PostgreSQL runs for you when a row or a table changes. It is how you keep an audit
+  trail that no application can forget to write, how you clean values on the way in, and how you tell other programs
+  that something happened. This lesson covers row and statement triggers, event triggers for DDL, and
+  <code>LISTEN</code>/<code>NOTIFY</code>, with the rules about transactions that catch people out.
+</p>
+
+<h2 id="goals">Learning goals</h2>
+<ul>
+  <li>Write a trigger function and attach it with <code>CREATE TRIGGER</code>.</li>
+  <li>Choose between <code>BEFORE</code> and <code>AFTER</code>, and between <code>FOR EACH ROW</code> and <code>FOR EACH STATEMENT</code>.</li>
+  <li>Use <code>NEW</code>, <code>OLD</code>, <code>TG_OP</code> and a <code>WHEN</code> condition to react only to the changes you care about.</li>
+  <li>Build an audit table that records who changed what, and say what such a table cannot guarantee.</li>
+  <li>Write an event trigger that logs or blocks DDL commands.</li>
+  <li>Explain when a <code>NOTIFY</code> is delivered, and why a rolled-back transaction sends nothing.</li>
+</ul>
+
+<h2 id="lab">Set up for this lesson</h2>
+<p>
+  Use the <code>shop</code> database. The playgrounds run in your browser, share one database, and are meant to be run
+  in order (press <em>Reset data</em> to start again). Triggers fire in the browser engine exactly as on the server.
+  <code>LISTEN</code>/<code>NOTIFY</code> needs two connections, which the single-user browser engine does not have, so
+  that part is explained with <code>psql</code> output from the Docker database.
+</p>
+
+<figure class="code" data-lang="bash">
+  <figcaption><span class="path">terminal</span><span class="grow"></span><span class="lang">bash</span></figcaption>
+<pre><code>./pg psql
+select count(*) from pg_trigger where not tgisinternal;   -- 0: the shop has no triggers yet</code></pre>
+</figure>
+
+<h2 id="first">1. A trigger has two parts</h2>
+
+<p>
+  A trigger is made of a <strong>trigger function</strong> (a function with no arguments that returns the special type
+  <code>trigger</code>, usually written in PL/pgSQL, see <a href="18-views-and-functions.html">lesson 18</a>) and a
+  <code>CREATE TRIGGER</code> statement that says <em>when</em> to call it. Inside the function, PostgreSQL gives
+  you variables: <code>NEW</code> (the row being written), <code>OLD</code> (the row as it was), <code>TG_OP</code> (the
+  words <code>INSERT</code>, <code>UPDATE</code> or <code>DELETE</code>) and <code>TG_TABLE_NAME</code>.
+</p>
+
+<p>
+  The first example cleans an e-mail address on the way in. It is a <strong>BEFORE</strong> trigger: it runs before the row
+  is stored, so it can change <code>NEW</code>, and what it returns is what gets stored.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">a BEFORE row trigger that rewrites the new row</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">create function shop.customers_normalise() returns trigger
+language plpgsql
+as $$
+begin
+  new.email := lower(trim(new.email));
+  return new;
+end;
+$$;
+
+create trigger customers_normalise
+before insert or update of email on shop.customers
+for each row execute function shop.customers_normalise();
+
+insert into shop.customers (email, full_name, country, created_at)
+values ('  Zoe.Test@Example.COM ', 'Zoe Test', 'NL', '2025-01-01')
+returning id, email;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  The row was stored as <code>zoe.test@example.com</code>. The words <code>update of email</code> mean “only fire for
+  updates that name the <code>email</code> column”.
+</p>
+
+<h2 id="timing">2. BEFORE or AFTER, ROW or STATEMENT</h2>
+
+<p>Two choices decide how a trigger behaves:</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th></th><th>What it means</th><th>Use it for</th></tr></thead>
+  <tbody>
+    <tr><td><code>BEFORE</code></td><td class="wrap">Runs before the change is made. May edit <code>NEW</code>, or return <code>NULL</code> to skip the row, or raise an error to refuse it.</td><td class="wrap">Cleaning values, defaults that need logic, extra validation</td></tr>
+    <tr><td><code>AFTER</code></td><td class="wrap">Runs after the change, when all constraints have been checked. Cannot change the row. Its return value is ignored.</td><td class="wrap">Audit logs, updating summary tables, sending notifications</td></tr>
+    <tr><td><code>FOR EACH ROW</code></td><td class="wrap">Called once per affected row. <code>NEW</code> and <code>OLD</code> are available.</td><td class="wrap">Anything that depends on the row's values</td></tr>
+    <tr><td><code>FOR EACH STATEMENT</code></td><td class="wrap">Called once per statement, even if it touched zero rows. No <code>NEW</code> or <code>OLD</code> row, but it can read <em>transition tables</em>.</td><td class="wrap">Cheap bulk bookkeeping, “something changed” signals</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>
+  A <strong>transition table</strong> is a temporary table of all the changed rows that a statement-level
+  <code>AFTER</code> trigger can query. It lets you handle a 100,000-row update with one function call instead of 100,000:
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">one call per statement, however many rows</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">create table shop.change_log (id bigint generated always as identity primary key, what text, row_count integer);
+
+create function shop.count_changes() returns trigger
+language plpgsql
+as $$
+begin
+  insert into shop.change_log (what, row_count)
+  select tg_op || ' on ' || tg_table_name, count(*) from changed;
+  return null;
+end;
+$$;
+
+create trigger orders_count
+after update on shop.orders
+referencing new table as changed
+for each statement execute function shop.count_changes();
+
+update shop.orders set total = total where status = 'delivered';
+update shop.orders set total = total where false;      -- touches no row, still fires
+select what, row_count from shop.change_log order by id;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  Both statements logged one row each: the first counted 7 delivered orders, the second counted zero. A
+  row-level trigger would have run seven times for the first statement and not at all for the second.
+</p>
+
+<h3>The order triggers run in</h3>
+<p>
+  For one statement the order is: <code>BEFORE</code> statement triggers, then for each row the <code>BEFORE</code> row triggers,
+  the change itself, and the <code>AFTER</code> row triggers, then finally the <code>AFTER</code> statement triggers. When one table has
+  several triggers of the same kind, they run in alphabetical order of their names, which is a quiet way to build
+  surprises. Keep the number of triggers per table small.
+</p>
+
+<h2 id="guard">3. Refusing a change, and conditions with WHEN</h2>
+
+<p>
+  A trigger that raises an error cancels the whole statement. Combined with <code>OLD</code> and <code>NEW</code>, that makes a
+  rule about <em>transitions</em>, which a <code>CHECK</code> constraint cannot express because it only sees the new row:
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">this one fails on purpose</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">create function shop.protect_status() returns trigger
+language plpgsql
+as $$
+begin
+  if old.status in ('shipped', 'delivered') and new.status = 'pending' then
+    raise exception 'order % cannot go back to pending from %', old.id, old.status;
+  end if;
+  return new;
+end;
+$$;
+
+create trigger orders_protect
+before update of status on shop.orders
+for each row
+when (old.status is distinct from new.status)
+execute function shop.protect_status();
+
+update shop.orders set status = 'pending' where id = 1;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  Order 1 is delivered, so the update is refused with <em>order 1 cannot go back to pending from delivered</em>. The
+  <code>WHEN (...)</code> clause is evaluated by PostgreSQL <em>before</em> it calls your function, so rows that do not match cost
+  almost nothing. Use it whenever you only care about some changes: <code>when (old.status is distinct from new.status)</code>
+  is the usual way to say “the status actually changed”. (<code>IS DISTINCT FROM</code> is the <code>NULL</code>-safe version of
+  <code>&lt;&gt;</code>.)
+</p>
+
+<div class="note info">
+  <span class="note-title">Return values in BEFORE triggers</span>
+  <p>
+    A <code>BEFORE ... FOR EACH ROW</code> trigger must <code>return new</code> (for insert and update) or <code>return old</code> (for
+    delete) to carry on. Returning <code>NULL</code> silently skips that row. Forgetting the <code>return</code> makes every
+    insert or update vanish without an error, which is a classic first-trigger bug.
+  </p>
+</div>
+
+<h2 id="audit">4. Audit trails</h2>
+
+<p>
+  An audit trail records who changed what, and when. The standard pattern is an <code>AFTER</code> row trigger that writes
+  the old and new row, as <code>jsonb</code>, into a log table:
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">audit every change to shop.products</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">create table shop.audit_log (
+  id          bigint generated always as identity primary key,
+  table_name  text   not null,
+  op          text   not null,
+  row_id      integer,
+  old_row     jsonb,
+  new_row     jsonb,
+  changed_by  text   not null default session_user
+);
+
+create function shop.audit_row() returns trigger
+language plpgsql
+as $$
+begin
+  insert into shop.audit_log (table_name, op, row_id, old_row, new_row)
+  values (tg_table_name, tg_op, coalesce(new.id, old.id),
+          case when tg_op in ('UPDATE', 'DELETE') then to_jsonb(old) end,
+          case when tg_op in ('INSERT', 'UPDATE') then to_jsonb(new) end);
+  return null;
+end;
+$$;
+
+create trigger products_audit
+after insert or update or delete on shop.products
+for each row execute function shop.audit_row();
+
+update shop.products set price = price + 1 where id in (1, 2);
+insert into shop.products (sku, name, description, category_id, price, stock, created_at)
+values ('SKU-09999', 'Test item', 'A test item.', 5, 9.99, 3, '2025-01-01');
+delete from shop.products where sku = 'SKU-09999';
+
+select op, row_id, old_row ->> 'price' as old_price, new_row ->> 'price' as new_price
+from shop.audit_log order by id;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  Four changes, four log rows. The default <code>session_user</code> records the role that connected, not the one a
+  <code>SET ROLE</code> or a <code>SECURITY DEFINER</code> function switched to (<a href="03-roles-and-users.html">lesson 3</a>). Because the
+  trigger lives in the database, a script that connects with <code>psql</code> is audited just like the web application.
+</p>
+
+<div class="note warn">
+  <span class="note-title">An audit table is only as trustworthy as its permissions</span>
+  <p>
+    A superuser or the table's owner can disable the trigger or edit the log. Give the application role no
+    <code>UPDATE</code>, <code>DELETE</code> or <code>TRUNCATE</code> on the log table, keep the trigger function owned by a role the application
+    cannot become, and ship the log elsewhere if it must be tamper-proof. Triggers also add write cost to every statement
+    on the table, and the log grows without limit unless you partition and drop it (<a href="20-partitioning.html">lesson 20</a>).
+  </p>
+</div>
+
+<div class="note warn">
+  <span class="note-title">Triggers are invisible</span>
+  <p>
+    Nothing in an <code>INSERT</code> statement tells the reader that a trigger changed the row or wrote somewhere else. Row triggers
+    do not fire for <code>TRUNCATE</code>; that needs a separate <code>BEFORE TRUNCATE</code> trigger. Bulk loads can switch triggers off with
+    <code>ALTER TABLE ... DISABLE TRIGGER</code>, a deliberate and privileged act, and changes made that way leave no audit row. List them with
+    <code>select tgname, tgrelid::regclass from pg_trigger where not tgisinternal;</code> or <code>\d tablename</code> in psql.
+  </p>
+</div>
+
+<h2 id="event">5. Event triggers: reacting to DDL</h2>
+
+<p>
+  A normal trigger watches rows. An <strong>event trigger</strong> watches commands that change the schema: <code>CREATE</code>,
+  <code>ALTER</code>, <code>DROP</code>. It belongs to the whole database, only a superuser can create one, and it fires on one of
+  four events: <code>ddl_command_start</code>, <code>ddl_command_end</code>, <code>sql_drop</code> and <code>table_rewrite</code>.
+  Inside it, <code>pg_event_trigger_ddl_commands()</code> lists what was just done.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">log every DDL command</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">create table shop.ddl_log (
+  id bigint generated always as identity primary key,
+  command_tag text, object_identity text
+);
+
+create function shop.log_ddl() returns event_trigger
+language plpgsql
+as $$
+declare
+  r record;
+begin
+  for r in select * from pg_event_trigger_ddl_commands() loop
+    insert into shop.ddl_log (command_tag, object_identity) values (r.command_tag, r.object_identity);
+  end loop;
+end;
+$$;
+
+create event trigger log_ddl on ddl_command_end execute function shop.log_ddl();
+
+create table public.t_demo (id int);
+alter table public.t_demo add column note text;
+create index on public.t_demo (note);
+
+select command_tag, object_identity from shop.ddl_log order by id;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  You should see <code>CREATE TABLE</code>, <code>ALTER TABLE</code> and <code>CREATE INDEX</code> (on the Docker database
+  the index is named <code>public.t_demo_note_idx</code>). An event trigger can also <em>refuse</em> a command by raising an error:
+  on <code>sql_drop</code>, <code>raise exception</code> cancels any <code>DROP</code>. On the Docker database this printed
+  <em>dropping objects is blocked in this database (DROP TABLE)</em>, and the table survived.
+</p>
+
+<div class="note danger">
+  <span class="note-title">A broken event trigger blocks DDL until you remove it</span>
+  <p>
+    If an event trigger always fails, every matching <code>CREATE</code>, <code>ALTER</code> or <code>DROP</code> fails with it.
+    You can still get out: commands on event triggers themselves never fire event triggers, so a superuser can run
+    <code>drop event trigger name;</code> (or <code>alter event trigger name disable;</code>). The setting
+    <code>event_triggers</code> (default <code>on</code>) lets a superuser switch all of them off for a session. Test event
+    triggers on a scratch database first.
+  </p>
+</div>
+
+<h2 id="notify">6. LISTEN and NOTIFY</h2>
+
+<p>
+  <code>NOTIFY channel, 'payload'</code> sends a short text message to every session that has run <code>LISTEN channel</code>. It
+  gives you a push signal from the database to a worker without polling. A trigger is the natural sender:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">notify when an order is inserted</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>create function shop.notify_order() returns trigger
+language plpgsql
+as $$
+begin
+  perform pg_notify('order_events', json_build_object('id', new.id, 'status', new.status)::text);
+  return null;
+end;
+$$;
+
+create trigger orders_notify after insert on shop.orders
+for each row execute function shop.notify_order();</code></pre>
+</figure>
+
+<p>In another psql window, subscribe with <code>listen order_events;</code>. Then, in the first window:</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">the sender</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>begin;
+insert into shop.orders (customer_id, status, ordered_at, shipping_country, total)
+values (1, 'paid', '2025-12-30', 'NL', 10);
+-- the listener sees nothing yet
+commit;
+-- now the listener prints:</code></pre>
+</figure>
+
+<figure class="code" data-lang="text">
+  <figcaption><span class="path">the listener's terminal</span><span class="grow"></span><span class="lang">text</span></figcaption>
+<pre><code>Asynchronous notification "order_events" with payload "{"id" : 200001, "status" : "paid"}" received from server process with PID 46800.</code></pre>
+</figure>
+
+<p>These are the rules, each one verified with two <code>psql</code> sessions on the Docker database:</p>
+<ul>
+  <li><strong>Delivery happens at commit.</strong> A notification sent inside a transaction waits until that transaction commits. A <code>ROLLBACK</code> throws it away: a rolled-back <code>pg_notify</code> never arrived.</li>
+  <li><strong>Identical notifications in one transaction collapse into one.</strong> Two <code>notify order_events, 'same'</code> statements in one transaction reached the listener once. Different payloads, or the same payload from different transactions, each arrive.</li>
+  <li><strong>Delivery is not durable.</strong> A listener that is not connected when the notification is sent never receives it. Nothing is stored or replayed.</li>
+  <li><strong>The payload is small</strong> (under 8000 bytes). Send an id, and let the listener query the row.</li>
+  <li><strong>The queue is bounded.</strong> A listener that stays inside a long transaction stops the queue from draining; when it fills, <code>NOTIFY</code> starts to fail at commit. <code>pg_notification_queue_usage()</code> shows how full it is (a fraction between 0 and 1).</li>
+</ul>
+
+<div class="note warn">
+  <span class="note-title">NOTIFY is a doorbell, not a message queue</span>
+  <p>
+    Use it to wake a worker up, and have the worker read the real work from a table (with <code>FOR UPDATE SKIP LOCKED</code>,
+    <a href="16-locking.html">lesson 16</a>). On start-up the worker must also read what it missed while it was away. If you need guaranteed
+    delivery, a table is the queue and <code>NOTIFY</code> is only the hint to look at it. Also remember that connection poolers in
+    transaction mode break <code>LISTEN</code>, because your session is not yours between statements
+    (<a href="26-connections-and-upgrades.html">lesson 26</a>).
+  </p>
+</div>
+
+<h2 id="when">When to use, when not to</h2>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Situation</th><th class="wrap">✅ Do this</th><th class="wrap">❌ Not this</th></tr></thead>
+  <tbody>
+    <tr><td class="wrap">Every change to a table must be recorded</td><td class="wrap">An <code>AFTER</code> row trigger writing to an audit table, with restricted permissions</td><td class="wrap">Hoping every application does it</td></tr>
+    <tr><td class="wrap">A value must be cleaned or filled in</td><td class="wrap">A <code>BEFORE</code> row trigger (or a generated column or default, when they are enough)</td><td class="wrap">An <code>AFTER</code> trigger that updates the row again</td></tr>
+    <tr><td class="wrap">A rule about one row's values</td><td class="wrap">A <code>CHECK</code> constraint</td><td class="wrap">A trigger</td></tr>
+    <tr><td class="wrap">A rule about how a value may change</td><td class="wrap">A <code>BEFORE UPDATE</code> trigger using <code>OLD</code> and <code>NEW</code></td><td class="wrap">Application-only checks</td></tr>
+    <tr><td class="wrap">A big bulk update must be summarised</td><td class="wrap">A statement trigger with a transition table</td><td class="wrap">A row trigger that does a query per row</td></tr>
+    <tr><td class="wrap">Wake a worker up when data arrives</td><td class="wrap"><code>NOTIFY</code> from a trigger, plus a table the worker reads</td><td class="wrap">Using <code>NOTIFY</code> as the only copy of the message</td></tr>
+    <tr><td class="wrap">Complex business workflows</td><td class="wrap">Application code or explicit procedures you can read and test</td><td class="wrap">Chains of triggers that fire other triggers</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="inspect">Inspect it</h2>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">every trigger, what it fires on, and whether it is enabled</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select tgrelid::regclass as table_name, tgname,
+       case when (tgtype &amp; 2) &lt;&gt; 0 then 'BEFORE' when (tgtype &amp; 64) &lt;&gt; 0 then 'INSTEAD OF' else 'AFTER' end as timing,
+       case when (tgtype &amp; 1) &lt;&gt; 0 then 'ROW' else 'STATEMENT' end as level,
+       tgenabled as enabled,            -- O = on, D = disabled
+       tgfoid::regproc as function
+from pg_trigger
+where not tgisinternal
+order by 1, 2;
+
+select evtname, evtevent, evtenabled from pg_event_trigger;</code></pre>
+</figure>
+
+<h2 id="exercises">Your turn</h2>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 1</span><span class="grow"></span><span class="lvl">basic</span></div>
+  <div class="ex-body">
+    <p>
+      Write a <code>BEFORE INSERT OR UPDATE</code> trigger on <code>shop.products</code> that stores every sku trimmed and in upper
+      case. The function and the trigger are both called <code>products_clean_sku</code> (the function lives in schema <code>shop</code>).
+    </p>
+    <p>Open <code>exercises/19/1.sql</code>, write your answer, then run <code>./pg check 19 1</code>.</p>
+  </div>
+  {{stub 19 1}}
+  <details><summary>Hint</summary><p>Assign to <code>new.sku</code> and <code>return new</code>. Section 1 has the same shape for e-mail addresses.</p></details>
+  {{solution 19 1}}
+</section>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 2</span><span class="grow"></span><span class="lvl">intermediate</span></div>
+  <div class="ex-body">
+    <p>
+      Record order status changes. Create <code>shop.order_status_log</code> and an <code>AFTER UPDATE</code> row trigger on
+      <code>shop.orders</code> that adds a row only when the status really changes. The check runs updates that do not change the
+      status and expects them to leave no trace.
+    </p>
+    <p>Open <code>exercises/19/2.sql</code>, write your answer, then run <code>./pg check 19 2</code>.</p>
+  </div>
+  {{stub 19 2}}
+  <details><summary>Hint</summary><p>Put <code>when (old.status is distinct from new.status)</code> on the trigger, as in section 3. An <code>AFTER</code> trigger returns <code>null</code>.</p></details>
+  {{solution 19 2}}
+</section>
+
+<section class="exercise">
+  <div class="ex-head"><span>Exercise 3</span><span class="grow"></span><span class="lvl">challenge</span></div>
+  <div class="ex-body">
+    <p>
+      Write an event trigger that refuses a <code>CREATE TABLE</code> in schema <code>public</code> unless the table name starts
+      with <code>app_</code>. Tables in other schemas stay unrestricted. The function is <code>public.require_app_prefix</code> and
+      the trigger is <code>require_app_prefix</code>.
+    </p>
+    <p>Open <code>exercises/19/3.sql</code>, write your answer, then run <code>./pg check 19 3</code>.</p>
+  </div>
+  {{stub 19 3}}
+  <details><summary>Hint</summary><p>Use <code>on ddl_command_end when tag in ('CREATE TABLE')</code>. In the function, loop over <code>pg_event_trigger_ddl_commands()</code>, whose columns include <code>schema_name</code> and <code>object_identity</code>. In a <code>LIKE</code> pattern, <code>_</code> matches any one character; write <code>\_</code> for a literal underscore.</p></details>
+  {{solution 19 3}}
+</section>
+
+<h2 id="summary">Summary</h2>
+<ul>
+  <li>A trigger is a trigger function plus a <code>CREATE TRIGGER</code>. <code>NEW</code>, <code>OLD</code> and <code>TG_OP</code> describe the change.</li>
+  <li><code>BEFORE</code> triggers can change or refuse a row; <code>AFTER</code> triggers observe it. Row triggers run per row; statement triggers run once and can read transition tables.</li>
+  <li><code>WHEN</code> filters cheaply before the function is called.</li>
+  <li>An audit trigger writes old and new rows to a log table; guard that table with permissions.</li>
+  <li>Event triggers react to DDL and can log or block it; a broken one can block you, so test on a scratch database.</li>
+  <li><code>NOTIFY</code> is delivered on commit, dropped on rollback, de-duplicated within a transaction, and not stored. Treat it as a doorbell.</li>
+</ul>
+
+<h2 id="next">Looking ahead</h2>
+<p>
+  Audit tables and event logs grow forever, which is exactly the case where one big table becomes a problem.
+  <a href="20-partitioning.html">Lesson 20</a> shows how to split a table into partitions, how queries skip the partitions they do not need, and
+  how dropping a partition replaces a slow bulk delete.
+</p>

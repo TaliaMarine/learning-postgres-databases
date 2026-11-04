@@ -1,0 +1,403 @@
+<p class="lede">
+  A join puts rows from two tables side by side, using a condition that says which rows belong together. The join
+  type decides what happens to the rows that have no partner. This annex shows every join type on the shop
+  tables, with a picture of which rows survive and a playground for each.
+</p>
+
+<h2 id="lab">Set up</h2>
+<p>
+  The playgrounds run a real PostgreSQL 18 in your browser on a small copy of the shop (8 customers, 8 products,
+  12 orders). In that copy, customer 6 (Finn Smit) has never ordered, and the product “Retro kettle” has never been
+  sold. Those two rows are what make the differences between join types visible. To try the same queries on the
+  Docker database, use <code>./pg psql</code>; the names are the same, the row counts are larger.
+</p>
+
+<h2 id="why">1. Why joins exist</h2>
+<p>
+  Data is split across tables so that each fact is stored once. An order stores a <code>customer_id</code>, not the
+  customer's name. To print “Anna Jansen ordered …” you need both tables, joined on
+  <code>orders.customer_id = customers.id</code>. That condition is the <code>ON</code> clause. A column that points
+  at another table's key is a <em>foreign key</em>; you will meet the constraint itself in
+  <a href="../lessons/07-constraints-and-design.html">lesson 7</a>.
+</p>
+
+<h2 id="inner">2. INNER JOIN: only the matches</h2>
+<p>
+  <code>INNER JOIN</code> (plain <code>JOIN</code> means the same) keeps a row only when the <code>ON</code>
+  condition finds a partner on the other side. Rows without a partner disappear from the result.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">orders with the customer's name</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select o.id as order_id, c.full_name, o.status, o.total
+from shop.orders o
+join shop.customers c on c.id = o.customer_id
+order by o.id;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  Notice the table aliases <code>o</code> and <code>c</code>. They keep the query short, and they are required
+  whenever both tables have a column of the same name (here both have <code>id</code>), because
+  <code>id</code> alone would be ambiguous.
+</p>
+
+<h2 id="outer">3. LEFT, RIGHT and FULL: keep the lonely rows</h2>
+<p>
+  An <em>outer</em> join keeps rows that have no partner and fills the other side with <code>NULL</code>.
+</p>
+<ul>
+  <li><code>LEFT JOIN</code> keeps every row of the table written <em>before</em> the word JOIN.</li>
+  <li><code>RIGHT JOIN</code> keeps every row of the table written <em>after</em> it. It is a mirror image; most people just swap the tables and use <code>LEFT JOIN</code>.</li>
+  <li><code>FULL JOIN</code> keeps the unmatched rows of both sides.</li>
+</ul>
+
+<figure class="dia">
+  <div class="dia-hold">
+    <svg class="d" viewBox="0 0 860 370" role="img" aria-labelledby="jn-t jn-d">
+      <title id="jn-t">Which rows survive each join type</title>
+      <desc id="jn-d">A left table with keys A, B, C and a right table with keys B, C, D. B and C match. INNER JOIN returns the pairs B-B and C-C. LEFT JOIN adds A with NULL. RIGHT JOIN adds D with NULL on the left. FULL JOIN returns all four. CROSS JOIN returns all nine pairs.</desc>
+      <text class="hd ctr" x="260" y="22">left table</text>
+      <text class="hd ctr" x="600" y="22">right table</text>
+      <rect class="box sunken" x="190" y="34" width="140" height="26" rx="5"/>
+      <text class="mono ctr" x="260.0" y="51">key A</text>
+      <rect class="box teal" x="190" y="64" width="140" height="26" rx="5"/>
+      <text class="mono ctr" x="260.0" y="81">key B</text>
+      <rect class="box teal" x="190" y="94" width="140" height="26" rx="5"/>
+      <text class="mono ctr" x="260.0" y="111">key C</text>
+      <rect class="box teal" x="530" y="34" width="140" height="26" rx="5"/>
+      <text class="mono ctr" x="600.0" y="51">key B</text>
+      <rect class="box teal" x="530" y="64" width="140" height="26" rx="5"/>
+      <text class="mono ctr" x="600.0" y="81">key C</text>
+      <rect class="box sunken" x="530" y="94" width="140" height="26" rx="5"/>
+      <text class="mono ctr" x="600.0" y="111">key D</text>
+      <path class="line teal" d="M330 77 L530 47"/>
+      <path class="line teal" d="M330 107 L530 77"/>
+      <text class="mut tiny ctr" x="430" y="30">ON left.key = right.key</text>
+      <text class="mut tiny ctr" x="260" y="140">A has no partner</text>
+      <text class="mut tiny ctr" x="600" y="140">D has no partner</text>
+      <rect class="box dash" x="14" y="165" width="159" height="190" rx="8"/>
+      <text class="hd ctr" x="93.5" y="187">INNER JOIN</text>
+      <text class="lbl ctr" x="93.5" y="203">left | right</text>
+      <rect class="box teal" x="26" y="212" width="135" height="24" rx="5"/>
+      <text class="mono ctr" x="93.5" y="228">B | B</text>
+      <rect class="box teal" x="26" y="240" width="135" height="24" rx="5"/>
+      <text class="mono ctr" x="93.5" y="256">C | C</text>
+      <text class="mut tiny ctr" x="93.5" y="282">2 rows</text>
+      <rect class="box dash" x="183" y="165" width="159" height="190" rx="8"/>
+      <text class="hd ctr" x="262.5" y="187">LEFT JOIN</text>
+      <text class="lbl ctr" x="262.5" y="203">left | right</text>
+      <rect class="box amber" x="195" y="212" width="135" height="24" rx="5"/>
+      <text class="mono ctr" x="262.5" y="228">A | NULL</text>
+      <rect class="box teal" x="195" y="240" width="135" height="24" rx="5"/>
+      <text class="mono ctr" x="262.5" y="256">B | B</text>
+      <rect class="box teal" x="195" y="268" width="135" height="24" rx="5"/>
+      <text class="mono ctr" x="262.5" y="284">C | C</text>
+      <text class="mut tiny ctr" x="262.5" y="310">3 rows</text>
+      <rect class="box dash" x="352" y="165" width="159" height="190" rx="8"/>
+      <text class="hd ctr" x="431.5" y="187">RIGHT JOIN</text>
+      <text class="lbl ctr" x="431.5" y="203">left | right</text>
+      <rect class="box teal" x="364" y="212" width="135" height="24" rx="5"/>
+      <text class="mono ctr" x="431.5" y="228">B | B</text>
+      <rect class="box teal" x="364" y="240" width="135" height="24" rx="5"/>
+      <text class="mono ctr" x="431.5" y="256">C | C</text>
+      <rect class="box amber" x="364" y="268" width="135" height="24" rx="5"/>
+      <text class="mono ctr" x="431.5" y="284">NULL | D</text>
+      <text class="mut tiny ctr" x="431.5" y="310">3 rows</text>
+      <rect class="box dash" x="521" y="165" width="159" height="190" rx="8"/>
+      <text class="hd ctr" x="600.5" y="187">FULL JOIN</text>
+      <text class="lbl ctr" x="600.5" y="203">left | right</text>
+      <rect class="box amber" x="533" y="212" width="135" height="24" rx="5"/>
+      <text class="mono ctr" x="600.5" y="228">A | NULL</text>
+      <rect class="box teal" x="533" y="240" width="135" height="24" rx="5"/>
+      <text class="mono ctr" x="600.5" y="256">B | B</text>
+      <rect class="box teal" x="533" y="268" width="135" height="24" rx="5"/>
+      <text class="mono ctr" x="600.5" y="284">C | C</text>
+      <rect class="box amber" x="533" y="296" width="135" height="24" rx="5"/>
+      <text class="mono ctr" x="600.5" y="312">NULL | D</text>
+      <text class="mut tiny ctr" x="600.5" y="338">4 rows</text>
+      <rect class="box dash" x="690" y="165" width="159" height="190" rx="8"/>
+      <text class="hd ctr" x="769.5" y="187">CROSS JOIN</text>
+      <text class="lbl ctr" x="769.5" y="203">left | right</text>
+      <rect class="box accent" x="702" y="212" width="135" height="24" rx="5"/>
+      <text class="mono ctr" x="769.5" y="228">all pairs</text>
+      <text class="mut tiny ctr" x="769.5" y="258">3 x 3 = 9 rows</text>
+      <text class="mut tiny ctr" x="769.5" y="276">no ON condition,</text>
+      <text class="mut tiny ctr" x="769.5" y="292">no matching</text>
+    </svg>
+  </div>
+  <figcaption>The two tables at the top share the keys <strong>B</strong> and <strong>C</strong>. Green rows are matches; amber rows are kept only because the join type asks for them, and carry <code>NULL</code> on the empty side.</figcaption>
+</figure>
+
+<p>Now the same idea on real tables. Customer 6 has no orders, so a <code>LEFT JOIN</code> from customers keeps her:</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">LEFT JOIN: every customer, with or without orders</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select c.id, c.full_name, o.id as order_id, o.total
+from shop.customers c
+left join shop.orders o on o.customer_id = c.id
+order by c.id, o.id;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  Look for the customer whose <code>order_id</code> and <code>total</code> are NULL. An inner join would have
+  dropped her. A customer with three orders appears three times; a join repeats the left row once per matching
+  right row.
+</p>
+
+<p>
+  <code>RIGHT JOIN</code> is the same query written the other way round. These two return the same rows:
+</p>
+
+<figure class="code" data-lang="sql">
+  <figcaption><span class="path">RIGHT is LEFT with the tables swapped</span><span class="grow"></span><span class="lang">sql</span></figcaption>
+<pre><code>select c.full_name, o.id from shop.orders o right join shop.customers c on c.id = o.customer_id;
+select c.full_name, o.id from shop.customers c left join shop.orders o on o.customer_id = c.id;</code></pre>
+</figure>
+
+<p>
+  <code>FULL JOIN</code> is rare, and useful for comparing two sets. Below, the left side is the active customers
+  and the right side is the delivered orders. A row with a NULL name is a delivered order whose customer is not
+  active. A row with a NULL order is an active customer with no delivered order.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">FULL JOIN: the unmatched rows from both sides</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select c.id as customer_id, c.full_name, o.id as order_id, o.customer_id as order_customer
+from (select * from shop.customers where status = 'active') c
+full join (select * from shop.orders where status = 'delivered') o
+       on o.customer_id = c.id
+where c.id is null or o.id is null
+order by customer_id, order_id;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<h2 id="anti">4. The anti-join: rows with no partner</h2>
+<p>
+  “Which customers never ordered?” asks for rows that have <em>no</em> match. Do a <code>LEFT JOIN</code>, then
+  keep only the rows where the right side came back empty. Test a column that can never be NULL in a real row,
+  such as the right table's primary key.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">anti-join: customers who never ordered</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select c.id, c.full_name
+from shop.customers c
+left join shop.orders o on o.customer_id = c.id
+where o.id is null;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  The same question for products that were never sold. Change it to compare with <code>NOT EXISTS</code>, which
+  says the same thing and is often easier to read (<a href="a4-subqueries-and-ctes.html">annex A4</a>):
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">products never ordered, two ways</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select p.id, p.name
+from shop.products p
+left join shop.order_items i on i.product_id = p.id
+where i.order_id is null;
+
+-- the same rows with NOT EXISTS:
+-- select p.id, p.name from shop.products p
+-- where not exists (select 1 from shop.order_items i where i.product_id = p.id);</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<h2 id="on-vs-where">5. ON versus WHERE in an outer join</h2>
+<p>
+  With an inner join, a condition in <code>ON</code> and the same condition in <code>WHERE</code> give the same
+  rows. With an outer join they do not. <code>ON</code> decides which rows <em>match</em>; <code>WHERE</code>
+  filters the result afterwards, and it also removes the NULL-filled rows you just asked for.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">same condition, two places, different results</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">-- Condition in ON: every customer stays; only delivered orders count as a match.
+select c.id, c.full_name, count(o.id) as delivered_orders
+from shop.customers c
+left join shop.orders o on o.customer_id = c.id and o.status = 'delivered'
+group by c.id, c.full_name
+order by c.id;
+
+-- Condition in WHERE: customers without a delivered order are filtered out. Try it:
+-- select c.id, c.full_name, count(o.id) as delivered_orders
+-- from shop.customers c
+-- left join shop.orders o on o.customer_id = c.id
+-- where o.status = 'delivered'
+-- group by c.id, c.full_name order by c.id;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<div class="note warn">
+  <span class="note-title">A WHERE on the optional side turns a LEFT JOIN into an inner join</span>
+  <p>
+    If you <code>LEFT JOIN</code> and then write <code>WHERE right_table.column = …</code>, the NULL-filled rows can
+    never pass, so you have quietly written an inner join. Put conditions about the optional table in
+    <code>ON</code>, unless you are deliberately testing for <code>IS NULL</code> (the anti-join).
+  </p>
+</div>
+
+<h2 id="using">6. USING versus ON</h2>
+<p>
+  When the two columns have the <em>same name</em>, <code>USING (col)</code> is a shorthand for
+  <code>ON a.col = b.col</code>, and it merges the pair into a single output column. With <code>ON</code> you get
+  both columns under the same name.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">USING returns the shared column once</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select *
+from shop.orders
+join (select id as customer_id, full_name from shop.customers) c using (customer_id)
+where shop.orders.id &lt;= 3
+order by shop.orders.id;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  The result has one <code>customer_id</code> column. Rewrite the join as
+  <code>join (…) c on c.customer_id = shop.orders.customer_id</code> and <code>select *</code> returns it twice.
+  Use <code>USING</code> when your columns are named consistently, and <code>ON</code> for anything else, including
+  conditions that are not plain equality.
+</p>
+
+<div class="note info">
+  <span class="note-title">Skip NATURAL JOIN</span>
+  <p>
+    <code>NATURAL JOIN</code> joins on every column the two tables share by name. Adding a column to either table
+    later can silently change the join. Name your join columns.
+  </p>
+</div>
+
+<h2 id="self">7. A self join: a table joined to itself</h2>
+<p>
+  Some tables point at themselves. <code>shop.customers.referred_by</code> holds the id of the customer who
+  referred this one, and <code>shop.categories.parent_id</code> points at the parent category. To read both rows
+  in one result, join the table to itself and give each use a different alias.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">who referred whom</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select c.full_name as customer,
+       r.full_name as referred_by
+from shop.customers c
+left join shop.customers r on r.id = c.referred_by
+order by c.id;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<p>
+  It is a <code>LEFT JOIN</code> because most customers were not referred by anyone, and you still want them in the
+  list. For trees that go more than one level deep, see recursive queries in
+  <a href="../lessons/08-advanced-queries.html">lesson 8</a>.
+</p>
+
+<h2 id="cross">8. CROSS JOIN: every combination</h2>
+<p>
+  <code>CROSS JOIN</code> has no <code>ON</code>. It pairs every row on the left with every row on the right, so
+  <em>m</em> rows and <em>n</em> rows give <em>m × n</em> rows. It is useful for building a grid, such as every
+  country with every status, to fill in the combinations that have no data.
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">a grid of country by status, then fill it with counts</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select k.country, s.status, count(c.id) as customers
+from (select distinct country from shop.customers) k
+cross join (values ('active'), ('suspended'), ('closed')) s(status)
+left join shop.customers c on c.country = k.country and c.status = s.status
+group by k.country, s.status
+order by k.country, s.status;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<div class="note danger">
+  <span class="note-title">The accidental cross join</span>
+  <p>
+    Writing <code>from a, b</code> (a comma) and forgetting the join condition in <code>WHERE</code> gives a cross
+    join. Two tables of 20,000 and 200,000 rows would try to produce four billion rows. Prefer the explicit
+    <code>JOIN … ON</code> syntax, so a missing condition is a syntax error instead of a silent explosion.
+  </p>
+</div>
+
+<h2 id="multiply">9. When a join multiplies rows</h2>
+<p>
+  A join returns one row per matching pair. If one order has three items, joining orders to items gives three rows
+  for that order, and <code>sum(orders.total)</code> over the join would count its total three times. Check the
+  row count after each join you add, and aggregate before joining when you only want one row per parent
+  (<a href="a3-aggregation.html">annex A3</a>).
+</p>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">the order total is counted once per item</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select count(*)                      as rows_after_join,
+       count(distinct o.id)             as distinct_orders,
+       sum(o.total)                     as wrong_revenue,
+       (select sum(total) from shop.orders) as right_revenue
+from shop.orders o
+join shop.order_items i on i.order_id = o.id;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<h2 id="sets">10. Combining result sets: UNION, INTERSECT, EXCEPT</h2>
+<p>
+  Joins combine tables <em>sideways</em>. Set operations stack the results of two queries <em>vertically</em>. The
+  two queries must return the same number of columns with compatible types.
+</p>
+<ul>
+  <li><code>UNION</code> — all rows from both, duplicates removed. <code>UNION ALL</code> keeps duplicates and is faster.</li>
+  <li><code>INTERSECT</code> — rows that appear in both.</li>
+  <li><code>EXCEPT</code> — rows in the first that are not in the second.</li>
+</ul>
+
+<div class="lab pg">
+  <div class="lab-head">playground <span class="note-lite">countries customers live in versus countries orders ship to</span></div>
+  <div class="lab-body">
+    <div class="pg-editor"><textarea class="sql" spellcheck="false">select country from shop.customers
+except
+select shipping_country from shop.orders
+where status = 'delivered'
+order by 1;</textarea></div>
+    <div class="pg-out"></div>
+  </div>
+</div>
+
+<h2 id="summary">Summary</h2>
+<ul>
+  <li><code>JOIN … ON</code> pairs rows that satisfy a condition. Unmatched rows are dropped by an inner join.</li>
+  <li><code>LEFT JOIN</code> keeps every left row; <code>RIGHT JOIN</code> keeps every right row; <code>FULL JOIN</code> keeps both. Missing sides are <code>NULL</code>.</li>
+  <li>An anti-join is <code>LEFT JOIN … WHERE right.key IS NULL</code>, or <code>NOT EXISTS</code>.</li>
+  <li>Put conditions on the optional table in <code>ON</code>, not <code>WHERE</code>.</li>
+  <li><code>USING (col)</code> shortens equal-named columns and merges them; <code>ON</code> works for everything.</li>
+  <li>A self join needs two different aliases for the same table.</li>
+  <li><code>CROSS JOIN</code> returns <em>m × n</em> rows. Joins can multiply rows; count after each one.</li>
+</ul>
+
+<h2 id="next">Where to next</h2>
+<p>
+  Summarise joined rows in <a href="a3-aggregation.html">annex A3</a>. The way the planner actually executes a join
+  (nested loop, hash, merge) is in <a href="../lessons/13-explain-and-planner.html">lesson 13</a>.
+</p>

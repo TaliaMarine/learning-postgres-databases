@@ -1,0 +1,4 @@
+-- Create a schema named archive. Inside it, create a table named
+-- archive.cancelled_orders that holds a copy of every row of shop.orders whose
+-- status is 'cancelled'. Leave shop.orders itself unchanged.
+-- Run ./pg check 02 1 when you are done.

@@ -1,0 +1,11 @@
+-- Two small WAL helpers in schema public.
+-- 1. A function public.lab_wal_distance(a pg_lsn, b pg_lsn) returning text:
+--    the size of the WAL between the two positions, human readable, as
+--    pg_size_pretty prints it. a is the later position, b the earlier one.
+--    Example: lab_wal_distance('0/3000000', '0/1000000') = '32 MB'.
+-- 2. A view public.lab_wal_position with exactly these columns:
+--      lsn              the current WAL write position (pg_lsn)
+--      segment          the name of the WAL file that position is in (text)
+--      segment_size_mb  the WAL segment size in whole megabytes (integer)
+-- Run ./pg check 22 3 when you are done.
+
