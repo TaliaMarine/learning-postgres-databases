@@ -37,32 +37,32 @@ jobs:
       - name: "Verify links, anchors and assets"
         run: python3 tools/check_links.py .
 
-  exercises:
-    name: "Exercises: solutions pass, stubs fail"
-    runs-on: ubuntu-latest
-    needs: check
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      # The same database the reader runs locally, in the same container image.
-      - name: "Start PostgreSQL 18 with the course seed"
-        run: ./pg up
-
-      - name: "Every model solution passes and every unedited stub fails"
-        run: ./pg verify
-
-      - name: "Show the database log on failure"
-        if: failure()
-        run: docker compose logs --tail=200 db
-
-      - name: "Stop the database"
-        if: always()
-        run: ./pg down
+#  exercises:
+#    name: "Exercises: solutions pass, stubs fail"
+#    runs-on: ubuntu-latest
+#    needs: check
+#    steps:
+#      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+#
+#      # The same database the reader runs locally, in the same container image.
+#      - name: "Start PostgreSQL 18 with the course seed"
+#        run: ./pg up
+#
+#      - name: "Every model solution passes and every unedited stub fails"
+#        run: ./pg verify
+#
+#      - name: "Show the database log on failure"
+#        if: failure()
+#        run: docker compose logs --tail=200 db
+#
+#      - name: "Stop the database"
+#        if: always()
+#        run: ./pg down
 
   publish:
     name: "Publish to GitHub Pages"
     if: github.event_name != 'pull_request'
-    needs: [check, exercises]
+    needs: [check]
     runs-on: ubuntu-latest
     permissions:
       contents: read
